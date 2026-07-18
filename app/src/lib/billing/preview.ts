@@ -1,0 +1,183 @@
+import {
+  durationToQuantityScaled,
+  quantityRateAmountScaled,
+  scaledDecimal,
+  taxForLine,
+} from './math'
+import { summarizeSelection } from './selection'
+import { stableHash } from './stable'
+
+import type {
+  BillingPreview,
+  BillingSettingsSnapshot,
+  EligibleBillingEntry,
+  InvoicePreview,
+  PreviewLine,
+} from './contracts'
+
+const XERO_DESCRIPTION_MAX = 4_000
+const XERO_REFERENCE_MAX = 255
+const MAX_LINES_PER_INVOICE = 1_000
+
+const groupKey = (entry: EligibleBillingEntry): string =>
+  `${entry.contactID}\u0000${entry.currency}`
+
+const formatLineDescription = (template: string, entry: EligibleBillingEntry): string => {
+  const values: Record<string, string> = {
+    description: entry.description,
+    projectCode: entry.projectCode,
+    projectName: entry.projectName,
+    userName: entry.userName,
+    workDate: entry.workDate,
+  }
+  const description = template.replace(
+    /{{\s*([^{}]+?)\s*}}/g,
+    (_, token: string) => values[token] ?? '',
+  )
+  if (!description.includes(entry.description)) {
+    throw new Error('The line template must preserve the complete time-entry description.')
+  }
+  if (description.length > XERO_DESCRIPTION_MAX) {
+    throw new Error(
+      `Invoice line for entry ${entry.entryID} is ${description.length} characters; Xero permits ${XERO_DESCRIPTION_MAX}. No text was truncated.`,
+    )
+  }
+  return description
+}
+
+const addDays = (calendarDate: string, days: number): string => {
+  const date = new Date(`${calendarDate}T00:00:00.000Z`)
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
+export function dueDateFor(
+  invoiceDate: string,
+  terms: BillingSettingsSnapshot['paymentTerms'],
+): string {
+  if (terms.basis === 'days-after-invoice') return addDays(invoiceDate, terms.value)
+
+  const date = new Date(`${invoiceDate}T00:00:00.000Z`)
+  const nextMonth = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 2, 0))
+  nextMonth.setUTCDate(Math.min(terms.value, nextMonth.getUTCDate()))
+  return nextMonth.toISOString().slice(0, 10)
+}
+
+const previewLine = (
+  entry: EligibleBillingEntry,
+  lineOrdinal: number,
+  settings: BillingSettingsSnapshot,
+): PreviewLine => {
+  const quantityScaled = durationToQuantityScaled(entry.durationSeconds)
+  const amountScaled = quantityRateAmountScaled(quantityScaled, entry.rateScaled)
+  const taxScaled = taxForLine(amountScaled, entry.taxRatePercent, settings.lineAmountType)
+  return {
+    ...entry,
+    amountScaled,
+    lineDescription: formatLineDescription(settings.invoiceLineDescriptionTemplate, entry),
+    lineOrdinal,
+    quantityScaled,
+    taxScaled,
+  }
+}
+
+export function buildBillingPreview(input: {
+  batchReference: string
+  entries: readonly EligibleBillingEntry[]
+  invoiceDate: string
+  settings: BillingSettingsSnapshot
+}): BillingPreview {
+  if (input.entries.length === 0) throw new Error('There are no eligible entries to preview.')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.invoiceDate))
+    throw new Error('Choose a valid invoice date.')
+  if (!/^[A-Z0-9_-]{6,80}$/.test(input.batchReference))
+    throw new Error('The preview reference is invalid.')
+
+  const groups = new Map<string, EligibleBillingEntry[]>()
+  for (const entry of input.entries) {
+    const values = groups.get(groupKey(entry)) ?? []
+    values.push(entry)
+    groups.set(groupKey(entry), values)
+  }
+
+  const invoices: InvoicePreview[] = [...groups.values()].map((entries, groupOrdinal) => {
+    if (entries.length > MAX_LINES_PER_INVOICE) {
+      throw new Error(
+        `A prospective invoice has ${entries.length} lines; narrow the selection to ${MAX_LINES_PER_INVOICE} or fewer.`,
+      )
+    }
+    const first = entries[0]
+    if (!first) throw new Error('The invoice group is empty.')
+    const applicationReference = `${input.settings.invoiceReferencePrefix}${input.batchReference}-${String(groupOrdinal + 1).padStart(2, '0')}`
+    if (applicationReference.length > XERO_REFERENCE_MAX) {
+      throw new Error(
+        `The application reference exceeds Xero's ${XERO_REFERENCE_MAX}-character boundary.`,
+      )
+    }
+    const lines = entries.map((entry, ordinal) => previewLine(entry, ordinal, input.settings))
+    const subtotalScaled = lines.reduce((total, line) => total + line.amountScaled, 0)
+    const taxScaled = lines.reduce((total, line) => total + line.taxScaled, 0)
+    const totalScaled =
+      input.settings.lineAmountType === 'Inclusive' ? subtotalScaled : subtotalScaled + taxScaled
+    const dueDate = dueDateFor(input.invoiceDate, input.settings.paymentTerms)
+    const payload = {
+      Contact: { ContactID: first.contactID },
+      CurrencyCode: first.currency,
+      Date: input.invoiceDate,
+      DueDate: dueDate,
+      LineAmountTypes: input.settings.lineAmountType,
+      LineItems: lines.map((line) => ({
+        AccountCode: line.accountCode,
+        Description: line.lineDescription,
+        Quantity: scaledDecimal(line.quantityScaled),
+        TaxType: line.taxType,
+        Tracking: line.tracking.map((item) => ({ Name: item.name, Option: item.option })),
+        UnitAmount: scaledDecimal(line.rateScaled),
+      })),
+      Reference: applicationReference,
+      Status: 'DRAFT',
+      Type: 'ACCREC',
+    }
+    return {
+      applicationReference,
+      contactID: first.contactID,
+      contactName: first.contactName,
+      currency: first.currency,
+      dueDate,
+      durationSeconds: lines.reduce((total, line) => total + line.durationSeconds, 0),
+      entryCount: lines.length,
+      invoiceDate: input.invoiceDate,
+      lines,
+      payload,
+      payloadHash: stableHash(payload),
+      subtotalScaled,
+      taxScaled,
+      totalScaled,
+    }
+  })
+
+  const selectionIdentity = input.entries.map((entry) => ({
+    accountCode: entry.accountCode,
+    contactID: entry.contactID,
+    currency: entry.currency,
+    entryID: entry.entryID,
+    taxType: entry.taxType,
+    tracking: entry.tracking,
+    updatedAt: entry.updatedAt,
+  }))
+  const selectionHash = stableHash(selectionIdentity)
+  return {
+    batchReference: input.batchReference,
+    checksum: stableHash({
+      batchReference: input.batchReference,
+      invoiceDate: input.invoiceDate,
+      invoices: invoices.map((invoice) => invoice.payloadHash),
+      selectionHash,
+      settings: input.settings,
+    }),
+    invoices,
+    selectionHash,
+    settings: input.settings,
+    summary: summarizeSelection(input.entries),
+  }
+}

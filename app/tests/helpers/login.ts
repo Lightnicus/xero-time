@@ -1,5 +1,6 @@
-import type { Page } from '@playwright/test'
 import { expect } from '@playwright/test'
+
+import type { Page } from '@playwright/test'
 
 export interface LoginOptions {
   page: Page
@@ -15,7 +16,7 @@ export interface LoginOptions {
  */
 export async function login({
   page,
-  serverURL = 'http://localhost:3000',
+  serverURL = process.env.NEXT_PUBLIC_SERVER_URL ?? 'http://localhost:3101',
   user,
 }: LoginOptions): Promise<void> {
   await page.goto(`${serverURL}/admin/login`)

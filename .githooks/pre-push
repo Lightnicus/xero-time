@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+
+cd app
+pnpm lint
+pnpm typecheck
+pnpm test:unit

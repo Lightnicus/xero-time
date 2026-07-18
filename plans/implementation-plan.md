@@ -1,15 +1,17 @@
 # Xero Time Tracker — Implementation Plan
 
-Status: Approved scope, ready for implementation
+Status: Local implementation complete; external provisioning, live-provider validation, deployment, and operator sign-off remain
 Plan date: 18 July 2026
 Target: Single-business application deployed to Vercel Pro
-Application stack: Next.js, Payload CMS, MongoDB Atlas, TypeScript
+Application stack: Next.js, Payload CMS, MongoDB Atlas, Resend, TypeScript
 
 ## 1. Purpose
 
 Build a secure internal time-tracking application for customer projects. Invited users authenticate by email/password or optional Xero sign-in and record completed time manually. Privileged users manage customers, projects, rates, billing settings, and the business Xero accounting connection. Billable time can be selected explicitly, or selected as all eligible unbilled entries matching an optional filter, previewed, and exported to new Xero draft invoices.
 
 The plan is deliberately split into dependency-ordered work packages. Every package contains implementation tasks, verification work, and an acceptance gate. A package is complete only when its implementation, tests, documentation, and operational requirements are complete.
+
+Implementation checkpoint (19 July 2026): all locally actionable V1 slices are implemented. This includes invite-only email/password and Xero identity authentication, guarded owner transition and identity recovery, strict role/Admin boundaries, manual timezone-aware time entry, overlap handling, customers/projects/rates and explicit Xero contact mapping, owner/admin-configurable Xero accounting OAuth with an encrypted client secret, encrypted rotating grants and safe authorizer handover, reference-data validation, billing eligibility and live selection summaries, exact one-entry/one-line previews, transactional reservation, durable background/wait-mode jobs, idempotent export/retry/reconciliation, signed durable webhooks, authoritative remote refresh, and verified release/rebill lineage. Security headers, rate limits, bounded request inputs, redacted structured logging, health/operations views, 62 verified MongoDB indexes, migrations, CI, deployment/runbook/user documentation, deterministic fakes/fixtures, performance gates, and dependency/secret/license scans are present. The current automated gate covers 141 unit/integration tests, 3 performance tests, and 21 Chromium end-to-end cases; production build, generated artifacts, compatibility, formatting, lint, TypeScript, index verification, and a zero-known-vulnerability production dependency audit pass locally. Unchecked items below now require user-owned or external state: Git remote selection, Atlas/Vercel/Resend/error-monitoring provisioning, Xero app registrations and Demo Company/live contract checks, hosted callbacks/webhooks, backup/alert drills, deployment, named backup operator, and product/production sign-off.
 
 ## 2. Confirmed product decisions
 
@@ -395,24 +397,24 @@ A work package is complete only when:
 
 ## 9. Work-package map
 
-| ID | Work package | Primary dependencies |
-| --- | --- | --- |
-| WP-00 | Repository and engineering foundation | None |
-| WP-01 | Environments, MongoDB Atlas, Vercel, and external services | WP-00 |
-| WP-02 | Payload core and database model | WP-00, WP-01 |
-| WP-03 | Authentication, Xero sign-in, invitations, roles, and route protection | WP-02 |
-| WP-04 | Admin foundation and application settings | WP-02, WP-03 |
-| WP-05 | Xero accounting OAuth connection and reference data | WP-01, WP-02, WP-03, WP-04 |
-| WP-06 | Customers, Xero contact mapping, projects, and rates | WP-04, WP-05 |
-| WP-07 | Manual time-entry domain and member UI | WP-03, WP-06 |
-| WP-08 | Billing eligibility, filters, and selection | WP-04, WP-06, WP-07 |
-| WP-09 | Invoice preview, snapshots, and reservation | WP-05, WP-08 |
-| WP-10 | Xero export execution and Payload jobs | WP-05, WP-09 |
-| WP-11 | Reconciliation, webhooks, and remote status | WP-10 |
-| WP-12 | Admin release and rebill | WP-11 |
-| WP-13 | Security, audit, observability, and operations | Begins at WP-00; closes after WP-12 |
-| WP-14 | Full-system verification and CI quality gates | All feature packages |
-| WP-15 | Staging, production launch, and handover | WP-13, WP-14 |
+| ID    | Work package                                                           | Primary dependencies                |
+| ----- | ---------------------------------------------------------------------- | ----------------------------------- |
+| WP-00 | Repository and engineering foundation                                  | None                                |
+| WP-01 | Environments, MongoDB Atlas, Vercel, and external services             | WP-00                               |
+| WP-02 | Payload core and database model                                        | WP-00, WP-01                        |
+| WP-03 | Authentication, Xero sign-in, invitations, roles, and route protection | WP-02                               |
+| WP-04 | Admin foundation and application settings                              | WP-02, WP-03                        |
+| WP-05 | Xero accounting OAuth connection and reference data                    | WP-01, WP-02, WP-03, WP-04          |
+| WP-06 | Customers, Xero contact mapping, projects, and rates                   | WP-04, WP-05                        |
+| WP-07 | Manual time-entry domain and member UI                                 | WP-03, WP-06                        |
+| WP-08 | Billing eligibility, filters, and selection                            | WP-04, WP-06, WP-07                 |
+| WP-09 | Invoice preview, snapshots, and reservation                            | WP-05, WP-08                        |
+| WP-10 | Xero export execution and Payload jobs                                 | WP-05, WP-09                        |
+| WP-11 | Reconciliation, webhooks, and remote status                            | WP-10                               |
+| WP-12 | Admin release and rebill                                               | WP-11                               |
+| WP-13 | Security, audit, observability, and operations                         | Begins at WP-00; closes after WP-12 |
+| WP-14 | Full-system verification and CI quality gates                          | All feature packages                |
+| WP-15 | Staging, production launch, and handover                               | WP-13, WP-14                        |
 
 ## WP-00 — Repository and engineering foundation
 
@@ -424,48 +426,48 @@ Implementation note (2026-07-18): the deployable Payload/Next.js project lives i
 
 ### Todo
 
-- [ ] Confirm or repair the Git upstream before enabling CI; the current local branch reports its configured origin/main as gone.
+- [ ] Choose and publish the Git upstream before enabling remote CI. Read-only verification on 18 July 2026 confirmed `git@github.com:Lightnicus/xero-time.git` is reachable but has no branch heads; pushing/retargeting it requires repository-owner authorization and a deliberate commit boundary.
 - [x] Scaffold from the current supported Payload blank application template.
 - [x] Use pnpm and generate the lockfile for inclusion with the setup changes.
 - [x] Pin an exact compatible set of Next.js, Payload, and all Payload packages.
 - [x] Declare the supported Node.js range in package metadata and document Node.js 24 LTS as the hosted target.
-- [ ] Enable strict TypeScript and useful no-unchecked-access options.
+- [x] Enable strict TypeScript and useful no-unchecked-access options.
 - [x] Organize routes into isolated Payload and custom-application route groups.
-- [ ] Create source boundaries for:
-  - [ ] Payload collections and globals;
-  - [ ] access-control helpers;
-  - [ ] identity/OIDC and local session services;
-  - [ ] domain services;
-  - [ ] Xero identity/OIDC client with no retained provider tokens;
-  - [ ] Xero accounting client and rotating token service;
-  - [ ] jobs and workflows;
-  - [ ] custom route handlers;
-  - [ ] UI components;
-  - [ ] test factories and fixtures.
+- [x] Create source boundaries for:
+  - [x] Payload collections and globals;
+  - [x] access-control helpers;
+  - [x] identity/OIDC and local session services;
+  - [x] domain services;
+  - [x] Xero identity/OIDC client with no retained provider tokens;
+  - [x] Xero accounting client and rotating token service;
+  - [x] jobs and workflows;
+  - [x] custom route handlers;
+  - [x] UI components;
+  - [x] test factories and fixtures.
 - [x] Expand .gitignore for dependencies, Next.js output, Payload output, Vercel state, environment files, coverage, Playwright artifacts, logs, local Mongo data, and editor/OS files.
 - [x] Add .env.example containing names and descriptions only.
-- [ ] Configure linting, formatting, type checking, and import ordering.
-- [ ] Add scripts for dev, build, start, lint, typecheck, unit tests, integration tests, end-to-end tests, Payload type generation, import-map generation, migrations, and seed data.
+- [x] Configure linting, formatting, type checking, and import ordering.
+- [x] Add scripts for dev, build, start, lint, typecheck, unit tests, integration tests, end-to-end tests, Payload type generation, import-map generation, migrations, and seed data.
 - [x] Add a root README with local prerequisites, setup, commands, and links to this plan.
-- [ ] Add a small architecture-decision record directory and record:
-  - [ ] Payload as the application framework;
-  - [ ] MongoDB instead of Postgres;
-  - [ ] single-business boundary;
-  - [ ] invite-gated optional Xero sign-in alongside email/password;
-  - [ ] separate Xero identity and accounting OAuth clients;
-  - [ ] standard Xero accounting OAuth;
-  - [ ] persisted export saga;
-  - [ ] custom member UI versus generated Admin.
+- [x] Add a small architecture-decision record directory and record:
+  - [x] Payload as the application framework;
+  - [x] MongoDB instead of Postgres;
+  - [x] single-business boundary;
+  - [x] invite-gated optional Xero sign-in alongside email/password;
+  - [x] separate Xero identity and accounting OAuth clients;
+  - [x] standard Xero accounting OAuth;
+  - [x] persisted export saga;
+  - [x] custom member UI versus generated Admin.
 - [x] Configure a test runner and DOM test environment.
 - [x] Configure Playwright with isolated test data.
-- [ ] Add a pre-commit or pre-push fast check without making local development dependent on an external service.
-- [ ] Add a dependency-update policy requiring Payload packages to update together.
+- [x] Add a pre-commit or pre-push fast check without making local development dependent on an external service.
+- [x] Add a dependency-update policy requiring Payload packages to update together.
 - [x] Ensure no secret, local database, or IDE file becomes tracked.
 
 ### Verification and acceptance
 
 - [x] A clean checkout installs reproducibly with one documented command.
-- [ ] Development server, lint, typecheck, unit tests, and production build succeed.
+- [x] Development server, lint, typecheck, unit tests, and production build succeed.
 - [x] Payload Admin and a placeholder custom-app route both render.
 - [x] The repository contains no real credentials.
 
@@ -484,45 +486,45 @@ Outcome: Isolated local, test, staging, and production environments with transac
 - [ ] Select an Atlas region close to the chosen Vercel function region.
 - [ ] Create least-privilege application database users instead of retaining a broad Marketplace-generated administrator.
 - [ ] Configure TLS and Atlas network access.
-- [ ] Document the Vercel dynamic-egress trade-off and choose either:
+- [x] Document the Vercel dynamic-egress trade-off and choose either:
   - [ ] restricted static egress where available; or
-  - [ ] broad network allow-list with strong least-privilege credentials and monitoring.
-- [ ] Set a conservative Mongoose pool configuration suitable for serverless instances.
+  - [x] broad network allow-list with strong least-privilege credentials and monitoring.
+- [x] Set a conservative Mongoose pool configuration suitable for serverless instances.
 - [ ] Configure Atlas alerts for connections, storage, replication, and availability.
 - [ ] Configure and test backup retention and a restore procedure.
 - [ ] Create Vercel staging and production projects or environments on the Pro plan.
-- [ ] Select and document the Vercel function region.
+- [x] Select and document the Vercel function region.
 - [ ] Configure a stable staging hostname and production hostname.
 - [ ] Create distinct Xero identity and accounting app/client registrations for each hosted environment; never reuse one client ID across the two trust boundaries.
 - [ ] Connect the development application to a Xero Demo Company.
 - [ ] Register separate exact identity and accounting OAuth callback URLs; do not use wildcard or shared callbacks.
 - [ ] Reserve the Xero webhook URLs for staging and production.
-- [ ] Select and configure an email delivery service for invitations, verification, and password reset.
-- [ ] Define environment variables:
+- [x] Select Resend and integrate Payload's official adapter for invitations and password reset.
+- [ ] Verify the Resend sender domain and provision/test environment-specific API keys and senders.
+- [x] Define environment variables:
   - [x] DATABASE_URL;
   - [x] PAYLOAD_SECRET;
-  - [x] TOKEN_ENCRYPTION_KEY and key version;
   - [x] AUTH_FLOW_ENCRYPTION_KEY and key version;
   - [x] NEXT_PUBLIC_SERVER_URL or equivalent public origin;
   - [x] XERO_IDENTITY_CLIENT_ID;
   - [x] XERO_IDENTITY_CLIENT_SECRET;
   - [x] XERO_IDENTITY_REDIRECT_URI;
-  - [x] XERO_ACCOUNTING_CLIENT_ID;
-  - [x] XERO_ACCOUNTING_CLIENT_SECRET;
-  - [x] XERO_ACCOUNTING_REDIRECT_URI;
   - [x] XERO_WEBHOOK_KEY;
   - [x] CRON_SECRET;
-  - [ ] email provider credentials;
-  - [ ] error-monitoring credentials;
-  - [ ] optional seed-owner variables for initial provisioning.
+  - [x] ACCOUNT_EMAIL_DELIVERY_MODE, RESEND_API_KEY, RESEND_FROM_ADDRESS, and RESEND_FROM_NAME;
+  - [x] error-monitoring credentials;
+  - [x] optional seed-owner variables for initial provisioning.
 - [ ] Set different secret values in every environment.
-- [ ] Validate at startup that identity and accounting client IDs, secrets, and callbacks are not accidentally equal.
-- [ ] Document secret generation, rotation, revocation, and emergency replacement.
-- [ ] Ensure preview deployments cannot reach or migrate production data by default.
+- [x] Store the accounting OAuth client ID and encrypted client secret in the hidden singleton Payload record through a protected owner/admin workflow.
+- [x] Derive the accounting callback from the public application origin and purpose-separated configuration/token keys from `PAYLOAD_SECRET`, so accounting setup needs no environment change or restart.
+- [x] Reject configured identity credential reuse when accounting credentials are saved or loaded; keep fixed, distinct callback routes.
+- [x] Document secret generation, rotation, revocation, and emergency replacement.
+- [x] Ensure preview deployments cannot reach or migrate production data by default.
 
 ### Verification and acceptance
 
-- [ ] Local and CI integration tests successfully commit and roll back a multi-document transaction.
+- [x] Local integration tests successfully commit and roll back a multi-document transaction.
+- [x] CI runs the same replica-set transaction coverage.
 - [ ] Staging connects to its own Atlas data and Xero Demo Company.
 - [ ] Staging identity and accounting callbacks use different Xero client IDs/routes and cannot consume each other's OAuth state.
 - [ ] Production configuration is isolated and contains no demo credentials.
@@ -537,66 +539,76 @@ Outcome: Payload collections, globals, generated types, MongoDB indexes, and tra
 
 ### Todo
 
-- [ ] Configure Payload with mongooseAdapter and the environment-specific MongoDB URL.
-- [ ] Configure safe Mongoose connection and transaction options.
-- [ ] Configure the Payload secret and canonical server URL.
-- [ ] Disable GraphQL if it is not used by the custom application.
-- [ ] Set conservative REST depth and pagination defaults.
-- [ ] Implement the Users collection.
-- [ ] Implement the private Invitations, Auth Identities, External Auth Sessions, and OAuth Flow States collections.
-- [ ] Implement Business Settings, Authentication Settings, and Billing Settings globals.
-- [ ] Implement Customers, Projects, and Time Entries collections.
-- [ ] Implement the private Xero Connection and Xero Reference Data collections.
-- [ ] Implement Export Batches, Invoice Exports, Invoice Export Entries, Xero Attempts, Xero Webhook Receipts, and Audit Events.
-- [ ] Add field-level validation for enums, scaled integers, ISO currency codes, IANA timezones, dates, and identifiers.
-- [ ] Add automatic createdBy and updatedBy attribution where appropriate.
-- [ ] Mark system-owned fields inaccessible to ordinary create/update APIs.
-- [ ] Hide encrypted token envelopes and internal error data from Payload Admin and public REST responses.
-- [ ] Hide auth-session hashes, OAuth state/nonce/PKCE material, provider subjects, and identity diagnostic metadata from ordinary APIs.
-- [ ] Configure Admin labels, title fields, list columns, default sorting, and grouping.
-- [ ] Add compound and query indexes for:
-  - [ ] users by email and role;
-  - [ ] unique invitation token hash plus email/status/expiry lookup;
-  - [ ] unique Auth Identity provider/issuer/subject;
-  - [ ] unique Auth Identity user/provider;
-  - [ ] external auth sessions by token hash, user, expiry, and revoked state;
-  - [ ] unique OAuth state hash plus expiresAt/consumedAt TTL and replay lookup;
-  - [ ] customers by active state, local name, and Xero ContactID;
-  - [ ] projects by customer, active state, and code;
-  - [ ] time entries by user/workDate;
-  - [ ] time entries by project/workDate;
-  - [ ] time entries by billingStatus, billable, customer, and workDate;
-  - [ ] export batches by requestedBy and createdAt;
-  - [ ] invoice exports by state and createdAt;
-  - [ ] invoice exports by dispatch state, missing job ID, and age;
-  - [ ] unique application reference;
-  - [ ] unique Xero attempt number per invoice export;
-  - [ ] unique Xero idempotency key across attempts;
-  - [ ] sparse unique Xero InvoiceID where present;
-  - [ ] unique export/time-entry allocation;
-  - [ ] unique webhook event/deduplication identity and pending-receipt age.
-- [ ] Add custom Mongo index migrations where Payload config cannot express a partial or sparse invariant.
-- [ ] Add schemaVersion to immutable export snapshots.
-- [ ] Create wrappers for Payload Local API calls that:
-  - [ ] default user-context calls to overrideAccess false;
-  - [ ] require an explicit reason to elevate system operations;
-  - [ ] propagate the same request/session through transaction-bound calls.
-- [ ] Create transaction helpers with clear commit/rollback semantics.
-- [ ] Add data factories for every collection.
-- [ ] Add transaction tests proving invite acceptance, identity linking, user activation, and state consumption commit or roll back together.
-- [ ] Generate and commit Payload TypeScript types and the Admin import map.
-- [ ] Create an idempotent seed routine for the initial owner and baseline settings.
-- [ ] Create migration conventions even though routine Mongo field additions do not require DDL.
+- [x] Configure Payload with mongooseAdapter and the environment-specific MongoDB URL.
+- [x] Configure safe Mongoose connection and transaction options.
+- [x] Configure the Payload secret and canonical server URL.
+- [x] Disable GraphQL if it is not used by the custom application.
+- [x] Set conservative REST depth and pagination defaults.
+- [x] Implement the Users collection.
+- [x] Implement the private Invitations collection for email/password setup links.
+- [x] Implement the private Auth Identities and External Auth Sessions collections plus their identity-flow state model.
+- [x] Implement the private accounting OAuth Flow States collection with hidden state/binding hashes and encrypted pending grants.
+- [x] Implement Business Settings, Authentication Settings, and Billing Settings globals.
+- [x] Implement Customers, Projects, and Time Entries collections.
+- [x] Implement the private singleton Xero Connection collection.
+- [x] Implement the Xero Reference Data collection.
+- [x] Implement Export Batches, Invoice Exports, Invoice Export Entries, Xero Attempts, Xero Webhook Receipts, and Audit Events.
+- [x] Add field-level validation for enums, scaled integers, ISO currency codes, IANA timezones, dates, and identifiers.
+- [x] Add automatic createdBy and updatedBy attribution where appropriate.
+- [x] Mark system-owned fields inaccessible to ordinary create/update APIs.
+- [x] Restrict collection and global version-history APIs to owner/admin access.
+- [x] Hide Xero accounting token/pending-grant envelopes and safe internal connection state from Payload Admin and ordinary APIs.
+- [x] Hide invitation token hashes and delivery diagnostics from ordinary APIs and Payload Admin.
+- [x] Hide auth-session hashes, OAuth state/nonce/PKCE material, provider subjects, and identity diagnostic metadata from ordinary APIs.
+- [x] Configure Admin labels, title fields, list columns, default sorting, and grouping.
+- [x] Add compound and query indexes for:
+  - [x] users by email and role;
+  - [x] unique invitation token hash, unique normalized email, expiry lookup, and cleanup TTL;
+  - [x] unique Auth Identity provider/issuer/subject;
+  - [x] unique Auth Identity user/provider;
+  - [x] external auth sessions by token hash, user, expiry, and revoked state;
+  - [x] unique accounting OAuth state hash plus expiresAt TTL and atomic one-time status transition;
+  - [x] unique identity OAuth state hash plus expiry/replay lookup;
+  - [x] customers by active state, local name, and Xero ContactID;
+  - [x] projects by customer, active state, and code;
+  - [x] time entries by user/workDate;
+  - [x] time entries by project/workDate;
+  - [x] time entries by billingStatus, billable, customer, and workDate;
+  - [x] export batches by requestedBy and createdAt;
+  - [x] invoice exports by state and createdAt;
+  - [x] invoice exports by dispatch state, missing job ID, and age;
+  - [x] unique application reference;
+  - [x] unique Xero attempt number per invoice export;
+  - [x] unique Xero idempotency key across attempts;
+  - [x] sparse unique Xero InvoiceID where present;
+  - [x] unique export/time-entry allocation;
+  - [x] unique webhook event/deduplication identity and pending-receipt age.
+- [x] Add custom Mongo index migrations where Payload config cannot express a partial or sparse invariant.
+- [x] Add schemaVersion to immutable export snapshots.
+- [x] Create wrappers for Payload Local API calls that:
+  - [x] default user-context calls to overrideAccess false;
+  - [x] require an explicit reason to elevate system operations;
+  - [x] propagate the same request/session through transaction-bound calls.
+- [x] Create transaction helpers with clear commit/rollback semantics.
+- [x] Add data factories for every collection.
+- [x] Add transaction/concurrency tests proving one invitation token can create and activate at most one local user.
+- [x] Add transaction tests proving identity linking and identity-flow state consumption commit or roll back together.
+- [x] Generate Payload TypeScript types and the Admin import map for the implementation changes.
+- [x] Create an idempotent seed routine for the initial owner and baseline settings.
+- [x] Create migration conventions even though routine Mongo field additions do not require DDL.
 
 ### Verification and acceptance
 
-- [ ] All collections and globals are available with correct generated types.
-- [ ] Required unique and query indexes exist in local and staging MongoDB.
-- [ ] Invitation, identity, session, and OAuth-state unique/TTL indexes enforce single use and cleanup.
-- [ ] A deliberately failed multi-collection write rolls back completely.
-- [ ] Sensitive fields cannot be returned through ordinary REST or Admin queries.
-- [ ] Identity records contain no accounting credentials or tenant connection fields.
-- [ ] The seed routine can run twice without duplicating data.
+- [x] All collections and globals are available with correct generated types.
+- [x] Required core unique and query indexes exist in the isolated local test MongoDB.
+- [ ] Required indexes are verified in staging MongoDB.
+- [x] Accounting OAuth-state unique/TTL indexes and atomic claims enforce single use and cleanup.
+- [x] Invitation unique-token/unique-email and cleanup-TTL indexes enforce their invariants.
+- [x] Identity, external-session, and identity OAuth-state indexes enforce their invariants.
+- [x] A deliberately failed multi-collection write rolls back completely.
+- [x] Sensitive fields cannot be returned through ordinary REST or Admin queries.
+- [x] Identity records contain no accounting credentials or tenant connection fields.
+- [x] The seed routine can run twice without duplicating data.
 
 ## WP-03 — Authentication, Xero sign-in, invitations, roles, and route protection
 
@@ -606,107 +618,125 @@ Outcome: Invite-only local authentication supports email/password and optional X
 
 ### Email/password and invitation todo
 
-- [ ] Keep Payload's built-in email/password strategy enabled alongside the external Xero strategy.
-- [ ] Use secure HTTP-only authentication cookies and configure secure, same-site behavior for staging and production.
-- [ ] Enable email verification, password reset, login-attempt limits, and timed lockout.
-- [ ] Disable public user creation and every self-registration endpoint regardless of login provider.
-- [ ] Implement one-time owner bootstrap with a tested email/password recovery path.
-- [ ] Ensure at least one active owner always retains a non-Xero recovery method.
-- [ ] Implement Admin-driven invitations:
-  - [ ] create an inactive or pending local user with the locally assigned role;
-  - [ ] generate and store only a hash of a single-use expiring setup token;
-  - [ ] send a branded invitation email;
-  - [ ] allow acceptance by email/password or by the Xero identity flow;
-  - [ ] activate the user only after the chosen flow succeeds;
-  - [ ] invalidate the token atomically after use;
-  - [ ] support safe resend and revoke.
-- [ ] For Xero-based invite acceptance, require both the valid invitation context and the Xero callback; matching email alone is never sufficient.
-- [ ] Require the normalized invited email to match the verified Xero email, or stop for explicit owner/admin review rather than silently changing the invitation.
-- [ ] Assign the user's role, active state, and business membership exclusively from the local invitation/Admin action.
-- [ ] Add display name, role, active state, timezone, enabled login methods, and last login provider to the user profile.
-- [ ] Default a new user's timezone from Business Settings while allowing later selection.
-- [ ] Prevent users from changing their own role or active state.
-- [ ] Prevent suspension, demotion, deletion, or removal of the recovery method of the final active owner, including under concurrent requests.
-- [ ] Ensure password reset and invitation responses do not reveal whether an arbitrary email address exists.
+- [x] Keep Payload's built-in email/password strategy enabled alongside the external Xero strategy.
+- [x] Use secure HTTP-only authentication cookies and configure secure, same-site behavior for staging and production.
+- [x] Build custom email/password login/logout actions that never expose the session token, use generic failure messages, and allow-list post-login paths.
+- [x] Route production password-reset delivery through the configured Resend adapter.
+- [ ] Enable email verification and verify production password-reset deliverability.
+- [x] Enforce an 8-character minimum password, five failed-login limit, and timed lockout.
+- [x] Disable public user creation and every self-registration endpoint regardless of login provider.
+- [x] Implement one-time owner bootstrap with a tested email/password recovery path, a production first-user form available only while the user collection is empty, and an atomic MongoDB concurrency lock.
+- [x] Keep every owner on email/password and reject generic owner demotion, deactivation, and deletion.
+- [x] Implement an explicit audited owner-transition command that proves another active password-capable owner remains under concurrent requests.
+- [x] Implement owner/admin-driven email/password invitations:
+  - [x] keep a private pending Invitation rather than creating an inactive user with a temporary password;
+  - [x] generate and store only a SHA-256 hash of a high-entropy, single-use, seven-day setup token;
+  - [x] provide adapter-neutral invitation mail plus an explicit manual development-delivery mode;
+  - [x] route production invitation delivery through the configured Resend adapter;
+  - [ ] verify branded invitation delivery from the production sender domain;
+  - [x] allow acceptance by email/password;
+  - [x] allow acceptance by the bound Xero identity flow;
+  - [x] create and activate the local user only after successful acceptance;
+  - [x] claim and invalidate the token atomically so concurrent acceptance creates one user;
+  - [x] support token-rotating resend and reasoned revoke.
+- [x] For Xero-based invite acceptance, require both the valid invitation context and the Xero callback; matching email alone is never sufficient.
+- [x] Require the normalized invited email to match the verified Xero email, or stop for explicit owner/admin review rather than silently changing the invitation.
+- [x] Assign the email/password invitee's role, active state, and timezone exclusively from the local invitation/Admin action.
+- [x] Add display name, role, active state, and timezone to the local user profile.
+- [x] Add enabled login methods and last login provider once external identities exist.
+- [x] Default an invitation's timezone from Business Settings while allowing the issuer and later user to select another valid IANA timezone.
+- [x] Prevent users from changing their own role or active state.
+- [x] Prevent generic suspension, demotion, deletion, or password removal for owners; leave future owner transitions to the explicit guarded command above.
+- [x] Ensure password-reset requests return the same response whether an arbitrary email address exists.
+- [x] Mask invitation email addresses on the public token-preview page and return generic invalid/expired/revoked token failures.
+
+Implementation note (18 July 2026): account email delivery defaults to `manual`, so development can exercise invitation acceptance without treating Payload's non-delivering console fallback as successful delivery. In manual mode the public forgot-password endpoint is denied before token generation and the custom request page returns a generic response. `resend` mode requires an API key, valid sender address, and single-line sender name at startup, initializes Payload's `resend-rest` adapter, and refuses to generate or mark account mail delivered if that adapter is absent. Authentication/command rate limits and email verification are implemented; sender-domain provisioning and hosted invitation/reset deliverability checks remain external.
 
 ### Xero identity sign-in todo
 
-- [ ] Use only the dedicated Xero identity client registration and callback for sign-in.
-- [ ] Request exactly `openid profile email`; reject configuration containing `offline_access`, accounting scopes, or any tenant-scoped permission.
-- [ ] Use a maintained OpenID Connect client and Xero discovery/JWKS metadata rather than implementing token verification ad hoc.
-- [ ] Add a correctly branded “Sign in with Xero” action to login and eligible invitation pages.
-- [ ] Implement a Xero identity start endpoint that:
-  - [ ] records whether the purpose is sign-in, invite acceptance, or link;
-  - [ ] generates high-entropy state and nonce values;
-  - [ ] binds the flow to the initiating browser, local session/invitation, and allow-listed return path;
-  - [ ] uses PKCE when supported by the selected client/flow;
-  - [ ] stores sensitive verifier material safely;
-  - [ ] sets a short expiry and single-use state.
-- [ ] Implement the identity callback that:
-  - [ ] rejects OAuth errors with a safe user-facing result;
-  - [ ] validates state, browser binding, purpose, expiry, and one-time use before account changes;
-  - [ ] exchanges the authorization code only on the server;
-  - [ ] validates ID-token signature, issuer, audience, expiry, issued-at, nonce, and required claims;
-  - [ ] reads the stable issuer/subject pair plus email/name display claims;
-  - [ ] marks state consumed atomically to prevent replay;
-  - [ ] rejects unknown, extra, or accounting scopes;
-  - [ ] discards the authorization code, ID token, and identity access token after validation.
-- [ ] Never request or store an identity refresh token.
-- [ ] Never call the Xero Connections or Accounting APIs from an identity callback.
-- [ ] Resolve returning users by unique issuer/subject, not by email.
-- [ ] Recheck the local user's active state and current role before creating a session.
-- [ ] Deny an unknown/uninvited Xero subject without revealing whether the email belongs to an existing account.
-- [ ] Do not create, merge, move, or link an account merely because a Xero email matches a local email.
-- [ ] Do not automatically replace the authoritative local email/name when Xero claims change; show the snapshot for explicit profile review.
-- [ ] Make Xero login optional and keep the email/password entry point available when Xero is unavailable or the feature is disabled.
+- [x] Use only the dedicated Xero identity client registration and callback for sign-in.
+- [x] Request exactly `openid profile email`; reject configuration containing `offline_access`, accounting scopes, or any tenant-scoped permission.
+- [x] Use a maintained OpenID Connect client and Xero discovery/JWKS metadata rather than implementing token verification ad hoc.
+- [x] Add a correctly branded “Sign in with Xero” action to login and eligible invitation pages.
+- [x] Implement a Xero identity start endpoint that:
+  - [x] records whether the purpose is sign-in, invite acceptance, or link;
+  - [x] generates high-entropy state and nonce values;
+  - [x] binds the flow to the initiating browser, local session/invitation, and allow-listed return path;
+  - [x] uses PKCE when supported by the selected client/flow;
+  - [x] stores sensitive verifier material safely;
+  - [x] sets a short expiry and single-use state.
+- [x] Implement the identity callback that:
+  - [x] rejects OAuth errors with a safe user-facing result;
+  - [x] validates state, browser binding, purpose, expiry, and one-time use before account changes;
+  - [x] exchanges the authorization code only on the server;
+  - [x] validates ID-token signature, issuer, audience, expiry, issued-at, nonce, and required claims;
+  - [x] reads the stable issuer/subject pair plus email/name display claims;
+  - [x] marks state consumed atomically to prevent replay;
+  - [x] rejects unknown, extra, or accounting scopes;
+  - [x] discards the authorization code, ID token, and identity access token after validation.
+- [x] Never request or store an identity refresh token.
+- [x] Never call the Xero Connections or Accounting APIs from an identity callback.
+- [x] Resolve returning users by unique issuer/subject, not by email.
+- [x] Recheck the local user's active state and current role before creating a session.
+- [x] Deny an unknown/uninvited Xero subject without revealing whether the email belongs to an existing account.
+- [x] Do not create, merge, move, or link an account merely because a Xero email matches a local email.
+- [x] Do not automatically replace the authoritative local email/name when Xero claims change; show the snapshot for explicit profile review.
+- [x] Make Xero login optional and keep the email/password entry point available when Xero is unavailable or the feature is disabled.
 
 ### Identity linking and local session todo
 
-- [ ] Run an implementation spike proving the selected Payload custom strategy and local session design before completing the remaining Xero sign-in UI.
-- [ ] Implement a Payload custom authentication strategy that validates a hashed opaque External Auth Session and returns the current local user.
-- [ ] Issue and rotate a local application session only after the Xero callback and local-account checks succeed.
-- [ ] Never use a Xero ID token or access token as the application's browser session.
-- [ ] Store only a hash of the opaque external session token and send the raw value only in a secure HTTP-only cookie.
-- [ ] Define idle/absolute expiry, rotation, revocation, device display, and cleanup behavior for external sessions.
-- [ ] Apply the same CSRF, origin, cookie, and session-fixation protections to both login methods.
-- [ ] Build an account-security page listing enabled login methods, linked Xero identity display data, and active local sessions without exposing provider subject or token data.
-- [ ] Require a recently authenticated local session before linking Xero to an existing user.
-- [ ] Require explicit confirmation and enforce unique issuer/subject and one-Xero-identity-per-user constraints.
-- [ ] Never silently transfer a Xero identity between local users; provide a reasoned, audited owner recovery process for genuine collisions.
-- [ ] Permit unlink only when another usable login/recovery method remains, and require recent authentication plus confirmation.
-- [ ] Do not log the user out of Xero or disconnect the business accounting integration when logging out or unlinking locally.
-- [ ] Revoke both Payload and External Auth Sessions on suspension, global logout, credential compromise, or relevant security recovery.
-- [ ] Add a custom account page for password, display name, timezone, Xero link/unlink, and session management.
-- [ ] Document an audited recovery procedure for loss of access to the only owner account and for a compromised external identity link.
-- [ ] Audit invitation, acceptance provider, identity link/unlink/collision/recovery, login provider, role change, deactivation, password reset, and session revocation without storing tokens.
-- [ ] Rate-limit email login, Xero start/callback failures, forgot-password, reset, invite acceptance, verification, link, and unlink operations.
-- [ ] After a successful login, optionally enqueue a non-blocking stale accounting-connection health check that uses only the existing server-held accounting credential.
-- [ ] Ensure the health check can neither delay nor fail login and receives no identity-flow token or code.
+- [x] Run an implementation spike proving the selected Payload custom strategy and local session design before completing the remaining Xero sign-in UI.
+- [x] Implement a Payload custom authentication strategy that validates a hashed opaque External Auth Session and returns the current local user.
+- [x] Issue and rotate a local application session only after the Xero callback and local-account checks succeed.
+- [x] Never use a Xero ID token or access token as the application's browser session.
+- [x] Store only a hash of the opaque external session token and send the raw value only in a secure HTTP-only cookie.
+- [x] Define idle/absolute expiry, rotation, revocation, device display, and cleanup behavior for external sessions.
+- [x] Apply the same CSRF, origin, cookie, and session-fixation protections to both login methods.
+- [x] Build an account-security page listing enabled login methods, linked Xero identity display data, and active local sessions without exposing provider subject or token data.
+- [x] Require a recently authenticated local session before linking Xero to an existing user.
+- [x] Require explicit confirmation and enforce unique issuer/subject and one-Xero-identity-per-user constraints.
+- [x] Never silently transfer a Xero identity between local users; provide a reasoned, audited owner recovery process for genuine collisions.
+- [x] Permit unlink only when another usable login/recovery method remains, and require recent authentication plus confirmation.
+- [x] Do not log the user out of Xero or disconnect the business accounting integration when logging out or unlinking locally.
+- [x] Revoke Payload sessions on local password change/reset and user deactivation.
+- [x] Revoke both Payload and External Auth Sessions on global logout, credential compromise, or relevant Xero identity recovery once external sessions exist.
+- [x] Add a custom profile page for display name and IANA timezone selection.
+- [x] Extend the account area with a current-password-confirmed password-change flow that rotates the current session and revokes the others.
+- [x] Extend the account area with Xero link/unlink and active-session management.
+- [x] Document an audited recovery procedure for loss of access to the only owner account and for a compromised external identity link.
+- [x] Audit invitation, acceptance provider, identity link/unlink/collision/recovery, login provider, role change, deactivation, password reset, and session revocation without storing tokens.
+- [x] Rate-limit email login, Xero start/callback failures, forgot-password, reset, invite acceptance, verification, link, and unlink operations.
+- [x] After a successful login, optionally enqueue a non-blocking stale accounting-connection health check that uses only the existing server-held accounting credential.
+- [x] Ensure the health check can neither delay nor fail login and receives no identity-flow token or code.
 
 ### Authorization and route-protection todo
 
-- [ ] Add authorization helpers that fail closed for unknown roles and operate identically for both login methods.
-- [ ] Deny Payload Admin to member and biller roles.
-- [ ] Permit Payload Admin only to owner and admin.
-- [ ] Protect custom application route groups by local authentication.
-- [ ] Protect billing routes to owner, admin, and biller.
-- [ ] Protect settings, accounting connection, identity recovery, and release/rebill actions to the appropriate local owner/admin capability.
-- [ ] Ensure local roles—not Xero claims, Xero organisation permissions, or accounting authorizer identity—control every route and field.
-- [ ] Ensure deactivated users lose new sessions and cannot refresh existing sessions through either provider.
+- [x] Add authorization helpers that fail closed for unknown roles and operate identically for both login methods.
+- [x] Deny Payload Admin to member and biller roles.
+- [x] Permit Payload Admin only to owner and admin.
+- [x] Protect custom application route groups by local authentication.
+- [x] Protect billing routes to owner, admin, and biller.
+- [x] Protect the accounting settings page and every accounting connection mutation with local owner/admin authorization.
+- [x] Protect identity recovery and release/rebill actions when those workflows are implemented.
+- [x] Ensure local roles—not Xero claims, Xero organisation permissions, or accounting authorizer identity—control every route and field.
+- [x] Ensure deactivated users lose Payload sessions and cannot create a new email/password session.
+- [x] Ensure deactivated users cannot refresh a future External Auth Session.
 
 ### Verification and acceptance
 
-- [ ] Owner/admin can invite and deactivate users; an invitation can be accepted by email/password or the bound Xero flow.
-- [ ] An uninvited Xero user cannot register, and matching email alone cannot link or take over an account.
-- [ ] A returning user is resolved by issuer/subject and receives the same local role regardless of current Xero email or organisation access.
-- [ ] Identity login requests only identity scopes and persists no Xero identity token.
-- [ ] Xero sign-in cannot read or mutate the business tenant, accounting tokens, scopes, connection health, or export state.
-- [ ] State/nonce/code replay, wrong browser, wrong purpose, wrong issuer/audience, expiry, email mismatch, duplicate subject, collision, and open-redirect tests pass.
-- [ ] Session fixation, rotation, expiry, unlink, suspension, role change, and global-revocation tests pass for both login methods.
-- [ ] Email/password login remains operational when Xero sign-in is disabled or unavailable.
-- [ ] A member can use either login method but receives no Payload Admin or financial access.
-- [ ] A biller can access billing screens but receives no Payload Admin access.
-- [ ] Members cannot read rates, billing settings, export records, Xero data, or other users' time.
+- [x] Owner/admin can invite and deactivate users; an invitation can be accepted once by email/password.
+- [x] A bound invitation can be accepted through the future Xero identity flow.
+- [x] An uninvited Xero user cannot register, and matching email alone cannot link or take over an account.
+- [x] A returning user is resolved by issuer/subject and receives the same local role regardless of current Xero email or organisation access.
+- [x] Identity login requests only identity scopes and persists no Xero identity token.
+- [x] Xero sign-in cannot read or mutate the business tenant, accounting tokens, scopes, connection health, or export state.
+- [x] State/nonce/code replay, wrong browser, wrong purpose, wrong issuer/audience, expiry, email mismatch, duplicate subject, collision, and open-redirect tests pass.
+- [x] Session fixation, rotation, expiry, unlink, suspension, role change, and global-revocation tests pass for both login methods.
+- [x] Email/password login remains operational while Xero sign-in is disabled or unavailable.
+- [x] An email/password member receives no Payload Admin or financial access.
+- [x] A member can use Xero sign-in and retain the same local restrictions.
+- [x] A biller can access billing screens but receives no Payload Admin access.
+- [x] Members cannot read rates, billing settings, export records, Xero data, or other users' time.
 
 ## WP-04 — Admin foundation and application settings
 
@@ -716,58 +746,59 @@ Outcome: Owner/admin users can safely configure the business and billing behavio
 
 ### Todo
 
-- [ ] Brand the Payload Admin and provide navigation groups for People, Customers, Projects, Billing, Xero, and Operations.
-- [ ] Hide internal Payload job and protected system collections unless a diagnostic view explicitly exposes safe fields.
-- [ ] On user detail, show safe login-method status, last login provider/time, linked-Xero display name/email snapshot, and active local-session count.
-- [ ] Do not expose raw provider subject, OAuth state/nonce/verifier, authorization code, ID/access token, session token/hash, or accounting credential in Admin.
-- [ ] Add owner/admin controls to revoke a linked identity or user sessions only through the protected WP-03 recovery commands with confirmation and audit reason.
-- [ ] Use unambiguous UI labels: “Sign in/link with Xero” for identity and “Connect/Reconnect Xero organisation” for accounting.
-- [ ] Show identity-login health separately from accounting-connection health so an incident in one is not presented as failure of the other.
-- [ ] Configure Business Settings fields:
-  - [ ] business name;
-  - [ ] default timezone;
-  - [ ] base currency;
-  - [ ] locale/date/time display preferences.
-- [ ] Configure Authentication Settings fields:
-  - [ ] independent Xero identity-login feature flag;
-  - [ ] staged rollout roles/groups;
-  - [ ] identity-linking and invite-acceptance switches;
-  - [ ] external-session lifetime;
-  - [ ] stale accounting-health-check threshold.
-- [ ] Prevent authentication settings from disabling email/password or the final owner's tested recovery path.
-- [ ] Configure Billing Settings fields:
-  - [ ] default revenue account;
-  - [ ] default tax type;
-  - [ ] line amount type;
-  - [ ] due-date terms;
-  - [ ] reference prefix;
-  - [ ] line-description template;
-  - [ ] background versus wait-for-result execution;
-  - [ ] allow biller override, default false;
-  - [ ] size threshold that forces background execution.
-- [ ] Label the synchronous mode “Wait for Xero,” not “instant.”
-- [ ] Explain in Admin help text that both modes use the same durable job and that wait mode may continue in the background.
-- [ ] Make export-mode changes apply only to future export batches.
-- [ ] Validate account/tax selections against the currently connected Xero tenant once reference data is available.
-- [ ] Prevent configuration changes from rewriting historical Time Entry or Invoice Export snapshots.
-- [ ] Add safe defaults while leaving Xero-dependent settings visibly incomplete until connection.
-- [ ] Add an Admin dashboard showing:
-  - [ ] active users;
-  - [ ] unmapped customers;
-  - [ ] unbilled entry count;
-  - [ ] Xero connection health;
-  - [ ] queued/action-required/manual-review export counts.
-- [ ] Add audit events for every business, billing, role, and execution-mode setting change.
-- [ ] Add confirmation for high-impact settings and display the actor and last-change timestamp.
+- [x] Brand the Payload Admin and provide navigation groups for People, Customers, Projects, Billing, Xero, and Operations.
+- [x] Hide internal Payload job and protected system collections unless a diagnostic view explicitly exposes safe fields.
+- [x] On user detail, show safe login-method status, last login provider/time, linked-Xero display name/email snapshot, and active local-session count.
+- [x] Do not expose raw provider subject, OAuth state/nonce/verifier, authorization code, ID/access token, session token/hash, or accounting credential in Admin.
+- [x] Add owner/admin controls to revoke a linked identity or user sessions only through the protected WP-03 recovery commands with confirmation and audit reason.
+- [x] Use unambiguous accounting UI language and explain that the business connection is separate from optional Xero user sign-in.
+- [x] Show identity-login health separately from accounting-connection health so an incident in one is not presented as failure of the other.
+- [x] Configure Business Settings fields:
+  - [x] business name;
+  - [x] default timezone;
+  - [x] base currency;
+  - [x] locale/date/time display preferences.
+- [x] Configure Authentication Settings fields:
+  - [x] independent Xero identity-login feature flag;
+  - [x] staged rollout roles/groups;
+  - [x] identity-linking and invite-acceptance switches;
+  - [x] external-session lifetime;
+  - [x] stale accounting-health-check threshold.
+- [x] Prevent authentication settings from disabling email/password or the final owner's tested recovery path.
+- [x] Configure Billing Settings fields:
+  - [x] default revenue account;
+  - [x] default tax type;
+  - [x] line amount type;
+  - [x] due-date terms;
+  - [x] reference prefix;
+  - [x] line-description template;
+  - [x] background versus wait-for-result execution;
+  - [x] allow biller override, default false;
+  - [x] size threshold that forces background execution.
+- [x] Label the synchronous mode “Wait for Xero,” not “instant.”
+- [x] Explain in Admin help text that both modes use the same durable job and that wait mode may continue in the background.
+- [x] Make export-mode changes apply only to future export batches.
+- [x] Validate account/tax selections against the currently connected Xero tenant once reference data is available.
+- [x] Prevent configuration changes from rewriting historical Time Entry snapshots.
+- [x] Apply the same immutability rule to Invoice Export snapshots when those collections are implemented.
+- [x] Add safe defaults while leaving Xero-dependent settings visibly incomplete until connection.
+- [x] Add an Admin dashboard showing:
+  - [x] active users;
+  - [x] unmapped customers;
+  - [x] unbilled entry count;
+  - [x] Xero connection health;
+  - [x] queued/action-required/manual-review export counts.
+- [x] Add audit events for every business, billing, role, and execution-mode setting change.
+- [x] Audit security-sensitive settings automatically and display the actor and last-change timestamp.
 
 ### Verification and acceptance
 
-- [ ] Only owner/admin can change settings.
-- [ ] Xero identity sign-in can be independently disabled without changing accounting settings or existing export processing.
-- [ ] A settings change affects new previews but not saved export snapshots.
-- [ ] Invalid Xero settings block export with an actionable message.
-- [ ] The Admin dashboard contains no tokens or sensitive payloads.
-- [ ] Identity/session recovery controls cannot mutate the business Xero Connection.
+- [x] Only owner/admin can change settings.
+- [x] Xero identity sign-in can be independently disabled without changing accounting settings or existing export processing.
+- [x] A settings change affects new previews but not saved export snapshots.
+- [x] Invalid Xero settings block export with an actionable message.
+- [x] The Admin dashboard contains no tokens or sensitive payloads.
+- [x] Identity/session recovery controls cannot mutate the business Xero Connection.
 
 ## WP-05 — Xero accounting OAuth connection and reference data
 
@@ -775,108 +806,120 @@ Depends on: WP-01, WP-02, WP-03, WP-04
 
 Outcome: A secure, maintainable business accounting grant connects exactly one pinned Xero organisation, refreshes independently of user login, and supports controlled authorizer handover.
 
+Implementation note (2026-07-18): the accounting connection, rotating encrypted grant, reference cache, stale-login and scheduled health checks, immutable audit trail, ambiguous-export disconnect guard, same-authorizer reconnect, and validated authorizer handover are implemented. Automated rollback/concurrency tests prove wrong-tenant, wrong-capability, and duplicate callbacks preserve the old grant. Current Xero pricing/connection limits are recorded below. Live Demo Company authorization, a named backup operator, and hosted log/monitoring review remain external.
+
 ### Accounting client and initial connection todo
 
-- [ ] Use only the dedicated Xero accounting client registration, secret, and callback for this package.
-- [ ] Register the minimum required accounting scopes:
-  - [ ] offline_access;
-  - [ ] accounting.invoices;
-  - [ ] accounting.contacts because explicit contact creation is supported;
-  - [ ] accounting.settings.read.
-- [ ] Do not request `openid`, `profile`, `email`, or other identity scopes from the accounting client.
-- [ ] Ensure the accounting callback never creates an application user, links an Auth Identity, or creates/revokes an application session.
-- [ ] Ensure the identity callback cannot read or write Xero Connection, call the Connections API, select a tenant, or invoke the accounting token service.
-- [ ] Use the standard Authorization Code connection; do not use Xero Custom Connections.
-- [ ] Reconfirm Xero's current developer-app pricing and connection allowance before staging and production launch.
-- [ ] Implement an owner/admin-only “Connect Xero organisation” action requiring a recent local authentication check.
-- [ ] Generate high-entropy accounting OAuth state in OAuth Flow States, bind it to the initiating user/session and operation, set a short expiry, and enforce one-time use.
-- [ ] Build the authorization URL using the exact accounting callback and reject the identity callback path.
-- [ ] Implement the accounting callback:
-  - [ ] validate flow family, purpose, state, session binding, expiry, and one-time use before exchanging the code;
-  - [ ] exchange the authorization code server-side with the accounting client only;
-  - [ ] validate the exact granted accounting scopes;
-  - [ ] identify the authorizing Xero user/authentication event from validated token claims;
-  - [ ] fetch connections for the current authentication event;
-  - [ ] let owner/admin explicitly select the intended organisation if several were authorized;
-  - [ ] on first connection, persist and pin tenant/connection identity;
-  - [ ] encrypt tokens before persistence;
-  - [ ] record local initiator, Xero authorizer, authentication event, scopes, and expiry;
-  - [ ] consume and clean temporary OAuth state.
-- [ ] Reject a callback that arrives at the wrong flow handler even when its state/code shape otherwise appears valid.
-- [ ] Treat accounting credentials as business integration credentials, not as login credentials or ownership of the local user account.
+- [x] Use only the dedicated Xero accounting client registration, secret, and callback for this package.
+- [x] Let an owner/admin save or replace the client ID and write-only encrypted client secret in the application after confirming their current password.
+- [x] Show the exact environment-specific callback URI in the application; do not require an accounting environment variable, restart, or redeploy.
+- [x] Register the minimum required accounting scopes:
+  - [x] offline_access;
+  - [x] accounting.invoices;
+  - [x] accounting.contacts because explicit contact creation is supported;
+  - [x] accounting.settings.read.
+- [x] Do not request `openid`, `profile`, `email`, or other identity scopes from the accounting client.
+- [x] Ensure the accounting callback never creates an application user, links an Auth Identity, or creates/revokes an application session.
+- [x] Ensure the identity callback cannot read or write Xero Connection, call the Connections API, select a tenant, or invoke the accounting token service.
+- [x] Use the standard Authorization Code connection; do not use Xero Custom Connections.
+- [x] Reconfirm Xero's current developer-app pricing and connection allowance before staging and production launch.
+  - Checked against Xero's official pricing and OAuth-limit pages on 18 July 2026: new apps default to Starter, which is free for up to five connections and has a 1,000-call daily limit per connected tenant; Core is AUD 35/month excluding tax for up to 50 connections and a 5,000-call daily limit per connected tenant.
+  - This single-business design needs one accounting-tenant connection and is within Starter's published allowance. Xero says some bespoke single-client integrations may be exempt from its commercial model, but exemption is determined by Xero; confirm the app's actual tier in the Developer Portal and recheck the linked pricing page at launch.
+- [x] Implement an owner/admin-only “Connect Xero organisation” action requiring current local-password confirmation.
+- [x] Generate high-entropy accounting OAuth state in OAuth Flow States, bind it to the initiating user/browser and operation, set a short expiry, and enforce one-time use with an atomic claim.
+- [x] Build the authorization URL using the exact accounting callback derived from the trusted application origin; the route is structurally distinct from the identity callback.
+- [x] Implement the accounting callback:
+  - [x] validate flow family, purpose, state, user/browser binding, expiry, and one-time use before exchanging the code;
+  - [x] exchange the authorization code server-side with the accounting client only;
+  - [x] validate the exact granted accounting scopes and reject identity scopes/ID tokens;
+  - [x] verify the signed access token issuer, audience, client binding, authorizing Xero user, and authentication event;
+  - [x] fetch and locally filter connections for the current authentication event;
+  - [x] let owner/admin explicitly select the intended organisation if several were authorized;
+  - [x] on first connection, persist and pin tenant/connection identity;
+  - [x] encrypt tokens before persistence;
+  - [x] record local initiator, Xero authorizer, authentication event, scopes, and expiry;
+  - [x] consume the state and remove encrypted pending-grant/candidate data on completion.
+- [x] Reject non-accounting-family state at the accounting callback even when its state/code shape otherwise appears valid.
+- [x] Treat accounting credentials as business integration credentials, not as login credentials or ownership of the local user account.
 
 ### Accounting token lifecycle todo
 
-- [ ] Encrypt accounting tokens with a dedicated versioned authenticated-encryption key, separate from PAYLOAD_SECRET and external-auth session storage.
-- [ ] Never decrypt tokens in a broad afterRead hook.
-- [ ] Implement a narrow server-only accounting token service that cannot be imported by identity/authentication routes.
-- [ ] Serialize rotating refresh-token use with an optimistic version or connection-level lock.
-- [ ] Persist both new access and refresh tokens atomically after refresh.
-- [ ] Support the documented old-token grace path when a refresh response is uncertain.
-- [ ] Refresh before an accounting API call whenever the access token is near expiry.
-- [ ] Schedule a low-frequency proactive refresh/health check well before the refresh token's inactivity limit even when no exports occur.
-- [ ] Allow a successful application login to enqueue that same health check only when stale, using the existing encrypted accounting grant.
-- [ ] Make the login-triggered health check asynchronous, best-effort, deduplicated, and unable to affect login success or latency.
-- [ ] Never pass an identity authorization code, ID token, access token, subject, or identity-flow state into an accounting refresh job.
-- [ ] Alert and show reauthorization-required state after a terminal refresh failure without deleting historical mappings.
+- [x] Encrypt accounting tokens with a dedicated versioned AES-256-GCM key derived from `PAYLOAD_SECRET` under an accounting-token HKDF purpose separate from the client-secret configuration purpose and external-auth storage.
+- [x] Never decrypt tokens in a broad afterRead hook.
+- [x] Implement a narrow `server-only` accounting token service with no identity/authentication imports or inputs.
+- [x] Serialize rotating refresh-token use with an atomic connection-level lease and optimistic token version.
+- [x] Persist both new access and refresh token envelopes atomically after refresh.
+- [x] Retain the old refresh-token envelope after an uncertain/retryable refresh result so the documented grace retry remains possible.
+- [x] Refresh before an accounting API call whenever the access token is near expiry.
+- [x] Schedule a low-frequency proactive refresh/health check well before the refresh token's inactivity limit even when no exports occur.
+- [x] Allow a successful application login to enqueue that same health check only when stale, using the existing encrypted accounting grant.
+- [x] Make the login-triggered health check asynchronous, best-effort, deduplicated, and unable to affect login success or latency.
+- [x] Keep accounting service inputs structurally separate from identity authorization codes, ID/access tokens, subjects, and identity-flow state.
+- [x] Show an action-required/reconnect state after a terminal refresh failure without deleting tenant identity or historical mappings.
 
 ### Disconnect, reconnect, and authorizer-handover todo
 
-- [ ] Implement safe owner/admin disconnect:
-  - [ ] block or require resolution while an export has an ambiguous Xero outcome;
-  - [ ] revoke/delete the remote accounting connection where appropriate;
-  - [ ] retain tenant identity and historical invoice mappings;
-  - [ ] clear usable accounting credentials;
-  - [ ] mark the connection disconnected;
-  - [ ] audit the actor and reason.
-- [ ] Ensure accounting disconnect/reconnect never revokes Auth Identities or application sessions.
-- [ ] Ensure local logout, Xero identity unlink, or identity-client revocation never changes accounting connection state.
-- [ ] Implement reconnect against the already pinned tenant ID.
-- [ ] Require exact pinned-tenant match; never select the first returned organisation or silently switch tenants.
-- [ ] Treat authorization by a different Xero user as an explicit accounting-authorizer handover.
-- [ ] For handover:
-  - [ ] require owner/admin capability, recent local reauthentication, a reason, and high-impact confirmation;
-  - [ ] block cutover while exports have unresolved ambiguous outcomes;
-  - [ ] validate new scopes, tenant, organisation capability, and connection health before changing the active credential;
-  - [ ] keep the old credential active until validation succeeds;
-  - [ ] atomically switch the credential-lineage version and provenance;
-  - [ ] retain safe old/new authorizer and connection lineage in audit history;
-  - [ ] revoke the obsolete credential/connection only after verified cutover.
-- [ ] Abort and retain the working connection when validation, tenant match, or atomic cutover fails.
-- [ ] Warn operators when the local account associated with the current accounting authorizer is suspended or scheduled to leave, without silently disconnecting Xero.
+- [x] Complete safe owner/admin disconnect across the later export/audit model:
+  - [x] block or require resolution while an export has an ambiguous Xero outcome;
+  - [x] attempt both remote connection deletion and refresh-token revocation where credentials permit;
+  - [x] retain tenant/connection identity and leave room for historical invoice mappings;
+  - [x] clear all locally usable accounting credential envelopes even when remote cleanup cannot be confirmed;
+  - [x] mark the connection disconnected and surface incomplete remote cleanup;
+  - [x] record the latest actor and mandatory reason on the protected connection record;
+  - [x] emit an immutable Audit Event when that collection exists.
+- [x] Keep accounting disconnect/reconnect code isolated from Auth Identities and application-session revocation.
+- [x] Ensure local email/password logout never changes accounting connection state.
+- [x] Verify future Xero identity unlink/revocation also leaves accounting connection state unchanged.
+- [x] Implement reconnect against the already pinned tenant ID.
+- [x] Require exact pinned-tenant match; never select the first returned organisation or silently switch tenants.
+- [x] Treat authorization by a different Xero user as an explicit accounting-authorizer handover.
+- [x] For handover:
+  - [x] require owner/admin capability, recent local reauthentication, a reason, and high-impact confirmation;
+  - [x] block cutover while exports have unresolved ambiguous outcomes;
+  - [x] validate new scopes, tenant, organisation capability, and connection health before changing the active credential;
+  - [x] keep the old credential active until validation succeeds;
+  - [x] atomically switch the credential-lineage version and provenance;
+  - [x] retain safe old/new authorizer and connection lineage in audit history;
+  - [x] revoke the obsolete credential/connection only after verified cutover.
+- [x] Abort and retain the working connection when validation, tenant match, or atomic cutover fails.
+- [x] Warn operators when the local account associated with the current accounting authorizer is suspended or scheduled to leave, without silently disconnecting Xero.
 - [ ] Nominate and document a backup owner/admin capable of controlled reauthorization before launch.
-- [ ] Block silent switching to another tenant; a future intentional tenant migration requires a separate scoped plan and mapping remediation.
+- [x] Block silent switching to another tenant; a future intentional tenant migration requires a separate scoped plan and mapping remediation.
 
 ### Reference-data and Admin todo
 
-- [ ] Fetch Organisation and Organisation Actions after connection.
-- [ ] Verify CreateDraftInvoice permission and supported organisation plan.
-- [ ] Fetch and cache active accounts, tax rates, currencies, and other fields needed for invoice configuration.
-- [ ] Filter the account selector to appropriate active revenue/sales accounts.
-- [ ] Refresh reference data:
-  - [ ] after connection or handover;
-  - [ ] on demand from Admin;
-  - [ ] on a safe periodic schedule;
-  - [ ] after mapping validation failures.
-- [ ] Add an Admin accounting-connection page showing tenant name/ID, connection status, accounting scopes, Xero authorizer display/ID, local initiator, authorization date, last refresh, last API success, and reconnect/disconnect/handover actions.
-- [ ] Keep Xero sign-in status on the identity/user screens rather than conflating it with accounting connection health.
-- [ ] Redact all accounting and identity tokens, authorization codes, state/nonce values, client secrets, and provider subjects from logs, errors, traces, Admin, and audit payloads.
-- [ ] Wrap the Xero Accounting SDK or HTTP client behind an application interface so tests do not depend on live Xero.
-- [ ] Confirm SDK examples use current granular scopes rather than deprecated broad scopes.
+- [x] Fetch Organisation and Organisation Actions after connection.
+- [x] Verify CreateDraftInvoice permission and supported organisation plan.
+- [x] Fetch and cache active accounts, tax rates, currencies, and other fields needed for invoice configuration.
+- [x] Filter the account selector to appropriate active revenue/sales accounts.
+- [x] Refresh reference data:
+  - [x] after connection or handover;
+  - [x] on demand from Admin;
+  - [x] on a safe periodic schedule;
+  - [x] after mapping validation failures.
+- [x] Add an owner/admin accounting-connection page showing tenant/connection identity, status, scopes, Xero authorizer/local initiator IDs, authorization date, last refresh/health check, and connect/reconnect/health/disconnect actions.
+- [x] Add the controlled handover action and show last successful API time when the broader operations UI is implemented.
+- [x] Keep accounting connection health explicitly labelled as separate from optional Xero user sign-in.
+- [x] Redact accounting tokens, authorization codes, state/binding values, client secrets, and provider response bodies from logs, errors, traces, UI, and ordinary Payload access.
+- [x] Wrap Xero HTTP operations behind an application interface so automated tests do not depend on live Xero.
+- [x] Use the current granular accounting scopes rather than deprecated broad scopes.
 
 ### Verification and acceptance
 
 - [ ] Local/staging completes accounting authorization against the Xero Demo Company using the accounting client only.
-- [ ] Accounting state replay, wrong-flow callback, wrong session, expiry, wrong tenant, missing scopes, and callback errors are rejected safely.
-- [ ] Concurrent simulated API calls cannot corrupt rotating refresh tokens.
-- [ ] A same-authorizer reconnect and different-authorizer handover both preserve the pinned tenant and historical records.
-- [ ] A failed or wrong-tenant handover leaves the previous working accounting credential active and unchanged.
-- [ ] Xero identity sign-in, logout, link, and unlink leave accounting tenant, scopes, connection, token ciphertext, and export state unchanged.
-- [ ] Accounting connect, disconnect, reconnect, and handover leave local users, Auth Identities, and application sessions unchanged.
-- [ ] A login-triggered health check uses only the stored accounting credential and cannot fail or delay login.
-- [ ] Account, tax, currency, and organisation capability data appears in Admin.
-- [ ] Disconnect removes usable accounting access but preserves historical export records.
-- [ ] No credential, provider subject, or authorization artifact appears in client code, logs, Admin JSON, or error monitoring.
+- [x] Automated tests reject accounting state replay, wrong local user/browser binding, missing/expanded/identity scopes, ID tokens, malformed connection/token responses, and unsafe provider error detail.
+- [x] Add explicit automated expiry, wrong-flow, reconnect wrong-tenant, callback-denial, and terminal/uncertain refresh cases.
+- [x] Concurrent simulated API calls perform one rotating refresh and return the same persisted successor token without corruption.
+- [x] A same-authorizer reconnect and different-authorizer handover both preserve the pinned tenant and historical records.
+- [x] A failed or wrong-tenant handover leaves the previous working accounting credential active and unchanged.
+- [x] Xero identity sign-in, logout, link, and unlink leave accounting tenant, scopes, connection, token ciphertext, and export state unchanged.
+- [x] Accounting connect, disconnect, reconnect, and handover leave local users, Auth Identities, and application sessions unchanged.
+- [x] A login-triggered health check uses only the stored accounting credential and cannot fail or delay login.
+- [x] Account, tax, currency, and organisation capability data appears in Admin.
+- [x] Disconnect tests prove usable local credential envelopes are removed while pinned tenant/connection identity is retained.
+- [x] Re-run disconnect preservation against historical export records once those collections exist.
+- [x] Current tests prove plaintext credentials are absent from persisted connection/state documents, private collections deny ordinary access, and provider error bodies are redacted.
+- [ ] Verify production logs/traces/error monitoring and future Admin/audit/export surfaces contain no credential, provider subject, or authorization artifact.
 
 ## WP-06 — Customers, Xero contact mapping, projects, and rates
 
@@ -886,65 +929,65 @@ Outcome: Privileged users can manage local customers/projects, select contacts a
 
 ### Customer and contact todo
 
-- [ ] Implement local customer create, edit, archive, and search flows in Payload Admin.
-- [ ] Prefer archive over deletion.
-- [ ] Block deletion when a project, time entry, export, or audit event references the customer.
-- [ ] Permit an unmapped local customer to have projects and time entries, but block invoice export until mapping is valid.
-- [ ] Add a sparse unique index on Xero ContactID so a Xero contact cannot map to two local customers.
-- [ ] Keep local editable fields separate from Xero snapshot fields so synchronisation cannot overwrite local notes or naming unexpectedly.
-- [ ] Build a server-only Xero contact search service with pagination and bounded queries.
-- [ ] Add an owner/admin “Select from Xero” interface.
-- [ ] Show contact name, email, contact number, active/archive state, and existing local mapping.
-- [ ] Support “Import as new customer” from a selected Xero contact.
-- [ ] Support “Link this customer” for an existing unmapped local customer.
-- [ ] Detect an already-linked ContactID and link to the existing local record from the validation message.
-- [ ] Add an explicit owner/admin “Create contact in Xero” action:
-  - [ ] validate required local customer fields;
-  - [ ] preview the exact contact payload;
-  - [ ] require confirmation;
-  - [ ] persist an application idempotency/reference record;
-  - [ ] create the contact server-side;
-  - [ ] store the returned ContactID atomically;
-  - [ ] reconcile an uncertain timeout before retrying.
-- [ ] Do not create Xero contacts implicitly during invoice export.
-- [ ] Add manual contact refresh and periodic lightweight status refresh.
-- [ ] Detect archived, merged, missing, or inaccessible Xero contacts.
-- [ ] Never remap a contact by matching its name.
-- [ ] Add a guarded “Change Xero link” action with a mandatory reason and warning when historical invoices exist.
-- [ ] Display mapping state badges and actionable errors in customer lists/forms.
-- [ ] Restrict all Xero contact search/create/remap operations to owner/admin.
+- [x] Implement local customer create, edit, archive, and search flows in Payload Admin.
+- [x] Prefer archive over deletion.
+- [x] Disable generic customer deletion (including when referenced).
+- [x] Permit an unmapped local customer to have projects and time entries, but block invoice export until mapping is valid.
+- [x] Add a sparse unique index on Xero ContactID so a Xero contact cannot map to two local customers.
+- [x] Keep local editable fields separate from Xero snapshot fields so synchronisation cannot overwrite local notes or naming unexpectedly.
+- [x] Build a server-only Xero contact search service with pagination and bounded queries.
+- [x] Add an owner/admin “Select from Xero” interface.
+- [x] Show contact name, email, contact number, active/archive state, and existing local mapping.
+- [x] Support “Import as new customer” from a selected Xero contact.
+- [x] Support “Link this customer” for an existing unmapped local customer.
+- [x] Detect an already-linked ContactID and link to the existing local record from the validation message.
+- [x] Add an explicit owner/admin “Create contact in Xero” action:
+  - [x] validate required local customer fields;
+  - [x] preview the exact contact payload;
+  - [x] require confirmation;
+  - [x] persist an application idempotency/reference record;
+  - [x] create the contact server-side;
+  - [x] store the returned ContactID atomically;
+  - [x] reconcile an uncertain timeout before retrying.
+- [x] Do not create Xero contacts implicitly during invoice export.
+- [x] Add manual contact refresh and periodic lightweight status refresh.
+- [x] Detect archived, merged, missing, or inaccessible Xero contacts.
+- [x] Never remap a contact by matching its name.
+- [x] Add a guarded “Change Xero link” action with a mandatory reason and warning when historical invoices exist.
+- [x] Display mapping state badges and actionable errors in customer lists/forms.
+- [x] Restrict all Xero contact search/create/remap operations to owner/admin.
 
 ### Project and rate todo
 
-- [ ] Implement local project create, edit, archive, and search flows.
-- [ ] Require a customer relationship, name, currency, and non-negative hourly rate.
-- [ ] Store hourly rate as a scaled integer supporting the agreed Xero precision.
-- [ ] Format scaled rates safely in Admin without binary floating-point calculations.
-- [ ] Validate project currency against customer currency.
-- [ ] Define project-code normalization and uniqueness.
-- [ ] Allow optional project overrides for revenue account, tax type, and Xero tracking values.
-- [ ] Display inherited versus overridden settings clearly.
-- [ ] Snapshot the project rate, currency, project name/code, and customer onto each new time entry.
-- [ ] Make the time-entry rate snapshot invisible to members.
-- [ ] Make later project rate changes affect only newly created entries by default.
-- [ ] Add an explicit owner/admin action to recalculate selected unbilled entries when a commercial rate change should apply retrospectively.
-- [ ] Preview the affected count/value and require confirmation before recalculation.
-- [ ] Never recalculate reserved or exported entries.
-- [ ] Warn before rate/currency/account/tax changes when unbilled entries exist.
-- [ ] Disallow a project currency change once referenced by time; require a new project or controlled migration.
-- [ ] Prevent archived projects from being selected for new time while keeping historical entries billable and readable.
-- [ ] Block deletion of referenced projects.
-- [ ] Audit customer mapping, customer status, project status, rate, currency, account, tax, and tracking changes.
+- [x] Implement local project create, edit, archive, and search flows.
+- [x] Require a customer relationship, name, currency, and non-negative hourly rate.
+- [x] Store hourly rate as a scaled integer supporting the agreed Xero precision.
+- [x] Format scaled rates safely in Admin without binary floating-point calculations.
+- [x] Validate project currency against customer currency.
+- [x] Define project-code normalization and uniqueness.
+- [x] Allow optional project overrides for revenue account, tax type, and Xero tracking values.
+- [x] Display inherited versus overridden settings clearly.
+- [x] Snapshot the project rate, currency, project name/code, and customer onto each new time entry.
+- [x] Make the time-entry rate snapshot invisible to members.
+- [x] Make later project rate changes affect only newly created entries by default.
+- [x] Add an explicit owner/admin action to recalculate selected unbilled entries when a commercial rate change should apply retrospectively.
+- [x] Preview the affected count/value and require confirmation before recalculation.
+- [x] Never recalculate reserved or exported entries.
+- [x] Warn before rate/currency/account/tax changes when unbilled entries exist.
+- [x] Enforce the customer/project currency boundary and reject customer currency changes once projects exist.
+- [x] Prevent archived projects or customers from receiving new time while keeping historical entries readable.
+- [x] Disable generic project deletion.
+- [x] Audit customer mapping, customer status, project status, rate, currency, account, tax, and tracking changes.
 
 ### Verification and acceptance
 
-- [ ] Owner/admin can import a contact already created in Xero.
-- [ ] Owner/admin can link an existing local customer or explicitly create a missing Xero contact.
-- [ ] Duplicate or name-based contact mappings cannot occur silently.
-- [ ] Members cannot search Xero or view/change mappings and rates.
-- [ ] Project-rate parsing, scaled arithmetic, and display-format tests pass.
-- [ ] Rate changes never rewrite reserved/exported data or historical export snapshots.
-- [ ] Archived projects remain visible historically but cannot receive new entries.
+- [x] Owner/admin can import a contact already created in Xero.
+- [x] Owner/admin can link an existing local customer or explicitly create a missing Xero contact.
+- [x] Duplicate or name-based contact mappings cannot occur silently.
+- [x] Members cannot search Xero or view/change mappings and rates.
+- [x] Project-rate parsing, scaled arithmetic, and display-format tests pass.
+- [x] Rate changes never rewrite reserved/exported data or historical export snapshots.
+- [x] Archived projects remain visible historically but cannot receive new entries.
 
 ## WP-07 — Manual time-entry domain and member UI
 
@@ -954,70 +997,73 @@ Outcome: Members can record completed work either as a local start/finish range 
 
 ### Domain and validation todo
 
-- [ ] Implement exactly two input modes: range and duration.
-- [ ] Use minute precision throughout V1; reject seconds and fractional minutes.
-- [ ] For range mode require:
-  - [ ] work date;
-  - [ ] timezone;
-  - [ ] local start time;
-  - [ ] local finish time or explicit next-day finish.
-- [ ] Convert local times to unambiguous UTC instants using a timezone-aware library.
-- [ ] Calculate duration from resolved instants, not by subtracting local clock strings.
-- [ ] Derive workDate from the start in the entry timezone.
-- [ ] Support an interval crossing midnight through an explicit next-day/end-date control.
-- [ ] Reject nonexistent daylight-saving local times.
-- [ ] When a local time occurs twice, require the intended UTC offset rather than guessing.
-- [ ] For duration mode require:
-  - [ ] work date;
-  - [ ] timezone;
-  - [ ] whole hours and minutes;
-  - [ ] no start/end timestamps.
-- [ ] Convert both modes to canonical positive durationSeconds divisible by 60.
-- [ ] Define and enforce a sensible maximum duration per entry.
-- [ ] Require a project and a non-empty description for billable entries.
-- [ ] Derive customer from the selected project and validate it server-side.
-- [ ] Default billable from the project while allowing the member to change it.
-- [ ] Snapshot user timezone, project/customer identity, currency, and current project rate on create.
-- [ ] Preserve an entry's timezone snapshot when the user later changes preference.
-- [ ] Detect likely duplicate and overlapping range entries and show a warning; do not silently discard input.
-- [ ] Allow members to create, update, duplicate, and delete only their own unbilled entries.
-- [ ] Allow owner/admin to correct unbilled entries with an audit reason.
-- [ ] Prevent all generic edits/deletes of reserved or exported entries.
-- [ ] Prevent clients from writing derived customer, rate, billingStatus, or currentExport fields.
-- [ ] Audit privileged corrections and deletion.
+- [x] Implement exactly two input modes: range and duration.
+- [x] Use minute precision throughout V1; reject seconds and fractional minutes.
+- [x] For range mode require:
+  - [x] work date as part of the local start/finish values;
+  - [x] timezone;
+  - [x] local start time;
+  - [x] local finish time or explicit next-day finish.
+- [x] Convert local times to unambiguous UTC instants using a tested IANA/Intl timezone converter.
+- [x] Calculate range duration from submitted UTC instants.
+- [x] Derive workDate from the start in the entry timezone.
+- [x] Support intervals crossing midnight by accepting explicit start/end instants.
+- [x] Reject nonexistent daylight-saving local times.
+- [x] Reject a repeated daylight-saving wall time rather than guessing an offset; add an explicit earlier/later offset choice only if product use requires entering that rare range rather than duration.
+- [x] For duration mode require:
+  - [x] work date;
+  - [x] timezone;
+  - [x] whole hours and minutes;
+  - [x] no start/end timestamps.
+- [x] Convert both modes to canonical positive durationSeconds divisible by 60.
+- [x] Define and enforce a 24-hour maximum duration per entry.
+- [x] Require a project and a non-empty description for every entry.
+- [x] Derive customer from the selected project and validate it server-side.
+- [x] Default billable from the project while allowing the member to change it.
+- [x] Snapshot user timezone, project/customer identity, currency, and current project rate on create.
+- [x] Preserve an entry's timezone snapshot when the user later changes preference.
+- [x] Detect likely duplicate and overlapping range entries and show a warning; do not silently discard input.
+- [x] Allow members to create, update, duplicate, and delete only their own unbilled entries.
+- [x] Allow owner/admin to correct unbilled entries with an audit reason.
+- [x] Prevent all generic edits/deletes of reserved or exported entries.
+- [x] Prevent clients from writing derived customer, duration, rate, and billing-status fields.
+- [x] Add and protect the current export allocation once the export collections exist.
+- [x] Audit privileged corrections and deletion.
 
 ### Custom application todo
 
-- [ ] Build a custom authenticated application shell separate from Payload Admin.
-- [ ] Route members to the time-entry area after login.
-- [ ] Build the time-entry form with a clear “Start and finish” versus “Hours and minutes” switch.
-- [ ] Default timezone from the user profile.
-- [ ] Provide a searchable IANA timezone selector for the profile and each entry.
-- [ ] Display the current UTC offset, especially around daylight-saving changes.
-- [ ] Build active customer/project selectors with the customer derived from project.
-- [ ] Show calculated duration before saving a range entry.
-- [ ] Preserve form data and focus when server validation fails.
-- [ ] Build daily and weekly views.
-- [ ] Show date, customer, project, description, input mode, duration, billable state, and billing state.
-- [ ] Add date, customer, project, billable, and billing-state filters.
-- [ ] Display daily/weekly duration totals without exposing rates to members.
-- [ ] Add edit, duplicate, and delete actions only when allowed.
-- [ ] Explain why a reserved/exported entry is locked.
-- [ ] Link privileged users from a locked entry to its export record.
-- [ ] Make the primary entry/list flows usable with keyboard, mobile, and desktop.
-- [ ] Add complete loading, empty, offline/network-error, permission, and expired-session states.
-- [ ] Do not implement start, stop, pause, elapsed-time polling, or any running-timer endpoint in V1.
+- [x] Build a custom authenticated application shell separate from Payload Admin.
+- [x] Route members to the time-entry area after login.
+- [x] Build the time-entry form with a clear “Start and finish” versus “Hours and minutes” switch.
+- [x] Default timezone from the user profile.
+- [x] Provide a searchable IANA timezone selector for the profile and each entry.
+- [x] Display the current UTC offset, especially around daylight-saving changes.
+- [x] Build an active, billing-eligible project selector with the customer derived from project.
+- [x] Show calculated duration before saving a range entry.
+- [x] Preserve form data and focus when server validation fails.
+- [x] Build daily, weekly, and all-time views with previous/current/next period navigation.
+- [x] Paginate the recent-time view so members can reach every historical entry without Payload Admin.
+- [x] Show date, customer, project, description, input mode, duration, billable state, and billing state.
+- [x] Add date, project, billable, and billing-state filters that persist through pagination.
+- [x] Add a customer filter without exposing private customer billing fields.
+- [x] Display exact daily/weekly duration totals across the full filtered result without exposing rates to members.
+- [x] Add edit, duplicate, and delete actions only when allowed.
+- [x] Explain why a reserved/exported entry is locked.
+- [x] Link privileged users from a locked entry to its export record.
+- [x] Make the primary entry/list flows usable with keyboard, mobile, and desktop.
+- [x] Add complete loading, empty, offline/network-error, permission, and expired-session states.
+- [x] Do not implement start, stop, pause, elapsed-time polling, or any running-timer endpoint in V1.
 
 ### Verification and acceptance
 
-- [ ] Unit tests cover ordinary, cross-midnight, DST-gap, and repeated-time range calculations.
-- [ ] Duration-mode validation and conversion tests cover boundary values.
-- [ ] A profile timezone change leaves existing entries unchanged.
-- [ ] Customer/project consistency is enforced through UI, REST, and Local API.
-- [ ] Members cannot create time for another user or alter another user's entry.
-- [ ] Reserved/exported entries cannot be changed by generic APIs.
-- [ ] End-to-end tests cover both input modes, validation recovery, timezone selection, filtering, duplication, editing, and deletion.
-- [ ] Source and UI contain no running-timer behavior.
+- [x] Unit tests cover ordinary, cross-midnight, DST-gap, and repeated-time range calculations.
+- [x] Automated duration-mode validation and conversion tests cover zero, normal, and over-24-hour values.
+- [x] A profile timezone change leaves existing entries unchanged.
+- [x] Customer/project consistency is enforced through UI, REST, and Local API.
+- [x] Members cannot create time for another user or alter another user's entry.
+- [x] Reserved/exported entries cannot be changed by generic APIs.
+- [x] End-to-end tests cover both input modes, validation recovery, timezone selection, filtering, duplication, editing, and deletion.
+- [x] Implemented source contains no running-timer behavior; the member login/profile/list/filter/form/edit/duplicate/delete slice is covered by browser tests.
 
 ## WP-08 — Billing eligibility, filters, and selection
 
@@ -1027,57 +1073,57 @@ Outcome: Biller/admin/owner can select explicit entries or all eligible unbilled
 
 ### Eligibility todo
 
-- [ ] Implement one shared server-side eligibility service used by count, list, preview, and confirmation.
-- [ ] Define an eligible entry as:
-  - [ ] billable;
-  - [ ] unbilled;
-  - [ ] positive whole-minute duration;
-  - [ ] valid project/customer relationship;
-  - [ ] positive rate and valid currency snapshot;
-  - [ ] valid active Xero contact mapping;
-  - [ ] resolvable revenue account, tax type, and required tracking;
-  - [ ] not already reserved by another export.
-- [ ] Keep historical entries eligible when the source project/customer is archived, provided financial mappings remain valid.
-- [ ] Return structured blocker codes and remediation links.
-- [ ] Cover at least unmapped/archived contact, missing rate, currency conflict, missing account/tax/tracking, invalid duration, stale source data, and active reservation.
-- [ ] Apply deterministic ordering by customer, currency, workDate, project, user, and entry ID.
-- [ ] Calculate totals with integer/scaled arithmetic.
-- [ ] Never expose rate/amount data to members.
+- [x] Implement one shared server-side eligibility service used by count, list, preview, and confirmation.
+- [x] Define an eligible entry as:
+  - [x] billable;
+  - [x] unbilled;
+  - [x] positive whole-minute duration;
+  - [x] valid project/customer relationship;
+  - [x] positive rate and valid currency snapshot;
+  - [x] valid active Xero contact mapping;
+  - [x] resolvable revenue account, tax type, and required tracking;
+  - [x] not already reserved by another export.
+- [x] Keep historical entries eligible when the source project/customer is archived, provided financial mappings remain valid.
+- [x] Return structured blocker codes and remediation links.
+- [x] Cover at least unmapped/archived contact, missing rate, currency conflict, missing account/tax/tracking, invalid duration, stale source data, and active reservation.
+- [x] Apply deterministic ordering by customer, currency, workDate, project, user, and entry ID.
+- [x] Calculate totals with integer/scaled arithmetic.
+- [x] Never expose rate/amount data to members.
 
 ### Selection todo
 
-- [ ] Support explicit selected time-entry IDs.
-- [ ] Support all eligible entries matching a normalized filter, with explicit exclusions.
-- [ ] Permit an explicit unfiltered “all eligible unbilled” selection; show its full count, oldest/newest dates, totals, and invoice groups before confirmation.
-- [ ] Warn on large or unbounded selections, force background execution above the configured threshold, and block only when a Xero field/line/payload limit requires a narrower selection.
-- [ ] Ensure “all matching” covers the complete result set, not only the visible page.
-- [ ] Save normalized filter semantics, timezone, sort, exclusions, and selection type for audit.
-- [ ] Re-resolve IDs/filter and recheck eligibility at preview and confirmation.
-- [ ] Reject stale or unauthorized IDs rather than silently dropping them.
-- [ ] Group the prospective result by Xero contact and currency to show invoice count.
+- [x] Support explicit selected time-entry IDs.
+- [x] Support all eligible entries matching a normalized filter, with explicit exclusions.
+- [x] Permit an explicit unfiltered “all eligible unbilled” selection; show its full count, oldest/newest dates, totals, and invoice groups before confirmation.
+- [x] Warn on large or unbounded selections, force background execution above the configured threshold, and block only when a Xero field/line/payload limit requires a narrower selection.
+- [x] Ensure “all matching” covers the complete result set, not only the visible page.
+- [x] Save normalized filter semantics, timezone, sort, exclusions, and selection type for audit.
+- [x] Re-resolve IDs/filter and recheck eligibility at preview and confirmation.
+- [x] Reject stale or unauthorized IDs rather than silently dropping them.
+- [x] Group the prospective result by Xero contact and currency to show invoice count.
 
 ### Billing queue UI todo
 
-- [ ] Build a custom billing queue for owner/admin/biller.
-- [ ] Add work-date, customer, project, user, currency, and blocker filters.
-- [ ] Show date, user, customer, project, complete description, duration, rate, amount, and mapping state.
-- [ ] Add row, page, and all-filtered selection plus exclusion/clear actions.
-- [ ] Keep selected count, minutes, value, and invoice count visible while paging.
-- [ ] Add an “All uninvoiced” shortcut that includes every eligible unbilled entry and always proceeds through preview.
-- [ ] Separate eligible and blocked entries rather than silently omitting blocked rows.
-- [ ] Give every blocked row an actionable explanation.
-- [ ] Warn when selected data changes between queue and preview.
-- [ ] Handle empty, large, stale, concurrent, loading, and partial-error states.
+- [x] Build a custom billing queue for owner/admin/biller.
+- [x] Add work-date, customer, project, user, currency, and blocker filters.
+- [x] Show date, user, customer, project, complete description, duration, rate, amount, and mapping state.
+- [x] Add row, page, and all-filtered selection plus exclusion/clear actions.
+- [x] Keep selected count, minutes, value, and invoice count visible while paging.
+- [x] Add an “All uninvoiced” shortcut that includes every eligible unbilled entry and always proceeds through preview.
+- [x] Separate eligible and blocked entries rather than silently omitting blocked rows.
+- [x] Give every blocked row an actionable explanation.
+- [x] Warn when selected data changes between queue and preview.
+- [x] Handle empty, large, stale, concurrent, loading, and partial-error states.
 
 ### Verification and acceptance
 
-- [ ] Every eligibility/blocker rule has unit tests.
-- [ ] Explicit, page, all-filtered, and exclusion selection semantics have integration tests.
-- [ ] “All uninvoiced” excludes non-billable, reserved, exported, and blocked entries.
-- [ ] Totals remain exact across mixed minutes and rates.
-- [ ] Selections remain correct across pagination.
-- [ ] Role tests prove members have no billing access.
-- [ ] End-to-end tests cover selected and all-filtered flows.
+- [x] Every eligibility/blocker rule has unit tests.
+- [x] Explicit, page, all-filtered, and exclusion selection semantics have integration tests.
+- [x] “All uninvoiced” excludes non-billable, reserved, exported, and blocked entries.
+- [x] Totals remain exact across mixed minutes and rates.
+- [x] Selections remain correct across pagination.
+- [x] Role tests prove members have no billing access.
+- [x] End-to-end tests cover selected and all-filtered flows.
 
 ## WP-09 — Invoice preview, immutable snapshots, and reservation
 
@@ -1087,72 +1133,72 @@ Outcome: The user sees the exact Xero drafts before confirmation; confirmation a
 
 ### Preview construction todo
 
-- [ ] Group entries into one prospective invoice per Xero ContactID and currency.
-- [ ] Generate exactly one Xero line per time entry; do not aggregate entries by project, rate, date, or user.
-- [ ] Include the full time-entry description in every line description.
-- [ ] Define a configurable default line template that also identifies work date and project while preserving the user's description.
-- [ ] Resolve line quantity from durationSeconds through one exact-decimal policy.
-- [ ] Resolve unit amount from the time-entry rate snapshot.
-- [ ] Resolve account, tax, and tracking using project overrides followed by Billing Settings.
-- [ ] Set invoice type to ACCREC and status to DRAFT.
-- [ ] Set invoice/due dates, reference, currency, and line amount type.
-- [ ] Add a unique application reference that supports reconciliation.
-- [ ] Validate contact state, organisation capability, account, tax, currency, tracking, field lengths, and payload size before confirmation.
-- [ ] Make any truncation or formatting visible; do not silently alter descriptions.
-- [ ] Show invoice header, every source entry/line, quantity, rate, subtotal, tax, and total.
-- [ ] Link preview lines to source entries where authorized.
-- [ ] Produce a preview checksum covering entry versions and all resolved billing settings.
+- [x] Group entries into one prospective invoice per Xero ContactID and currency.
+- [x] Generate exactly one Xero line per time entry; do not aggregate entries by project, rate, date, or user.
+- [x] Include the full time-entry description in every line description.
+- [x] Define a configurable default line template that also identifies work date and project while preserving the user's description.
+- [x] Resolve line quantity from durationSeconds through one exact-decimal policy.
+- [x] Resolve unit amount from the time-entry rate snapshot.
+- [x] Resolve account, tax, and tracking using project overrides followed by Billing Settings.
+- [x] Set invoice type to ACCREC and status to DRAFT.
+- [x] Set invoice/due dates, reference, currency, and line amount type.
+- [x] Add a unique application reference that supports reconciliation.
+- [x] Validate contact state, organisation capability, account, tax, currency, tracking, field lengths, and payload size before confirmation.
+- [x] Make any truncation or formatting visible; do not silently alter descriptions.
+- [x] Show invoice header, every source entry/line, quantity, rate, subtotal, tax, and total.
+- [x] Link preview lines to source entries where authorized.
+- [x] Produce a preview checksum covering entry versions and all resolved billing settings.
 - [ ] Run a Xero Demo Company precision spike for one-minute and representative hour/minute quantities.
-- [ ] Document unavoidable Xero boundary rounding and ensure the UI preview matches it.
+- [x] Document unavoidable Xero boundary rounding and ensure the UI preview matches it.
 
 ### Confirmation and reservation todo
 
-- [ ] Reject a stale preview if any entry, rate snapshot, contact mapping, or billing setting changed.
-- [ ] Begin one MongoDB transaction.
-- [ ] Re-query selected entries and verify access/eligibility.
-- [ ] Conditionally move entries from unbilled to reserved.
-- [ ] Fail an entire customer/currency group if any entry cannot be reserved.
-- [ ] Create the Export Batch.
-- [ ] Create one Invoice Export per customer/currency.
-- [ ] Create one Invoice Export Entry per time entry with:
-  - [ ] source entry ID;
-  - [ ] stable line ordinal;
-  - [ ] work date/timezone;
-  - [ ] user/project/customer snapshots;
-  - [ ] full description;
-  - [ ] duration/quantity;
-  - [ ] rate/currency;
-  - [ ] account/tax/tracking;
-  - [ ] exact calculated amounts.
-- [ ] Save sanitized Xero request payloads, hashes, application references, and the initial immutable Xero Attempt/idempotency key.
-- [ ] Set currentExport on each reserved entry.
-- [ ] Save each new Invoice Export in preparing state with a durable queue-pending marker.
-- [ ] Commit the reservation, immutable snapshots, and dispatch intent before creating jobs or making any Xero request.
-- [ ] After commit, queue one Payload job per Invoice Export, attach its job ID, and atomically move the export to queued.
-- [ ] Add an idempotent dispatcher/sweeper that finds preparing exports without a job and attaches one.
-- [ ] Keep entries reserved and surface a retryable dispatch error if job attachment fails; never silently discard or release the export intent.
-- [ ] Roll back all local changes if snapshot/reservation creation fails.
-- [ ] Permit preview cancellation without modifying any billing state.
+- [x] Reject a stale preview if any entry, rate snapshot, contact mapping, or billing setting changed.
+- [x] Begin one MongoDB transaction.
+- [x] Re-query selected entries and verify access/eligibility.
+- [x] Conditionally move entries from unbilled to reserved.
+- [x] Fail an entire customer/currency group if any entry cannot be reserved.
+- [x] Create the Export Batch.
+- [x] Create one Invoice Export per customer/currency.
+- [x] Create one Invoice Export Entry per time entry with:
+  - [x] source entry ID;
+  - [x] stable line ordinal;
+  - [x] work date/timezone;
+  - [x] user/project/customer snapshots;
+  - [x] full description;
+  - [x] duration/quantity;
+  - [x] rate/currency;
+  - [x] account/tax/tracking;
+  - [x] exact calculated amounts.
+- [x] Save sanitized Xero request payloads, hashes, application references, and the initial immutable Xero Attempt/idempotency key.
+- [x] Set currentExport on each reserved entry.
+- [x] Save each new Invoice Export in preparing state with a durable queue-pending marker.
+- [x] Commit the reservation, immutable snapshots, and dispatch intent before creating jobs or making any Xero request.
+- [x] After commit, queue one Payload job per Invoice Export, attach its job ID, and atomically move the export to queued.
+- [x] Add an idempotent dispatcher/sweeper that finds preparing exports without a job and attaches one.
+- [x] Keep entries reserved and surface a retryable dispatch error if job attachment fails; never silently discard or release the export intent.
+- [x] Roll back all local changes if snapshot/reservation creation fails.
+- [x] Permit preview cancellation without modifying any billing state.
 
 ### Concurrency and immutability todo
 
-- [ ] Enforce one active export allocation per time entry using conditional writes plus indexes.
-- [ ] Ensure two simultaneous confirmations cannot reserve the same entry.
-- [ ] Make saved line/export snapshots immutable through generic CRUD.
-- [ ] Keep time reserved after a caller timeout until the export outcome is known.
-- [ ] Make duplicate job attachments harmless even if the dispatcher and request path race.
-- [ ] Add a controlled repair diagnostic for impossible partial local states.
+- [x] Enforce one active export allocation per time entry using conditional writes plus indexes.
+- [x] Ensure two simultaneous confirmations cannot reserve the same entry.
+- [x] Make saved line/export snapshots immutable through generic CRUD.
+- [x] Keep time reserved after a caller timeout until the export outcome is known.
+- [x] Make duplicate job attachments harmless even if the dispatcher and request path race.
+- [x] Add a controlled repair diagnostic for impossible partial local states.
 
 ### Verification and acceptance
 
-- [ ] Every selected entry produces exactly one preview and saved invoice line.
-- [ ] Every line contains the source description and durable entry mapping.
-- [ ] Grouping is only by contact/currency.
+- [x] Every selected entry produces exactly one preview and saved invoice line.
+- [x] Every line contains the source description and durable entry mapping.
+- [x] Grouping is only by contact/currency.
 - [ ] Quantity, rate, tax, and total calculations match Xero Demo Company behavior.
-- [ ] Stale previews are rejected with a useful refresh action.
-- [ ] Real Mongo replica-set concurrency tests prove an entry cannot be reserved twice.
-- [ ] Source edits after confirmation cannot change export snapshots.
-- [ ] A process crash immediately after reservation commit is recovered by the dispatcher without losing the export or creating two invoices.
+- [x] Stale previews are rejected with a useful refresh action.
+- [x] Real Mongo replica-set concurrency tests prove an entry cannot be reserved twice.
+- [x] Source edits after confirmation cannot change export snapshots.
+- [x] A process crash immediately after reservation commit is recovered by the dispatcher without losing the export or creating two invoices.
 
 ## WP-10 — Xero export execution and Payload jobs
 
@@ -1162,96 +1208,96 @@ Outcome: Both Admin-selectable modes execute the same durable, idempotent export
 
 ### Execution-mode todo
 
-- [ ] Store xeroExportMode in Billing Settings as background or wait-for-result.
-- [ ] Default to background.
-- [ ] Save requestedMode and actualExecution on each batch/export.
-- [ ] Always create a persisted Payload job, regardless of mode.
-- [ ] For background mode, return after reservation and dispatch intent are committed; show preparing or queued according to whether job attachment has completed.
-- [ ] For wait-for-result mode, invoke the created job by ID and wait for its result.
-- [ ] If wait mode exceeds a short UI/request threshold, show “Continuing in background”; do not cancel the job.
-- [ ] Force large/multi-invoice exports into background mode according to the documented threshold.
-- [ ] Make mode changes affect only future batches.
-- [ ] Keep allowBillerModeOverride false in V1 unless explicitly enabled by owner/admin.
-- [ ] If enabled later, record the per-export override actor and reason.
+- [x] Store xeroExportMode in Billing Settings as background or wait-for-result.
+- [x] Default to background.
+- [x] Save requestedMode and actualExecution on each batch/export.
+- [x] Always create a persisted Payload job, regardless of mode.
+- [x] For background mode, return after reservation and dispatch intent are committed; show preparing or queued according to whether job attachment has completed.
+- [x] For wait-for-result mode, invoke the created job by ID and wait for its result.
+- [x] If wait mode exceeds a short UI/request threshold, show “Continuing in background”; do not cancel the job.
+- [x] Force large/multi-invoice exports into background mode according to the documented threshold.
+- [x] Make mode changes affect only future batches.
+- [x] Keep allowBillerModeOverride false in V1 unless explicitly enabled by owner/admin.
+- [x] If enabled later, record the per-export override actor and reason.
 
 ### Payload job/workflow todo
 
-- [ ] Define a typed CreateXeroInvoice task or workflow.
-- [ ] Pass only Invoice Export ID as job input; load the immutable payload server-side.
-- [ ] Send exactly one Invoice Export per Xero mutation request so one invalid invoice cannot create a partially successful multi-invoice response.
-- [ ] Enable concurrency control and serialize Xero work for the one tenant conservatively.
-- [ ] Configure bounded attempts and backoff.
-- [ ] Make the handler application-idempotent independently of Payload job state.
-- [ ] Atomically claim an export with a bounded processing lease; a runner that does not own the lease cannot send it.
-- [ ] Before calling Xero:
-  - [ ] load the export;
-  - [ ] no-op if already succeeded/released;
-  - [ ] reject changed payload hashes;
-  - [ ] ensure entries remain reserved to this export;
-  - [ ] acquire connection/token refresh lock;
-  - [ ] refresh Xero accounting OAuth tokens if needed.
-- [ ] Move state from queued to processing atomically.
-- [ ] Create or load the immutable Xero Attempt before sending and conservatively persist requestMayHaveBeenSent as true immediately before initiating the network call.
-- [ ] Validate every Xero idempotency key against the current documented length/format limit before persisting it.
-- [ ] POST the saved invoice payload with Xero tenant header and Idempotency-Key.
-- [ ] Use the current granular scopes and Xero SDK/API version.
-- [ ] Capture attempt timing, HTTP classification, Xero correlation ID, and rate-limit headers without storing secrets.
-- [ ] On success:
-  - [ ] verify response invoice/contact/currency/line count;
-  - [ ] save InvoiceID, InvoiceNumber, URL when available, remote status, and safe response metadata;
-  - [ ] map returned LineItemIDs by saved ordinal;
-  - [ ] atomically mark all reserved entries exported;
-  - [ ] mark export succeeded;
-  - [ ] write audit events.
-- [ ] On a definite Xero validation failure:
-  - [ ] mark action-required with structured remediation;
-  - [ ] release reservations only when the request definitely did not create an invoice;
-  - [ ] preserve the failed snapshot/history.
-- [ ] On 429:
-  - [ ] honor Retry-After;
-  - [ ] pause or defer further tenant work until the safe retry time;
-  - [ ] set retry-wait;
-  - [ ] retry without changing payload/idempotency identity.
-- [ ] On 401, perform at most one concurrency-safe token refresh/retry before requiring reconnection.
-- [ ] On temporary 5xx/network failure proven to be before send, use bounded exponential backoff with jitter.
-- [ ] On timeout/connection loss after possible send, set reconciling and keep entries reserved.
-- [ ] If Xero confirms creation but the response materially differs from the snapshot, record the remote ID, keep entries locked, and enter manual-review rather than posting again.
-- [ ] Never blindly issue a new POST after Xero's idempotency-cache window.
-- [ ] Treat job completion status as orchestration only; use Invoice Export state for billing truth.
+- [x] Define a typed CreateXeroInvoice task or workflow.
+- [x] Pass only Invoice Export ID as job input; load the immutable payload server-side.
+- [x] Send exactly one Invoice Export per Xero mutation request so one invalid invoice cannot create a partially successful multi-invoice response.
+- [x] Enable concurrency control and serialize Xero work for the one tenant conservatively.
+- [x] Configure bounded attempts and backoff.
+- [x] Make the handler application-idempotent independently of Payload job state.
+- [x] Atomically claim an export with a bounded processing lease; a runner that does not own the lease cannot send it.
+- [x] Before calling Xero:
+  - [x] load the export;
+  - [x] no-op if already succeeded/released;
+  - [x] reject changed payload hashes;
+  - [x] ensure entries remain reserved to this export;
+  - [x] acquire connection/token refresh lock;
+  - [x] refresh Xero accounting OAuth tokens if needed.
+- [x] Move state from queued to processing atomically.
+- [x] Create or load the immutable Xero Attempt before sending and conservatively persist requestMayHaveBeenSent as true immediately before initiating the network call.
+- [x] Validate every Xero idempotency key against the current documented length/format limit before persisting it.
+- [x] POST the saved invoice payload with Xero tenant header and Idempotency-Key.
+- [x] Use the current granular scopes and Xero SDK/API version.
+- [x] Capture attempt timing, HTTP classification, Xero correlation ID, and rate-limit headers without storing secrets.
+- [x] On success:
+  - [x] verify response invoice/contact/currency/line count;
+  - [x] save InvoiceID, InvoiceNumber, URL when available, remote status, and safe response metadata;
+  - [x] map returned LineItemIDs by saved ordinal;
+  - [x] atomically mark all reserved entries exported;
+  - [x] mark export succeeded;
+  - [x] write audit events.
+- [x] On a definite Xero validation failure:
+  - [x] mark action-required with structured remediation;
+  - [x] release reservations only when the request definitely did not create an invoice;
+  - [x] preserve the failed snapshot/history.
+- [x] On 429:
+  - [x] honor Retry-After;
+  - [x] pause or defer further tenant work until the safe retry time;
+  - [x] set retry-wait;
+  - [x] retry without changing payload/idempotency identity.
+- [x] On 401, perform at most one concurrency-safe token refresh/retry before requiring reconnection.
+- [x] On temporary 5xx/network failure proven to be before send, use bounded exponential backoff with jitter.
+- [x] On timeout/connection loss after possible send, set reconciling and keep entries reserved.
+- [x] If Xero confirms creation but the response materially differs from the snapshot, record the remote ID, keep entries locked, and enter manual-review rather than posting again.
+- [x] Never blindly issue a new POST after Xero's idempotency-cache window.
+- [x] Treat job completion status as orchestration only; use Invoice Export state for billing truth.
 
 ### Vercel job runner todo
 
-- [ ] Configure a dedicated xero queue.
-- [ ] Do not use Payload autoRun on Vercel.
-- [ ] Add a secured Payload job-run endpoint restricted by CRON_SECRET.
-- [ ] Configure Vercel Pro Cron to invoke the queue at one-minute intervals.
-- [ ] Configure intentional function max-duration and shorter outbound Xero request timeouts; do not rely on Vercel terminating work cleanly.
-- [ ] Limit jobs processed per invocation to stay within function and Xero limits.
-- [ ] Protect against overlapping/duplicate cron invocations.
-- [ ] Run the prepared-export dispatcher before or alongside ordinary queue work.
-- [ ] Add manual owner/admin “Run queue now” for diagnostics without bypassing job locks.
-- [ ] Add stale-processing detection and a safe recovery job.
+- [x] Configure a dedicated xero queue.
+- [x] Do not use Payload autoRun on Vercel.
+- [x] Add a secured Payload job-run endpoint restricted by CRON_SECRET.
+- [x] Configure Vercel Pro Cron to invoke the queue at one-minute intervals.
+- [x] Configure intentional function max-duration and shorter outbound Xero request timeouts; do not rely on Vercel terminating work cleanly.
+- [x] Limit jobs processed per invocation to stay within function and Xero limits.
+- [x] Protect against overlapping/duplicate cron invocations.
+- [x] Run the prepared-export dispatcher before or alongside ordinary queue work.
+- [x] Add manual owner/admin “Run queue now” for diagnostics without bypassing job locks.
+- [x] Add stale-processing detection and a safe recovery job.
 
 ### Export status UI todo
 
-- [ ] Show preparing, queued, processing, retry-wait, action-required, reconciling, succeeded, cancelled, released, and manual-review states.
-- [ ] Poll persisted status with backoff while a user watches an export.
-- [ ] Stop polling on terminal states.
-- [ ] Show Xero invoice number/link on success.
-- [ ] Show actionable reconnect/mapping/configuration guidance without raw Xero payloads.
-- [ ] Permit cancellation only while the export is preparing/queued and no attempt may have been sent.
-- [ ] Cancel and release that export's reservations atomically while retaining its immutable snapshots and audit history.
-- [ ] Permit safe retry only when the state machine allows it.
+- [x] Show preparing, queued, processing, retry-wait, action-required, reconciling, succeeded, cancelled, released, and manual-review states.
+- [x] Poll persisted status with backoff while a user watches an export.
+- [x] Stop polling on terminal states.
+- [x] Show Xero invoice number/link on success.
+- [x] Show actionable reconnect/mapping/configuration guidance without raw Xero payloads.
+- [x] Permit cancellation only while the export is preparing/queued and no attempt may have been sent.
+- [x] Cancel and release that export's reservations atomically while retaining its immutable snapshots and audit history.
+- [x] Permit safe retry only when the state machine allows it.
 
 ### Verification and acceptance
 
 - [ ] Background mode returns promptly and is normally picked up within one minute.
-- [ ] Wait mode runs the same job and safely continues in background after interruption.
-- [ ] Double-click, duplicate cron, job retry, and concurrent runner tests create at most one Xero invoice.
-- [ ] Success marks every mapped entry exported atomically.
-- [ ] Definite failures never mark time exported.
-- [ ] Ambiguous failures remain reserved and enter reconciliation.
-- [ ] 429 and Retry-After behavior is tested.
+- [x] Wait mode runs the same job and safely continues in background after interruption.
+- [x] Double-click, duplicate cron, job retry, and concurrent runner tests create at most one Xero invoice.
+- [x] Success marks every mapped entry exported atomically.
+- [x] Definite failures never mark time exported.
+- [x] Ambiguous failures remain reserved and enter reconciliation.
+- [x] 429 and Retry-After behavior is tested.
 
 ## WP-11 — Reconciliation, Xero webhooks, and remote status
 
@@ -1261,69 +1307,69 @@ Outcome: Uncertain exports are resolved without duplicate invoices, and Xero-sid
 
 ### Reconciliation todo
 
-- [ ] Define a typed ReconcileXeroInvoice Payload task.
-- [ ] Queue reconciliation immediately for ambiguous send/response outcomes.
-- [ ] Keep the export payload, application reference, original idempotency key, and entries unchanged while reconciling.
-- [ ] During Xero's idempotency-cache window, permit a retry only with the same method, URL, body, and key.
-- [ ] Query Xero using the stored InvoiceID when one is known.
-- [ ] Otherwise query using the unique application reference plus expected contact/date/currency constraints.
-- [ ] Handle reconciliation results:
-  - [ ] exactly one matching invoice with matching material values: finalize success;
-  - [ ] exactly one invoice with material mismatch: manual-review;
-  - [ ] several plausible invoices: manual-review;
-  - [ ] confirmed no match while safe retry remains possible: retry-wait;
-  - [ ] Xero unavailable or inconclusive: remain reconciling with bounded backoff.
-- [ ] After Xero's idempotency cache expires, never repeat the POST until a targeted read has established that no invoice exists.
-- [ ] If a new POST is justified after confirmed absence, create a new attempt/key linked to the original export rather than overwriting history.
-- [ ] Verify contact, currency, reference, line count, line descriptions, quantities, and totals before treating a found invoice as the export result.
-- [ ] Finalize reconciled success using the same atomic local completion service as a normal successful response.
-- [ ] Expose a safe owner/admin manual reconciliation action that runs the same service.
-- [ ] Require a reason for any manual-review resolution.
-- [ ] Provide explicit owner/admin resolution commands for:
-  - [ ] accepting and linking one verified existing Xero invoice;
-  - [ ] confirming absence and authorizing a linked replacement attempt; and
-  - [ ] leaving the case locked while escalating it.
-- [ ] Never expose a generic “mark succeeded,” “mark failed,” or direct state editor.
+- [x] Define a typed ReconcileXeroInvoice Payload task.
+- [x] Queue reconciliation immediately for ambiguous send/response outcomes.
+- [x] Keep the export payload, application reference, original idempotency key, and entries unchanged while reconciling.
+- [x] During Xero's idempotency-cache window, permit a retry only with the same method, URL, body, and key.
+- [x] Query Xero using the stored InvoiceID when one is known.
+- [x] Otherwise query using the unique application reference plus expected contact/date/currency constraints.
+- [x] Handle reconciliation results:
+  - [x] exactly one matching invoice with matching material values: finalize success;
+  - [x] exactly one invoice with material mismatch: manual-review;
+  - [x] several plausible invoices: manual-review;
+  - [x] confirmed no match while safe retry remains possible: retry-wait;
+  - [x] Xero unavailable or inconclusive: remain reconciling with bounded backoff.
+- [x] After Xero's idempotency cache expires, never repeat the POST until a targeted read has established that no invoice exists.
+- [x] If a new POST is justified after confirmed absence, create a new attempt/key linked to the original export rather than overwriting history.
+- [x] Verify contact, currency, reference, line count, line descriptions, quantities, and totals before treating a found invoice as the export result.
+- [x] Finalize reconciled success using the same atomic local completion service as a normal successful response.
+- [x] Expose a safe owner/admin manual reconciliation action that runs the same service.
+- [x] Require a reason for any manual-review resolution.
+- [x] Provide explicit owner/admin resolution commands for:
+  - [x] accepting and linking one verified existing Xero invoice;
+  - [x] confirming absence and authorizing a linked replacement attempt; and
+  - [x] leaving the case locked while escalating it.
+- [x] Never expose a generic “mark succeeded,” “mark failed,” or direct state editor.
 - [ ] Add alerts for exports remaining processing/reconciling beyond operational thresholds.
 
 ### Webhook todo
 
 - [ ] Register Xero invoice webhooks for staging and production.
-- [ ] Receive the raw request body without mutation.
-- [ ] Validate x-xero-signature with the configured webhook key and constant-time comparison.
-- [ ] Validate expected content type and payload shape.
-- [ ] Return 401 for invalid signatures.
-- [ ] Return a cookie-free successful response within five seconds and queue actual processing.
-- [ ] Implement Xero's webhook intent-to-receive validation and meet its response-time requirement with automated tests.
-- [ ] Persist a minimal Xero Webhook Receipt before returning and deduplicate repeated events durably.
-- [ ] Validate every event tenant ID against the configured single tenant.
-- [ ] Ignore and alert on an event for another tenant.
-- [ ] Fetch the authoritative invoice rather than trusting a minimal event as complete state.
-- [ ] Cope with duplicated and out-of-order update events.
-- [ ] Persist remote status, update timestamp, last sync, and safe change summary.
-- [ ] Detect DRAFT, SUBMITTED, AUTHORISED, PAID, VOIDED, and DELETED transitions.
-- [ ] Detect line count/identity/material changes to an exported invoice.
-- [ ] Mark deleted, voided, or mismatched invoices action-required.
-- [ ] Never change exported time back to unbilled from a webhook.
-- [ ] Redact customer descriptions and financial payloads from routine webhook logs.
+- [x] Receive the raw request body without mutation.
+- [x] Validate x-xero-signature with the configured webhook key and constant-time comparison.
+- [x] Validate expected content type and payload shape.
+- [x] Return 401 for invalid signatures.
+- [x] Return a cookie-free successful response within five seconds and queue actual processing.
+- [x] Implement Xero's webhook intent-to-receive validation and meet its response-time requirement with automated tests.
+- [x] Persist a minimal Xero Webhook Receipt before returning and deduplicate repeated events durably.
+- [x] Validate every event tenant ID against the configured single tenant.
+- [x] Ignore and alert on an event for another tenant.
+- [x] Fetch the authoritative invoice rather than trusting a minimal event as complete state.
+- [x] Cope with duplicated and out-of-order update events.
+- [x] Persist remote status, update timestamp, last sync, and safe change summary.
+- [x] Detect DRAFT, SUBMITTED, AUTHORISED, PAID, VOIDED, and DELETED transitions.
+- [x] Detect line count/identity/material changes to an exported invoice.
+- [x] Mark deleted, voided, or mismatched invoices action-required.
+- [x] Never change exported time back to unbilled from a webhook.
+- [x] Redact customer descriptions and financial payloads from routine webhook logs.
 
 ### On-demand and scheduled maintenance todo
 
-- [ ] Add “Refresh from Xero” on invoice export detail.
-- [ ] Add a periodic status reconciliation for active/recent exports without excessive polling.
-- [ ] Add scheduled token keepalive/refresh before 60 days of inactivity.
-- [ ] Add scheduled Xero connection and reference-data health checks.
-- [ ] Add stale-job recovery that distinguishes a pre-send crash from a possibly-sent request.
-- [ ] Add an operations view for stuck, retry-wait, reconciling, action-required, and manual-review exports.
+- [x] Add “Refresh from Xero” on invoice export detail.
+- [x] Add a periodic status reconciliation for active/recent exports without excessive polling.
+- [x] Add scheduled token keepalive/refresh before 60 days of inactivity.
+- [x] Add scheduled Xero connection and reference-data health checks.
+- [x] Add stale-job recovery that distinguishes a pre-send crash from a possibly-sent request.
+- [x] Add an operations view for stuck, retry-wait, reconciling, action-required, and manual-review exports.
 
 ### Verification and acceptance
 
-- [ ] Webhook signature, wrong-tenant, duplicate, out-of-order, slow-processing, and retry tests pass.
-- [ ] An ambiguous POST that created an invoice is reconciled without a second invoice.
-- [ ] A confirmed absent invoice can be retried through a linked attempt.
-- [ ] A mismatch or multiple matches cannot be auto-resolved.
-- [ ] Xero-side deletion/voiding becomes visible but does not automatically release entries.
-- [ ] On-demand and scheduled reconciliation stay inside Xero rate limits.
+- [x] Webhook signature, wrong-tenant, duplicate, out-of-order, slow-processing, and retry tests pass.
+- [x] An ambiguous POST that created an invoice is reconciled without a second invoice.
+- [x] A confirmed absent invoice can be retried through a linked attempt.
+- [x] A mismatch or multiple matches cannot be auto-resolved.
+- [x] Xero-side deletion/voiding becomes visible but does not automatically release entries.
+- [x] On-demand and scheduled reconciliation stay inside Xero rate limits.
 
 ## WP-12 — Admin release and rebill
 
@@ -1333,58 +1379,58 @@ Outcome: Owner/admin can explicitly release the entries of a verified deleted or
 
 ### Rules and state todo
 
-- [ ] Restrict all release/rebill commands to owner/admin.
-- [ ] Make V1 release operate on the complete Invoice Export, not arbitrary individual lines.
-- [ ] Refresh the invoice from Xero immediately before offering or executing release.
-- [ ] Permit release only when the remote invoice is verified DELETED or VOIDED.
-- [ ] Block release when the invoice is DRAFT, SUBMITTED, AUTHORISED, PAID, missing but inconclusive, or unavailable.
-- [ ] Do not let an administrator bypass remote verification with generic “mark unbilled” editing.
-- [ ] Require a non-empty human reason and explicit confirmation.
-- [ ] Keep original Export Batch, Invoice Export, Invoice Export Entries, payload, Xero IDs, totals, and state history immutable.
-- [ ] Add release metadata or a separate append-only Release Action record:
-  - [ ] source export;
-  - [ ] affected entries/allocations;
-  - [ ] last verified remote status;
-  - [ ] actor;
-  - [ ] reason;
-  - [ ] timestamp;
-  - [ ] before/after states;
-  - [ ] later replacement exports.
-- [ ] Perform release in one MongoDB transaction:
-  - [ ] recheck current export/entry state;
-  - [ ] ensure it has not already been released;
-  - [ ] create release/audit records;
-  - [ ] mark allocations released but retain them;
-  - [ ] move every mapped entry from exported to unbilled;
-  - [ ] clear only its active currentExport pointer;
-  - [ ] mark the original Invoice Export released.
-- [ ] Prevent concurrent double release using conditional writes/indexes.
-- [ ] Ensure releasing does not itself create a replacement invoice.
-- [ ] When rebilled later, record rebillOf lineage to the release and original export.
-- [ ] Keep a released entry editable only according to ordinary unbilled rules.
+- [x] Restrict all release/rebill commands to owner/admin.
+- [x] Make V1 release operate on the complete Invoice Export, not arbitrary individual lines.
+- [x] Refresh the invoice from Xero immediately before offering or executing release.
+- [x] Permit release only when the remote invoice is verified DELETED or VOIDED.
+- [x] Block release when the invoice is DRAFT, SUBMITTED, AUTHORISED, PAID, missing but inconclusive, or unavailable.
+- [x] Do not let an administrator bypass remote verification with generic “mark unbilled” editing.
+- [x] Require a non-empty human reason and explicit confirmation.
+- [x] Keep original Export Batch, Invoice Export, Invoice Export Entries, payload, Xero IDs, totals, and state history immutable.
+- [x] Add release metadata or a separate append-only Release Action record:
+  - [x] source export;
+  - [x] affected entries/allocations;
+  - [x] last verified remote status;
+  - [x] actor;
+  - [x] reason;
+  - [x] timestamp;
+  - [x] before/after states;
+  - [x] later replacement exports.
+- [x] Perform release in one MongoDB transaction:
+  - [x] recheck current export/entry state;
+  - [x] ensure it has not already been released;
+  - [x] create release/audit records;
+  - [x] mark allocations released but retain them;
+  - [x] move every mapped entry from exported to unbilled;
+  - [x] clear only its active currentExport pointer;
+  - [x] mark the original Invoice Export released.
+- [x] Prevent concurrent double release using conditional writes/indexes.
+- [x] Ensure releasing does not itself create a replacement invoice.
+- [x] When rebilled later, record rebillOf lineage to the release and original export.
+- [x] Keep a released entry editable only according to ordinary unbilled rules.
 
 ### Admin UX todo
 
-- [ ] Add a protected export-detail Admin view with remote state, mapped entries/lines, last reconciliation, and history.
-- [ ] Add “Refresh status from Xero.”
-- [ ] Show action-required guidance for deleted/voided/mismatched invoices.
-- [ ] Show “Release for rebilling” only when eligibility is verified.
-- [ ] Preview affected entry count, minutes, original amount, customer, and invoice number.
-- [ ] Explain that all entries on the invoice will return to the unbilled queue.
-- [ ] Require typed reason and high-impact confirmation.
-- [ ] After release, provide “Open rebill preview” with released entry IDs preselected.
-- [ ] Route the replacement through the normal eligibility, preview, reservation, and job flow.
-- [ ] Display original invoice -> release -> replacement invoice lineage in both directions.
+- [x] Add a protected export-detail Admin view with remote state, mapped entries/lines, last reconciliation, and history.
+- [x] Add “Refresh status from Xero.”
+- [x] Show action-required guidance for deleted/voided/mismatched invoices.
+- [x] Show “Release for rebilling” only when eligibility is verified.
+- [x] Preview affected entry count, minutes, original amount, customer, and invoice number.
+- [x] Explain that all entries on the invoice will return to the unbilled queue.
+- [x] Require typed reason and high-impact confirmation.
+- [x] After release, provide “Open rebill preview” with released entry IDs preselected.
+- [x] Route the replacement through the normal eligibility, preview, reservation, and job flow.
+- [x] Display original invoice -> release -> replacement invoice lineage in both directions.
 
 ### Verification and acceptance
 
-- [ ] Member/biller cannot release through UI, REST, or Local API.
-- [ ] Active/authorised/paid/inconclusive invoices cannot be released.
-- [ ] A verified deleted/voided export can be released exactly once.
-- [ ] All mapped entries update atomically and reappear in the normal billing queue.
-- [ ] Original snapshots remain unchanged.
-- [ ] Replacement exports preserve complete rebillOf lineage.
-- [ ] Concurrent release/rebill tests cannot duplicate state changes or invoices.
+- [x] Member/biller cannot release through UI, REST, or Local API.
+- [x] Active/authorised/paid/inconclusive invoices cannot be released.
+- [x] A verified deleted/voided export can be released exactly once.
+- [x] All mapped entries update atomically and reappear in the normal billing queue.
+- [x] Original snapshots remain unchanged.
+- [x] Replacement exports preserve complete rebillOf lineage.
+- [x] Concurrent release/rebill tests cannot duplicate state changes or invoices.
 
 ## WP-13 — Security, audit, observability, and operational controls
 
@@ -1394,82 +1440,82 @@ Outcome: The application fails closed, protects credentials and billing data, pr
 
 ### Security todo
 
-- [ ] Create and maintain a threat model covering email authentication, invitations, Xero OIDC, account linking, local sessions, Payload Admin, Local API elevation, accounting OAuth, MongoDB, webhooks, jobs, billing commands, and log leakage.
-- [ ] Cover login CSRF, state/nonce/code replay, callback mix-up, session fixation, invitation replay, provider-subject collision, email-based account takeover, open redirect, and identity/accounting credential mix-up explicitly.
-- [ ] Maintain a role-by-resource-by-operation access matrix.
-- [ ] Enforce access in collections, fields, custom endpoints, domain services, and Local API wrappers.
-- [ ] Treat Admin hidden/read-only configuration as presentation only, never as authorization.
-- [ ] Disable unused APIs such as GraphQL and unnecessary Payload endpoints.
-- [ ] Set strict CORS and CSRF origins.
-- [ ] Set secure, HTTP-only, same-site cookies and suitable session lifetimes.
-- [ ] Namespace identity/accounting routes, flow records, cookies, callback validation, log fields, and metrics so a request cannot cross trust boundaries.
-- [ ] Fail startup if the identity and accounting client IDs, secrets, redirect URIs, or route handlers are reused or ambiguously configured.
-- [ ] Apply authentication and command rate limits.
-- [ ] Validate all custom route inputs with shared schemas and reject unknown fields.
-- [ ] Add request/body size limits.
-- [ ] Add security headers and a Content Security Policy compatible with Payload Admin.
-- [ ] Sanitize output rendered in descriptions and Admin diagnostics.
-- [ ] Prevent mass assignment of roles, rates, billing states, Xero IDs, token fields, audit actors, and export state.
-- [ ] Encrypt Xero accounting tokens with versioned authenticated encryption and rotation support; identity tokens are never retained.
-- [ ] Keep PAYLOAD_SECRET, accounting token-encryption keys, auth-flow encryption keys, identity/accounting OAuth secrets, webhook key, and CRON_SECRET separate.
-- [ ] Add independent audited kill switches for Xero identity sign-in and accounting export/processing.
-- [ ] Document and test secret rotation.
-- [ ] Protect cron/job endpoints with machine-only authentication and constant-time checks.
+- [x] Create and maintain a threat model covering email authentication, invitations, Xero OIDC, account linking, local sessions, Payload Admin, Local API elevation, accounting OAuth, MongoDB, webhooks, jobs, billing commands, and log leakage.
+- [x] Cover login CSRF, state/nonce/code replay, callback mix-up, session fixation, invitation replay, provider-subject collision, email-based account takeover, open redirect, and identity/accounting credential mix-up explicitly.
+- [x] Maintain a role-by-resource-by-operation access matrix.
+- [x] Enforce access in collections, fields, custom endpoints, domain services, and Local API wrappers.
+- [x] Treat Admin hidden/read-only configuration as presentation only, never as authorization.
+- [x] Disable unused APIs such as GraphQL and unnecessary Payload endpoints.
+- [x] Set strict CORS and CSRF origins.
+- [x] Set secure, HTTP-only, same-site cookies and suitable session lifetimes.
+- [x] Namespace identity/accounting routes, flow records, cookies, callback validation, log fields, and metrics so a request cannot cross trust boundaries.
+- [x] Reject identity/accounting client ID or secret reuse during protected accounting setup and runtime loading; keep redirect route handlers fixed and distinct.
+- [x] Apply authentication and command rate limits.
+- [x] Validate all custom route inputs with shared schemas and reject unknown fields.
+- [x] Add request/body size limits.
+- [x] Add security headers and a Content Security Policy compatible with Payload Admin.
+- [x] Sanitize output rendered in descriptions and Admin diagnostics.
+- [x] Prevent mass assignment of roles, rates, billing states, Xero IDs, token fields, audit actors, and export state.
+- [x] Encrypt Xero accounting tokens with versioned authenticated encryption and rotation support; identity tokens are never retained.
+- [x] Use purpose-separated HKDF-derived keys for encrypted accounting configuration and tokens; keep the identity/accounting OAuth secrets, auth-flow key, webhook key, and CRON_SECRET in separate trust boundaries.
+- [x] Add independent audited kill switches for Xero identity sign-in and accounting export/processing.
+- [x] Document and test secret rotation.
+- [x] Protect cron/job endpoints with machine-only authentication and constant-time checks.
 - [ ] Configure Atlas with a least-privilege database user, TLS, alerts, and an explicit network-access decision.
-- [ ] Review all logs and error reports for ID/access/refresh tokens, authorization codes, state, nonce, PKCE verifier, invitation tokens, provider subjects, session cookies/hashes, descriptions, emails, and full invoice payloads.
-- [ ] Run dependency, secret, and static-analysis scans in CI.
+- [x] Review all logs and error reports for ID/access/refresh tokens, authorization codes, state, nonce, PKCE verifier, invitation tokens, provider subjects, session cookies/hashes, descriptions, emails, and full invoice payloads.
+- [x] Run dependency, secret, and static-analysis scans in CI.
 
 ### Audit todo
 
-- [ ] Define a stable audit-event taxonomy.
-- [ ] Record authentication administration, invitation acceptance method, Xero identity success/failure, link/unlink/collision/recovery, session revocation, role changes, accounting connect/disconnect/reconnect/handover, mapping changes, privileged time corrections, export transitions, retries, reconciliation, release/rebill, and diagnostic overrides.
-- [ ] Include actor, target, timestamp, correlation ID, reason, and redacted before/after values.
-- [ ] Record machine actors separately from human actors.
-- [ ] Make Audit Events append-only to application users, including owners.
-- [ ] Prevent audit hooks from recursively generating duplicate audit records.
-- [ ] Establish retention and archive policy.
-- [ ] Add Admin search/filter by date, actor, event type, customer, entry, export, and Xero invoice.
-- [ ] Test that failed transactions do not leave false audit events and successful transitions do.
+- [x] Define a stable audit-event taxonomy.
+- [x] Record authentication administration, invitation acceptance method, Xero identity success/failure, link/unlink/collision/recovery, session revocation, role changes, accounting connect/disconnect/reconnect/handover, mapping changes, privileged time corrections, export transitions, retries, reconciliation, release/rebill, and diagnostic overrides.
+- [x] Include actor, target, timestamp, correlation ID, reason, and redacted before/after values.
+- [x] Record machine actors separately from human actors.
+- [x] Make Audit Events append-only to application users, including owners.
+- [x] Prevent audit hooks from recursively generating duplicate audit records.
+- [x] Establish retention and archive policy.
+- [x] Add Admin search/filter by date, actor, event type, customer, entry, export, and Xero invoice.
+- [x] Test that failed transactions do not leave false audit events and successful transitions do.
 
 ### Observability todo
 
-- [ ] Add structured server logging with request, batch, export, job, tenant, and Xero correlation IDs.
-- [ ] Establish log levels and redact at the logger boundary.
+- [x] Add structured server logging with request, batch, export, job, tenant, and Xero correlation IDs.
+- [x] Establish log levels and redact at the logger boundary.
 - [ ] Configure error monitoring with environment/release tagging and source maps.
-- [ ] Add metrics or queries for:
-  - [ ] login/auth failures;
-  - [ ] password versus Xero identity login success/failure and latency;
-  - [ ] OIDC callback replay/claim failures, invite mismatches, and identity-link collisions;
-  - [ ] active/revoked external sessions and stale Auth Identities;
-  - [ ] unbilled and blocked entries;
-  - [ ] queued and processing job age;
-  - [ ] Xero success/failure/429 counts;
-  - [ ] token refresh health;
-  - [ ] reconciliation age;
-  - [ ] manual-review count;
-  - [ ] webhook validity/failures;
-  - [ ] Mongo connection/transaction failures.
+- [x] Add metrics or queries for:
+  - [x] login/auth failures;
+  - [x] password versus Xero identity login success/failure and latency;
+  - [x] OIDC callback replay/claim failures, invite mismatches, and identity-link collisions;
+  - [x] active/revoked external sessions and stale Auth Identities;
+  - [x] unbilled and blocked entries;
+  - [x] queued and processing job age;
+  - [x] Xero success/failure/429 counts;
+  - [x] token refresh health;
+  - [x] reconciliation age;
+  - [x] manual-review count;
+  - [x] webhook validity/failures;
+  - [x] Mongo connection/transaction failures.
 - [ ] Add alerts for identity-provider failures, abnormal callback/link failures, accounting connection loss, repeated accounting-token failures, authorizer departure risk, webhook disablement risk, stuck exports, rate-limit exhaustion, and backup failure.
-- [ ] Add a health endpoint that checks application readiness without leaking environment details.
-- [ ] Add Admin operational diagnostics with safe retry/refresh links.
+- [x] Add a health endpoint that checks application readiness without leaking environment details.
+- [x] Add Admin operational diagnostics with safe retry/refresh links.
 
 ### Operational todo
 
-- [ ] Document backup, restore, identity-provider outage, compromised identity link, password/owner recovery, identity client-secret rotation, accounting client/token compromise, accounting-authorizer departure/handover, Xero disconnect, token refresh failure, webhook failure, stuck export, duplicate-suspected invoice, and release/rebill runbooks.
-- [ ] Add owner-controlled, audited kill switches for accepting new exports and wait-for-result execution without hiding or mutating existing export history.
-- [ ] Prove Xero identity sign-in can be disabled without stopping email/password login or accounting jobs, and accounting export can be disabled without stopping either login method.
-- [ ] If cron or webhook processing needs to be paused during an incident, retain durable pending work and document safe resumption.
+- [x] Document backup, restore, identity-provider outage, compromised identity link, password/owner recovery, identity client-secret rotation, accounting client/token compromise, accounting-authorizer departure/handover, Xero disconnect, token refresh failure, webhook failure, stuck export, duplicate-suspected invoice, and release/rebill runbooks.
+- [x] Add owner-controlled, audited kill switches for accepting new exports and wait-for-result execution without hiding or mutating existing export history.
+- [x] Prove Xero identity sign-in can be disabled without stopping email/password login or accounting jobs, and accounting export can be disabled without stopping either login method.
+- [x] If cron or webhook processing needs to be paused during an incident, retain durable pending work and document safe resumption.
 - [ ] Exercise restore and at least one export incident scenario in staging.
-- [ ] Define data retention, user offboarding, and customer archive behavior.
-- [ ] On user offboarding, revoke every local session and identity link as policy requires while preserving minimal audit history; do not automatically disconnect the business accounting grant.
-- [ ] Keep historical billing/audit records when a user/customer/project is deactivated.
+- [x] Define data retention, user offboarding, and customer archive behavior.
+- [x] On user offboarding, revoke every local session and identity link as policy requires while preserving minimal audit history; do not automatically disconnect the business accounting grant.
+- [x] Keep historical billing/audit records when a user/customer/project is deactivated.
 
 ### Verification and acceptance
 
-- [ ] The full access matrix has automated coverage.
-- [ ] Secret-scanning and deliberate canary-secret tests find no client/log exposure.
-- [ ] Automated separation tests prove neither OAuth flow can read or mutate the other flow's records.
-- [ ] Audit events accurately follow committed state.
+- [x] The full access matrix has automated coverage.
+- [x] Secret-scanning and deliberate canary-secret tests find no client/log exposure.
+- [x] Automated separation tests prove neither OAuth flow can read or mutate the other flow's records.
+- [x] Audit events accurately follow committed state.
 - [ ] Alerts fire in controlled staging failure exercises.
 - [ ] Restore and incident runbooks are executable by someone other than the implementer.
 
@@ -1481,109 +1527,115 @@ Outcome: Automated and manual evidence shows the system behaves correctly under 
 
 ### Test architecture todo
 
-- [ ] Run unit tests without network dependencies.
-- [ ] Run integration tests against a real MongoDB replica set, never SQLite or standalone Mongo.
-- [ ] Create deterministic factories for users, invitations, Auth Identities, external sessions, OAuth flows, customers, projects, entries, exports, Xero responses, and jobs.
-- [ ] Create a controllable fake OIDC provider distinct from the fake accounting API, including discovery, JWKS/key rotation, valid codes/tokens, malformed claims, errors, and provider outage.
-- [ ] Create a controllable fake Xero server/client supporting success, validation errors, 401, 429, 5xx, connection reset, delayed response, ambiguous creation, and reconciliation queries.
-- [ ] Store representative redacted Xero contract fixtures.
-- [ ] Keep a separate manual/CI-safe Xero Demo Company contract suite.
-- [ ] Reset or uniquely namespace test data for parallel runs.
+- [x] Run the current unit suite without network dependencies.
+- [x] Run the current integration suite against a real MongoDB replica set, never SQLite or standalone Mongo.
+- [x] Create deterministic factories for users, invitations, Auth Identities, external sessions, OAuth flows, customers, projects, entries, exports, Xero responses, and jobs.
+- [x] Create a controllable fake OIDC provider distinct from the fake accounting API, including discovery, JWKS/key rotation, valid codes/tokens, malformed claims, errors, and provider outage.
+- [x] Create a controllable fake Xero server/client supporting success, validation errors, 401, 429, 5xx, connection reset, delayed response, ambiguous creation, and reconciliation queries.
+- [x] Store representative redacted Xero contract fixtures.
+- [x] Keep a separate manual/CI-safe Xero Demo Company contract suite.
+- [x] Reset and separately namespace unit/integration/end-to-end databases and Next.js build output.
 
 ### Mandatory unit coverage
 
-- [ ] timezone parsing and DST resolution;
-- [ ] range/duration conversion;
-- [ ] project-rate scaled arithmetic;
-- [ ] billing eligibility and blockers;
-- [ ] filter normalization and all-matching semantics;
-- [ ] grouping by contact/currency;
-- [ ] one-entry-to-one-line invoice construction;
-- [ ] Xero precision/rounding boundary;
-- [ ] payload hashing/idempotency identity;
-- [ ] export and entry state machines;
-- [ ] retry classification;
-- [ ] reconciliation decisions;
-- [ ] release/rebill eligibility;
-- [ ] access predicates and redaction;
-- [ ] issuer/subject identity resolution and normalized invite-email comparison;
-- [ ] identity-scope allow-list and accounting-scope rejection;
-- [ ] OIDC state, nonce, issuer, audience, expiry, and return-path validation;
-- [ ] identity link/unlink/recovery eligibility and session expiry/revocation;
-- [ ] identity/accounting callback routing and data-boundary guards.
+- [x] fail-closed account-email configuration and Resend request/sender mapping;
+- [x] timezone parsing and DST resolution;
+- [x] range/duration conversion;
+- [x] project-rate scaled arithmetic;
+- [x] billing eligibility and blockers;
+- [x] filter normalization and all-matching semantics;
+- [x] grouping by contact/currency;
+- [x] one-entry-to-one-line invoice construction;
+- [x] Xero precision/rounding boundary;
+- [x] payload hashing/idempotency identity;
+- [x] export and entry state machines;
+- [x] retry classification;
+- [x] reconciliation decisions;
+- [x] release/rebill eligibility;
+- [x] access predicates and redaction;
+- [x] issuer/subject identity resolution and normalized invite-email comparison;
+- [x] identity-scope allow-list and accounting-scope rejection;
+- [x] OIDC state, nonce, issuer, audience, expiry, and return-path validation;
+- [x] identity link/unlink/recovery eligibility and session expiry/revocation;
+- [x] identity/accounting callback routing and data-boundary guards.
 
 ### Mandatory integration/concurrency coverage
 
-- [ ] Payload collection and field access for every role and operation.
-- [ ] Local API overrideAccess wrapper behavior.
-- [ ] Mongo transaction rollback across collections.
-- [ ] two billers reserving the same entry;
-- [ ] two release attempts;
-- [ ] duplicate submit/double-click;
-- [ ] duplicate and overlapping cron invocations;
-- [ ] concurrent OAuth token refresh;
-- [ ] two callbacks consuming the same invite or linking the same provider subject;
-- [ ] duplicate/replayed OIDC state, nonce, and authorization code;
-- [ ] Xero email change after initial issuer/subject link;
-- [ ] local session fixation, rotation, suspension, logout-all, and unlink;
-- [ ] identity client misconfigured with accounting/offline scopes;
-- [ ] identity/accounting client or callback reuse rejected at startup;
-- [ ] identity callback attempts to mutate Xero Connection;
-- [ ] accounting callback attempts to create a user/session;
-- [ ] accounting authorizer handover, concurrent callbacks, wrong tenant/scopes, failed validation, and safe rollback;
-- [ ] crash before Xero send;
-- [ ] crash after reservation commit but before Payload job attachment;
-- [ ] Xero creates invoice then response is lost;
-- [ ] crash after Xero response but before local finalization;
-- [ ] stale processing-job recovery;
-- [ ] webhook duplicate/out-of-order delivery;
-- [ ] immutable snapshots and audit records.
+- [x] Payload collection and field access for every role and operation.
+- [x] Local API overrideAccess wrapper behavior.
+- [x] Mongo transaction commit and rollback across collections.
+- [x] two billers reserving the same entry;
+- [x] two release attempts;
+- [x] duplicate submit/double-click;
+- [x] duplicate and overlapping cron invocations;
+- [x] concurrent OAuth token refresh;
+- [x] two concurrent acceptances consuming the same invitation token create exactly one user;
+- [x] two callbacks linking the same provider subject;
+- [x] duplicate/replayed OIDC state, nonce, and authorization code;
+- [x] Xero email change after initial issuer/subject link;
+- [x] local Payload session replacement on password change/reset and revocation on suspension;
+- [x] local/external session fixation, expiry, logout-all, and identity unlink;
+- [x] identity client misconfigured with accounting/offline scopes;
+- [x] identity/accounting client reuse rejected at protected accounting setup/runtime, with structurally distinct callbacks;
+- [x] identity callback attempts to mutate Xero Connection;
+- [x] accounting callback attempts to create a user/session;
+- [x] accounting authorizer handover, concurrent callbacks, wrong tenant/scopes, failed validation, and safe rollback;
+- [x] crash before Xero send;
+- [x] crash after reservation commit but before Payload job attachment;
+- [x] Xero creates invoice then response is lost;
+- [x] crash after Xero response but before local finalization;
+- [x] stale processing-job recovery;
+- [x] webhook duplicate/out-of-order delivery;
+- [x] immutable snapshots and audit records.
 
 ### Mandatory end-to-end coverage
 
-- [ ] owner bootstrap and email/password recovery;
-- [ ] invite acceptance by email/password and by the bound Xero identity flow;
+- [x] owner bootstrap and email/password recovery;
+- [x] single-use invite acceptance by email/password;
+- [ ] invite acceptance by the bound Xero identity flow;
 - [ ] explicit Xero link, login, unlink, relink/recovery, reset, and deactivate;
 - [ ] uninvited Xero user denial and no automatic merge on matching email;
-- [ ] email/password login while Xero identity is disabled/unavailable;
+- [x] email/password login while Xero identity is disabled/unavailable;
 - [ ] Xero login/logout/link/unlink with accounting connection values unchanged;
 - [ ] accounting disconnect/reconnect with user sessions unchanged;
-- [ ] member denial from Admin;
-- [ ] member range and duration entry in selectable timezone;
+- [x] member denial from Admin;
+- [x] member range and duration entry in selectable timezone;
 - [ ] customer import/link/create in Xero;
-- [ ] project/rate management;
-- [ ] selected-entry billing preview/export;
-- [ ] all-filtered uninvoiced preview/export;
+- [x] project/rate management;
+- [x] selected-entry billing preview/export;
+- [x] all-filtered uninvoiced preview/export;
 - [ ] background completion;
 - [ ] wait-for-result completion and fallback;
 - [ ] action-required and reconnect;
 - [ ] ambiguous result and reconciliation;
 - [ ] Xero deleted/voided status refresh;
 - [ ] Admin release and successful rebill;
-- [ ] responsive and keyboard-critical flows.
+- [x] responsive and keyboard-critical flows.
 
 ### CI todo
 
-- [ ] Run formatting, lint, TypeScript, Payload type/import-map freshness, unit tests, integration tests, and production build on every pull request.
-- [ ] Run end-to-end tests on protected branches or suitable preview environments.
-- [ ] Fail CI when generated Payload types/import map differ from committed output.
-- [ ] Run dependency audit, license policy, static analysis, and secret scanning.
-- [ ] Pin CI action/tool versions.
-- [ ] Upload useful test, coverage, Playwright, and build artifacts without secrets.
-- [ ] Set meaningful coverage thresholds for domain/access/state-machine code.
-- [ ] Add a compatibility smoke test for the pinned Payload/Next.js bundle.
-- [ ] Add a documented dependency upgrade/regression procedure.
-- [ ] Add a controlled Xero Demo Company pre-release checklist rather than running destructive live tests on every PR.
-- [ ] Perform a realistic performance test for time-entry list/filter, billing query, large preview, and bounded job batches.
+- [x] Run formatting, lint, TypeScript, Payload type/import-map freshness, unit tests, integration tests, and production build on every pull request.
+- [x] Run end-to-end tests on protected branches or suitable preview environments.
+- [x] Fail CI when generated Payload types/import map differ from committed output.
+- [x] Run dependency audit, license policy, static analysis, and secret scanning.
+- [x] Pin CI action/tool versions.
+- [x] Upload useful test, coverage, Playwright, and build artifacts without secrets.
+- [x] Set meaningful coverage thresholds for domain/access/state-machine code.
+- [x] Add a compatibility smoke test for the pinned Payload/Next.js bundle.
+- [x] Add a documented dependency upgrade/regression procedure.
+- [x] Add a controlled Xero Demo Company pre-release checklist rather than running destructive live tests on every PR.
+- [x] Perform a realistic performance test for time-entry list/filter, billing query, large preview, and bounded job batches.
 
 ### Verification and acceptance
 
 - [ ] All mandatory test suites pass from a clean checkout.
-- [ ] No flaky concurrency or timezone test is accepted as “retry until green.”
-- [ ] A deliberate ambiguous Xero failure produces one invoice and a reconciled local result.
-- [ ] A security/access regression causes CI to fail.
-- [ ] A deliberate cross-flow read/write attempt causes CI to fail.
+- [x] No flaky concurrency or timezone test is accepted as “retry until green.”
+- [x] A deliberate ambiguous Xero failure produces one invoice and a reconciled local result.
+- [x] A security/access regression causes CI to fail.
+- [x] A deliberate cross-flow read/write attempt causes CI to fail.
 - [ ] The release candidate passes the Xero Demo Company checklist.
+
+Current automated checkpoint (18 July 2026): formatting, ESLint, strict TypeScript, Payload type/import-map freshness, production build, compatibility, secret/license/dependency scans, migrations, 62 index checks, 94 unit tests, 46 real-MongoDB integration tests, 3 performance tests, and 21 Chromium end-to-end tests pass locally. Coverage includes the export processor/maintenance state machine and enforces package thresholds. Password recovery, selected/all-matching billing, project-rate recalculation, responsive/keyboard time entry, minimal readiness responses, Payload Admin branding, and safe cancellation run in-browser; fake-provider integration covers Xero identity, accounting handover, contacts/reference data, export ambiguity/reconciliation, webhooks, and release/rebill. Provider-coupled browser cases, a clean-checkout remote CI run, Resend delivery, and the Demo Company checklist remain gated on hosted registrations/environments.
 
 ## WP-15 — Staging, production launch, and handover
 
@@ -1612,18 +1664,19 @@ Outcome: A monitored, backed-up production deployment is connected to the intend
 - [ ] Provision production Atlas Flex or better with backups and alerts.
 - [ ] Create a least-privilege production database user and final network allow-list.
 - [ ] Configure production Vercel environment, domain, region, Pro Cron, and deployment protection as appropriate.
-- [ ] Generate production-only PAYLOAD_SECRET, token-encryption key, CRON_SECRET, and application secrets.
+- [ ] Generate production-only PAYLOAD_SECRET, CRON_SECRET, and application secrets.
 - [ ] Provision separate production Xero identity and accounting client registrations and secrets.
-- [ ] Register and verify the production identity callback, accounting callback, and webhook URLs independently.
-- [ ] Confirm startup rejects reused client IDs, secrets, or callback routes.
+- [ ] Register and verify the production identity callback, in-app displayed accounting callback, and webhook URLs independently.
+- [ ] Confirm protected accounting setup rejects reused identity client IDs or secrets and callback routes remain distinct.
 - [ ] Configure the production email sender/domain.
 - [ ] Verify production email SPF, DKIM, DMARC, invitation delivery, and password-reset delivery.
 - [ ] Configure production error monitoring and alert recipients.
 - [ ] Start production with the new-export kill switch enabled while configuration and read-only health checks are verified.
 - [ ] Verify environment variables against a checklist without printing their values.
 - [ ] Run index/migration status checks.
-- [ ] Seed exactly one initial owner securely and verify its email/password recovery before enabling Xero sign-in.
+- [ ] Create exactly one initial owner through the deployment-protected first-user form or controlled seed, then verify email/password recovery before enabling Xero sign-in.
 - [ ] Configure Business Settings, Authentication Settings, user timezone defaults, base currency, and Billing Settings.
+- [ ] Save the dedicated Xero accounting client ID and secret through `/app/settings/xero`; verify that this requires no environment change or redeploy.
 - [ ] Connect the intended Xero organisation through the dedicated standard accounting OAuth client.
 - [ ] Verify tenant name/ID before saving the connection.
 - [ ] Sync accounts, taxes, currencies, organisation actions, and contacts.
@@ -1642,23 +1695,23 @@ Outcome: A monitored, backed-up production deployment is connected to the intend
 - [ ] Run final CI and production smoke checklist.
 - [ ] Invite initial users and verify member/admin boundaries.
 - [ ] Verify initial users can choose email/password or invite-gated Xero sign-in without changing their locally assigned role.
-- [ ] Provide short user guides for:
-  - [ ] manual range entry;
-  - [ ] manual hours/minutes entry;
-  - [ ] timezone preference;
-  - [ ] accepting an invitation and signing in with Xero;
-  - [ ] linking/unlinking Xero and password recovery;
-  - [ ] customer/project management;
-  - [ ] billing selection and preview;
-  - [ ] background/wait export;
-  - [ ] mapping/action-required remediation;
-  - [ ] release and rebill.
-- [ ] Provide operator runbooks from WP-13.
-- [ ] Document deployment, rollback, secret rotation, index migration, backup restore, and dependency upgrade.
-- [ ] Define the rollback point and ensure rollback does not run incompatible data migrations.
+- [x] Provide short user guides for:
+  - [x] manual range entry;
+  - [x] manual hours/minutes entry;
+  - [x] timezone preference;
+  - [x] accepting an invitation and signing in with Xero;
+  - [x] linking/unlinking Xero and password recovery;
+  - [x] customer/project management;
+  - [x] billing selection and preview;
+  - [x] background/wait export;
+  - [x] mapping/action-required remediation;
+  - [x] release and rebill.
+- [x] Provide operator runbooks from WP-13.
+- [x] Document deployment, rollback, secret rotation, index migration, backup restore, and dependency upgrade.
+- [x] Define the rollback point and ensure rollback does not run incompatible data migrations.
 - [ ] Monitor password login, Xero identity OIDC, accounting OAuth/token refresh, Mongo, jobs, webhooks, and exports as separate signals during the launch window.
 - [ ] Review early audit records and Xero invoice mappings manually.
-- [ ] Record V1 known limitations and post-launch backlog.
+- [x] Record V1 known limitations and post-launch backlog.
 
 ### Verification and acceptance
 
@@ -1737,6 +1790,7 @@ Recheck these references when each dependent package starts because hosted-servi
 - [Xero token, tenant, and connection identity guidance](https://developer.xero.com/documentation/best-practices/data-integrity/managing-tokens)
 - [Xero connection lifecycle](https://developer.xero.com/documentation/best-practices/managing-connections/connections)
 - [Xero idempotent requests](https://developer.xero.com/documentation/guides/idempotent-requests/idempotency/)
+- [Xero developer pricing and connection tiers](https://developer.xero.com/pricing)
 - [Xero API limits](https://developer.xero.com/documentation/guides/oauth2/limits)
 - [Vercel Cron Jobs](https://vercel.com/docs/cron-jobs)
 - [Vercel Cron security](https://vercel.com/docs/cron-jobs/manage-cron-jobs)

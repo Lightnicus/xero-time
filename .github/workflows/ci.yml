@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATABASE_URL: mongodb://127.0.0.1:27018/xero_time_test?replicaSet=xero_time_rs0&directConnection=true
+  NEXT_PUBLIC_SERVER_URL: http://127.0.0.1:3101
+  PAYLOAD_SECRET: ci-only-payload-secret-not-used-outside-tests-0123456789
+  ACCOUNT_EMAIL_DELIVERY_MODE: manual
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    services:
+      mongodb:
+        image: mongo:8.0
+        ports:
+          - 27018:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Initiate MongoDB replica set
+        working-directory: .
+        run: |
+          container="$(docker ps --filter ancestor=mongo:8.0 --format '{{.ID}}' | head -1)"
+          test -n "$container"
+          docker exec "$container" mongosh --quiet --eval "rs.initiate({_id:'xero_time_rs0',members:[{_id:0,host:'localhost:27017'}]})"
+          docker exec "$container" mongosh --quiet --eval "while (!db.hello().isWritablePrimary) { sleep(200) }"
+      - run: pnpm verify:secrets
+      - run: pnpm verify:licenses
+      - run: pnpm verify:generated
+      - run: pnpm check
+      - run: pnpm check:compat
+      - run: pnpm migrate
+      - run: pnpm test:coverage
+      - run: pnpm test:perf
+      - run: pnpm verify:indexes
+      - run: pnpm audit --prod --audit-level high
+      - run: pnpm build
+      - if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: build-metadata
+          path: |
+            app/.next/BUILD_ID
+            app/.next/build-manifest.json
+            app/.next/routes-manifest.json
+          if-no-files-found: error
+          retention-days: 7
+      - if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: coverage-report
+          path: app/coverage
+          if-no-files-found: error
+          retention-days: 7
+
+  e2e:
+    if: github.event_name == 'push' || github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-24.04
+    services:
+      mongodb:
+        image: mongo:8.0
+        ports:
+          - 27018:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Initiate MongoDB replica set
+        working-directory: .
+        run: |
+          container="$(docker ps --filter ancestor=mongo:8.0 --format '{{.ID}}' | head -1)"
+          test -n "$container"
+          docker exec "$container" mongosh --quiet --eval "rs.initiate({_id:'xero_time_rs0',members:[{_id:0,host:'localhost:27017'}]})"
+          docker exec "$container" mongosh --quiet --eval "while (!db.hello().isWritablePrimary) { sleep(200) }"
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
+      - if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: playwright-report
+          path: app/playwright-report
+          if-no-files-found: ignore
+          retention-days: 7

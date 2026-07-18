@@ -68,8 +68,25 @@ export interface Config {
   blocks: {};
   collections: {
     users: User;
-    media: Media;
+    invitations: Invitation;
+    'auth-identities': AuthIdentity;
+    'external-auth-sessions': ExternalAuthSession;
+    customers: Customer;
+    projects: Project;
+    'time-entries': TimeEntry;
+    'xero-connections': XeroConnection;
+    'xero-oauth-states': XeroOauthState;
+    'xero-reference-data': XeroReferenceDatum;
+    'export-batches': ExportBatch;
+    'invoice-exports': InvoiceExport;
+    'invoice-export-entries': InvoiceExportEntry;
+    'xero-attempts': XeroAttempt;
+    'xero-contact-operations': XeroContactOperation;
+    'xero-webhook-receipts': XeroWebhookReceipt;
+    'release-actions': ReleaseAction;
+    'audit-events': AuditEvent;
     'payload-kv': PayloadKv;
+    'payload-jobs': PayloadJob;
     'payload-locked-documents': PayloadLockedDocument;
     'payload-preferences': PayloadPreference;
     'payload-migrations': PayloadMigration;
@@ -77,8 +94,25 @@ export interface Config {
   collectionsJoins: {};
   collectionsSelect: {
     users: UsersSelect<false> | UsersSelect<true>;
-    media: MediaSelect<false> | MediaSelect<true>;
+    invitations: InvitationsSelect<false> | InvitationsSelect<true>;
+    'auth-identities': AuthIdentitiesSelect<false> | AuthIdentitiesSelect<true>;
+    'external-auth-sessions': ExternalAuthSessionsSelect<false> | ExternalAuthSessionsSelect<true>;
+    customers: CustomersSelect<false> | CustomersSelect<true>;
+    projects: ProjectsSelect<false> | ProjectsSelect<true>;
+    'time-entries': TimeEntriesSelect<false> | TimeEntriesSelect<true>;
+    'xero-connections': XeroConnectionsSelect<false> | XeroConnectionsSelect<true>;
+    'xero-oauth-states': XeroOauthStatesSelect<false> | XeroOauthStatesSelect<true>;
+    'xero-reference-data': XeroReferenceDataSelect<false> | XeroReferenceDataSelect<true>;
+    'export-batches': ExportBatchesSelect<false> | ExportBatchesSelect<true>;
+    'invoice-exports': InvoiceExportsSelect<false> | InvoiceExportsSelect<true>;
+    'invoice-export-entries': InvoiceExportEntriesSelect<false> | InvoiceExportEntriesSelect<true>;
+    'xero-attempts': XeroAttemptsSelect<false> | XeroAttemptsSelect<true>;
+    'xero-contact-operations': XeroContactOperationsSelect<false> | XeroContactOperationsSelect<true>;
+    'xero-webhook-receipts': XeroWebhookReceiptsSelect<false> | XeroWebhookReceiptsSelect<true>;
+    'release-actions': ReleaseActionsSelect<false> | ReleaseActionsSelect<true>;
+    'audit-events': AuditEventsSelect<false> | AuditEventsSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
+    'payload-jobs': PayloadJobsSelect<false> | PayloadJobsSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
     'payload-preferences': PayloadPreferencesSelect<false> | PayloadPreferencesSelect<true>;
     'payload-migrations': PayloadMigrationsSelect<false> | PayloadMigrationsSelect<true>;
@@ -87,15 +121,33 @@ export interface Config {
     defaultIDType: string;
   };
   fallbackLocale: null;
-  globals: {};
-  globalsSelect: {};
+  globals: {
+    'business-settings': BusinessSetting;
+    'authentication-settings': AuthenticationSetting;
+    'billing-settings': BillingSetting;
+  };
+  globalsSelect: {
+    'business-settings': BusinessSettingsSelect<false> | BusinessSettingsSelect<true>;
+    'authentication-settings': AuthenticationSettingsSelect<false> | AuthenticationSettingsSelect<true>;
+    'billing-settings': BillingSettingsSelect<false> | BillingSettingsSelect<true>;
+  };
   locale: null;
   widgets: {
     collections: CollectionsWidget;
   };
   user: User;
   jobs: {
-    tasks: unknown;
+    tasks: {
+      'create-xero-invoice': TaskCreateXeroInvoice;
+      'reconcile-xero-invoice': TaskReconcileXeroInvoice;
+      'process-xero-webhook-receipt': TaskProcessXeroWebhookReceipt;
+      'refresh-xero-invoice-status': TaskRefreshXeroInvoiceStatus;
+      'maintain-xero-accounting': TaskMaintainXeroAccounting;
+      inline: {
+        input: unknown;
+        output: unknown;
+      };
+    };
     workflows: unknown;
   };
 }
@@ -123,6 +175,25 @@ export interface UserAuthOperations {
  */
 export interface User {
   id: string;
+  displayName: string;
+  role: 'owner' | 'admin' | 'biller' | 'member';
+  /**
+   * Inactive users are denied application and Payload Admin authorization.
+   */
+  active: boolean;
+  bootstrapMarker?: string | null;
+  /**
+   * IANA timezone, for example Pacific/Auckland.
+   */
+  timezone: string;
+  /**
+   * Managed by protected authentication workflows.
+   */
+  enabledLoginMethods?: ('email-password' | 'xero')[] | null;
+  lastLoginProvider?: ('email-password' | 'xero') | null;
+  lastLoginAt?: string | null;
+  linkedXeroDisplay?: string | null;
+  activeExternalSessionCount?: number | null;
   updatedAt: string;
   createdAt: string;
   email: string;
@@ -130,6 +201,8 @@ export interface User {
   resetPasswordExpiration?: string | null;
   salt?: string | null;
   hash?: string | null;
+  _verified?: boolean | null;
+  _verificationToken?: string | null;
   loginAttempts?: number | null;
   lockUntil?: string | null;
   sessions?:
@@ -144,22 +217,1517 @@ export interface User {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "media".
+ * via the `definition` "invitations".
  */
-export interface Media {
+export interface Invitation {
   id: string;
-  alt: string;
+  email: string;
+  displayName: string;
+  role: 'admin' | 'biller' | 'member';
+  timezone: string;
+  status: 'pending' | 'accepting' | 'accepted' | 'revoked';
+  tokenHash: string;
+  issuedAt: string;
+  expiresAt: string;
+  cleanupAt?: string | null;
+  invitedBy: string | User;
+  acceptedBy?: (string | null) | User;
+  acceptanceProvider?: ('email-password' | 'xero') | null;
+  acceptedAt?: string | null;
+  revokedAt?: string | null;
+  revokedBy?: (string | null) | User;
+  revocationReason?: string | null;
+  deliveryStatus: 'pending' | 'sent' | 'failed';
+  deliveryAttempts: number;
+  lastDeliveredAt?: string | null;
+  lastDeliveryError?: string | null;
   updatedAt: string;
   createdAt: string;
-  url?: string | null;
-  thumbnailURL?: string | null;
-  filename?: string | null;
-  mimeType?: string | null;
-  filesize?: number | null;
-  width?: number | null;
-  height?: number | null;
-  focalX?: number | null;
-  focalY?: number | null;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "auth-identities".
+ */
+export interface AuthIdentity {
+  id: string;
+  user: string | User;
+  provider: 'xero';
+  status: 'active' | 'revoked' | 'collision-review';
+  issuer: string;
+  subject: string;
+  emailSnapshot?: string | null;
+  displayNameSnapshot?: string | null;
+  linkedAt: string;
+  lastUsedAt?: string | null;
+  linkedBy?: (string | null) | User;
+  unlinkedBy?: (string | null) | User;
+  unlinkedAt?: string | null;
+  unlinkReason?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "external-auth-sessions".
+ */
+export interface ExternalAuthSession {
+  id: string;
+  user: string | User;
+  identity: string | AuthIdentity;
+  tokenHash: string;
+  status: 'active' | 'revoked' | 'expired';
+  version: number;
+  issuedAt: string;
+  lastSeenAt: string;
+  idleExpiresAt: string;
+  absoluteExpiresAt: string;
+  cleanupAt?: string | null;
+  deviceLabel?: string | null;
+  userAgentHash?: string | null;
+  revokedAt?: string | null;
+  revocationReason?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Local customers may be used for projects and time before they are explicitly mapped to a Xero contact.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "customers".
+ */
+export interface Customer {
+  id: string;
+  /**
+   * Local display name. It does not need to match the Xero contact name.
+   */
+  name: string;
+  /**
+   * Archived customers remain available to historical time and invoice records.
+   */
+  status: 'active' | 'archived';
+  /**
+   * Projects for this customer must use the same ISO currency.
+   */
+  currency:
+    | 'NZD'
+    | 'AED'
+    | 'AFN'
+    | 'ALL'
+    | 'AMD'
+    | 'ANG'
+    | 'AOA'
+    | 'ARS'
+    | 'AUD'
+    | 'AWG'
+    | 'AZN'
+    | 'BAM'
+    | 'BBD'
+    | 'BDT'
+    | 'BGN'
+    | 'BHD'
+    | 'BIF'
+    | 'BMD'
+    | 'BND'
+    | 'BOB'
+    | 'BRL'
+    | 'BSD'
+    | 'BTN'
+    | 'BWP'
+    | 'BYN'
+    | 'BZD'
+    | 'CAD'
+    | 'CDF'
+    | 'CHF'
+    | 'CLP'
+    | 'CNY'
+    | 'COP'
+    | 'CRC'
+    | 'CUC'
+    | 'CUP'
+    | 'CVE'
+    | 'CZK'
+    | 'DJF'
+    | 'DKK'
+    | 'DOP'
+    | 'DZD'
+    | 'EGP'
+    | 'ERN'
+    | 'ETB'
+    | 'EUR'
+    | 'FJD'
+    | 'FKP'
+    | 'GBP'
+    | 'GEL'
+    | 'GHS'
+    | 'GIP'
+    | 'GMD'
+    | 'GNF'
+    | 'GTQ'
+    | 'GYD'
+    | 'HKD'
+    | 'HNL'
+    | 'HRK'
+    | 'HTG'
+    | 'HUF'
+    | 'IDR'
+    | 'ILS'
+    | 'INR'
+    | 'IQD'
+    | 'IRR'
+    | 'ISK'
+    | 'JMD'
+    | 'JOD'
+    | 'JPY'
+    | 'KES'
+    | 'KGS'
+    | 'KHR'
+    | 'KMF'
+    | 'KPW'
+    | 'KRW'
+    | 'KWD'
+    | 'KYD'
+    | 'KZT'
+    | 'LAK'
+    | 'LBP'
+    | 'LKR'
+    | 'LRD'
+    | 'LSL'
+    | 'LYD'
+    | 'MAD'
+    | 'MDL'
+    | 'MGA'
+    | 'MKD'
+    | 'MMK'
+    | 'MNT'
+    | 'MOP'
+    | 'MRU'
+    | 'MUR'
+    | 'MVR'
+    | 'MWK'
+    | 'MXN'
+    | 'MYR'
+    | 'MZN'
+    | 'NAD'
+    | 'NGN'
+    | 'NIO'
+    | 'NOK'
+    | 'NPR'
+    | 'OMR'
+    | 'PAB'
+    | 'PEN'
+    | 'PGK'
+    | 'PHP'
+    | 'PKR'
+    | 'PLN'
+    | 'PYG'
+    | 'QAR'
+    | 'RON'
+    | 'RSD'
+    | 'RUB'
+    | 'RWF'
+    | 'SAR'
+    | 'SBD'
+    | 'SCR'
+    | 'SDG'
+    | 'SEK'
+    | 'SGD'
+    | 'SHP'
+    | 'SLE'
+    | 'SLL'
+    | 'SOS'
+    | 'SRD'
+    | 'SSP'
+    | 'STN'
+    | 'SVC'
+    | 'SYP'
+    | 'SZL'
+    | 'THB'
+    | 'TJS'
+    | 'TMT'
+    | 'TND'
+    | 'TOP'
+    | 'TRY'
+    | 'TTD'
+    | 'TWD'
+    | 'TZS'
+    | 'UAH'
+    | 'UGX'
+    | 'USD'
+    | 'UYU'
+    | 'UZS'
+    | 'VES'
+    | 'VND'
+    | 'VUV'
+    | 'WST'
+    | 'XAF'
+    | 'XCD'
+    | 'XCG'
+    | 'XDR'
+    | 'XOF'
+    | 'XPF'
+    | 'XSU'
+    | 'YER'
+    | 'ZAR'
+    | 'ZMW'
+    | 'ZWG'
+    | 'ZWL';
+  /**
+   * Optional local billing contact; Xero remains authoritative for invoices.
+   */
+  billingEmail?: string | null;
+  /**
+   * Internal notes. These are never copied to a Xero invoice automatically.
+   */
+  notes?: string | null;
+  /**
+   * Optional billing override inherited by customer projects.
+   */
+  revenueAccountCode?: string | null;
+  /**
+   * Optional Xero TaxType inherited by customer projects.
+   */
+  taxType?: string | null;
+  /**
+   * Set only by the protected “Select from Xero” or “Create in Xero” workflow; never matched by name.
+   */
+  xeroContactId?: string | null;
+  /**
+   * Last known validation state of the explicit ContactID mapping.
+   */
+  xeroMappingStatus: 'unmapped' | 'active' | 'archived' | 'invalid' | 'needs-review';
+  /**
+   * Display snapshot only; never used as the durable mapping key.
+   */
+  xeroContactNameSnapshot?: string | null;
+  xeroContactEmailSnapshot?: string | null;
+  xeroLastValidatedAt?: string | null;
+  xeroLinkedAt?: string | null;
+  xeroLinkedBy?: (string | null) | User;
+  createdBy?: (string | null) | User;
+  updatedBy?: (string | null) | User;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Projects define the customer, currency, and billing defaults snapshotted onto each new time entry.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "projects".
+ */
+export interface Project {
+  id: string;
+  /**
+   * Currency is validated against this customer when the project is saved.
+   */
+  customer: string | Customer;
+  name: string;
+  /**
+   * Stable short code used in search and invoice descriptions.
+   */
+  code: string;
+  description?: string | null;
+  /**
+   * Archived projects remain attached to historical entries but cannot receive new time.
+   */
+  status: 'active' | 'archived';
+  /**
+   * Must equal the selected customer currency.
+   */
+  currency:
+    | 'NZD'
+    | 'AED'
+    | 'AFN'
+    | 'ALL'
+    | 'AMD'
+    | 'ANG'
+    | 'AOA'
+    | 'ARS'
+    | 'AUD'
+    | 'AWG'
+    | 'AZN'
+    | 'BAM'
+    | 'BBD'
+    | 'BDT'
+    | 'BGN'
+    | 'BHD'
+    | 'BIF'
+    | 'BMD'
+    | 'BND'
+    | 'BOB'
+    | 'BRL'
+    | 'BSD'
+    | 'BTN'
+    | 'BWP'
+    | 'BYN'
+    | 'BZD'
+    | 'CAD'
+    | 'CDF'
+    | 'CHF'
+    | 'CLP'
+    | 'CNY'
+    | 'COP'
+    | 'CRC'
+    | 'CUC'
+    | 'CUP'
+    | 'CVE'
+    | 'CZK'
+    | 'DJF'
+    | 'DKK'
+    | 'DOP'
+    | 'DZD'
+    | 'EGP'
+    | 'ERN'
+    | 'ETB'
+    | 'EUR'
+    | 'FJD'
+    | 'FKP'
+    | 'GBP'
+    | 'GEL'
+    | 'GHS'
+    | 'GIP'
+    | 'GMD'
+    | 'GNF'
+    | 'GTQ'
+    | 'GYD'
+    | 'HKD'
+    | 'HNL'
+    | 'HRK'
+    | 'HTG'
+    | 'HUF'
+    | 'IDR'
+    | 'ILS'
+    | 'INR'
+    | 'IQD'
+    | 'IRR'
+    | 'ISK'
+    | 'JMD'
+    | 'JOD'
+    | 'JPY'
+    | 'KES'
+    | 'KGS'
+    | 'KHR'
+    | 'KMF'
+    | 'KPW'
+    | 'KRW'
+    | 'KWD'
+    | 'KYD'
+    | 'KZT'
+    | 'LAK'
+    | 'LBP'
+    | 'LKR'
+    | 'LRD'
+    | 'LSL'
+    | 'LYD'
+    | 'MAD'
+    | 'MDL'
+    | 'MGA'
+    | 'MKD'
+    | 'MMK'
+    | 'MNT'
+    | 'MOP'
+    | 'MRU'
+    | 'MUR'
+    | 'MVR'
+    | 'MWK'
+    | 'MXN'
+    | 'MYR'
+    | 'MZN'
+    | 'NAD'
+    | 'NGN'
+    | 'NIO'
+    | 'NOK'
+    | 'NPR'
+    | 'OMR'
+    | 'PAB'
+    | 'PEN'
+    | 'PGK'
+    | 'PHP'
+    | 'PKR'
+    | 'PLN'
+    | 'PYG'
+    | 'QAR'
+    | 'RON'
+    | 'RSD'
+    | 'RUB'
+    | 'RWF'
+    | 'SAR'
+    | 'SBD'
+    | 'SCR'
+    | 'SDG'
+    | 'SEK'
+    | 'SGD'
+    | 'SHP'
+    | 'SLE'
+    | 'SLL'
+    | 'SOS'
+    | 'SRD'
+    | 'SSP'
+    | 'STN'
+    | 'SVC'
+    | 'SYP'
+    | 'SZL'
+    | 'THB'
+    | 'TJS'
+    | 'TMT'
+    | 'TND'
+    | 'TOP'
+    | 'TRY'
+    | 'TTD'
+    | 'TWD'
+    | 'TZS'
+    | 'UAH'
+    | 'UGX'
+    | 'USD'
+    | 'UYU'
+    | 'UZS'
+    | 'VES'
+    | 'VND'
+    | 'VUV'
+    | 'WST'
+    | 'XAF'
+    | 'XCD'
+    | 'XCG'
+    | 'XDR'
+    | 'XOF'
+    | 'XPF'
+    | 'XSU'
+    | 'YER'
+    | 'ZAR'
+    | 'ZMW'
+    | 'ZWG'
+    | 'ZWL';
+  /**
+   * 10,000 units = 1 currency unit. Example: NZD 150.00 is 1500000.
+   */
+  hourlyRateScaled: number;
+  hourlyRateDisplay?: string | null;
+  /**
+   * Applied when a user creates a time entry for this project.
+   */
+  billableByDefault?: boolean | null;
+  /**
+   * Optional project-specific text available to the invoice preview formatter.
+   */
+  lineDescriptionPrefix?: string | null;
+  /**
+   * Optional override; otherwise customer then Billing Settings.
+   */
+  revenueAccountCode?: string | null;
+  /**
+   * Optional Xero TaxType override.
+   */
+  taxType?: string | null;
+  /**
+   * Optional Xero tracking category/option pairs. Empty values inherit future defaults.
+   */
+  trackingCategories?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * Required for a rate/currency/account/tax/tracking change when unbilled entries exist. Existing snapshots remain unchanged.
+   */
+  confirmUnbilledImpact?: boolean | null;
+  /**
+   * Recorded in the audit trail for a confirmed commercial change.
+   */
+  commercialChangeReason?: string | null;
+  createdBy?: (string | null) | User;
+  updatedBy?: (string | null) | User;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Manual time only: enter either a start/finish range or a duration. There is no running timer.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "time-entries".
+ */
+export interface TimeEntry {
+  id: string;
+  /**
+   * Members are always assigned to themselves; an owner or admin may choose another active user.
+   */
+  owner: string | User;
+  /**
+   * Determines customer, currency, and hourly-rate snapshots.
+   */
+  project: string | Project;
+  /**
+   * The active reservation/export allocation. Only billing commands can set or clear it.
+   */
+  currentExport?: (string | null) | InvoiceExport;
+  inputMode: 'duration' | 'range';
+  /**
+   * YYYY-MM-DD. For start/finish entries this is derived from the start in the selected timezone.
+   */
+  workDate: string;
+  /**
+   * Defaults to the user timezone, then Pacific/Auckland.
+   */
+  timezone:
+    | 'Pacific/Auckland'
+    | 'Africa/Abidjan'
+    | 'Africa/Accra'
+    | 'Africa/Addis_Ababa'
+    | 'Africa/Algiers'
+    | 'Africa/Asmera'
+    | 'Africa/Bamako'
+    | 'Africa/Bangui'
+    | 'Africa/Banjul'
+    | 'Africa/Bissau'
+    | 'Africa/Blantyre'
+    | 'Africa/Brazzaville'
+    | 'Africa/Bujumbura'
+    | 'Africa/Cairo'
+    | 'Africa/Casablanca'
+    | 'Africa/Ceuta'
+    | 'Africa/Conakry'
+    | 'Africa/Dakar'
+    | 'Africa/Dar_es_Salaam'
+    | 'Africa/Djibouti'
+    | 'Africa/Douala'
+    | 'Africa/El_Aaiun'
+    | 'Africa/Freetown'
+    | 'Africa/Gaborone'
+    | 'Africa/Harare'
+    | 'Africa/Johannesburg'
+    | 'Africa/Juba'
+    | 'Africa/Kampala'
+    | 'Africa/Khartoum'
+    | 'Africa/Kigali'
+    | 'Africa/Kinshasa'
+    | 'Africa/Lagos'
+    | 'Africa/Libreville'
+    | 'Africa/Lome'
+    | 'Africa/Luanda'
+    | 'Africa/Lubumbashi'
+    | 'Africa/Lusaka'
+    | 'Africa/Malabo'
+    | 'Africa/Maputo'
+    | 'Africa/Maseru'
+    | 'Africa/Mbabane'
+    | 'Africa/Mogadishu'
+    | 'Africa/Monrovia'
+    | 'Africa/Nairobi'
+    | 'Africa/Ndjamena'
+    | 'Africa/Niamey'
+    | 'Africa/Nouakchott'
+    | 'Africa/Ouagadougou'
+    | 'Africa/Porto-Novo'
+    | 'Africa/Sao_Tome'
+    | 'Africa/Tripoli'
+    | 'Africa/Tunis'
+    | 'Africa/Windhoek'
+    | 'America/Adak'
+    | 'America/Anchorage'
+    | 'America/Anguilla'
+    | 'America/Antigua'
+    | 'America/Araguaina'
+    | 'America/Argentina/La_Rioja'
+    | 'America/Argentina/Rio_Gallegos'
+    | 'America/Argentina/Salta'
+    | 'America/Argentina/San_Juan'
+    | 'America/Argentina/San_Luis'
+    | 'America/Argentina/Tucuman'
+    | 'America/Argentina/Ushuaia'
+    | 'America/Aruba'
+    | 'America/Asuncion'
+    | 'America/Bahia'
+    | 'America/Bahia_Banderas'
+    | 'America/Barbados'
+    | 'America/Belem'
+    | 'America/Belize'
+    | 'America/Blanc-Sablon'
+    | 'America/Boa_Vista'
+    | 'America/Bogota'
+    | 'America/Boise'
+    | 'America/Buenos_Aires'
+    | 'America/Cambridge_Bay'
+    | 'America/Campo_Grande'
+    | 'America/Cancun'
+    | 'America/Caracas'
+    | 'America/Catamarca'
+    | 'America/Cayenne'
+    | 'America/Cayman'
+    | 'America/Chicago'
+    | 'America/Chihuahua'
+    | 'America/Ciudad_Juarez'
+    | 'America/Coral_Harbour'
+    | 'America/Cordoba'
+    | 'America/Costa_Rica'
+    | 'America/Creston'
+    | 'America/Cuiaba'
+    | 'America/Curacao'
+    | 'America/Danmarkshavn'
+    | 'America/Dawson'
+    | 'America/Dawson_Creek'
+    | 'America/Denver'
+    | 'America/Detroit'
+    | 'America/Dominica'
+    | 'America/Edmonton'
+    | 'America/Eirunepe'
+    | 'America/El_Salvador'
+    | 'America/Fort_Nelson'
+    | 'America/Fortaleza'
+    | 'America/Glace_Bay'
+    | 'America/Godthab'
+    | 'America/Goose_Bay'
+    | 'America/Grand_Turk'
+    | 'America/Grenada'
+    | 'America/Guadeloupe'
+    | 'America/Guatemala'
+    | 'America/Guayaquil'
+    | 'America/Guyana'
+    | 'America/Halifax'
+    | 'America/Havana'
+    | 'America/Hermosillo'
+    | 'America/Indiana/Knox'
+    | 'America/Indiana/Marengo'
+    | 'America/Indiana/Petersburg'
+    | 'America/Indiana/Tell_City'
+    | 'America/Indiana/Vevay'
+    | 'America/Indiana/Vincennes'
+    | 'America/Indiana/Winamac'
+    | 'America/Indianapolis'
+    | 'America/Inuvik'
+    | 'America/Iqaluit'
+    | 'America/Jamaica'
+    | 'America/Jujuy'
+    | 'America/Juneau'
+    | 'America/Kentucky/Monticello'
+    | 'America/Kralendijk'
+    | 'America/La_Paz'
+    | 'America/Lima'
+    | 'America/Los_Angeles'
+    | 'America/Louisville'
+    | 'America/Lower_Princes'
+    | 'America/Maceio'
+    | 'America/Managua'
+    | 'America/Manaus'
+    | 'America/Marigot'
+    | 'America/Martinique'
+    | 'America/Matamoros'
+    | 'America/Mazatlan'
+    | 'America/Mendoza'
+    | 'America/Menominee'
+    | 'America/Merida'
+    | 'America/Metlakatla'
+    | 'America/Mexico_City'
+    | 'America/Miquelon'
+    | 'America/Moncton'
+    | 'America/Monterrey'
+    | 'America/Montevideo'
+    | 'America/Montserrat'
+    | 'America/Nassau'
+    | 'America/New_York'
+    | 'America/Nome'
+    | 'America/Noronha'
+    | 'America/North_Dakota/Beulah'
+    | 'America/North_Dakota/Center'
+    | 'America/North_Dakota/New_Salem'
+    | 'America/Ojinaga'
+    | 'America/Panama'
+    | 'America/Paramaribo'
+    | 'America/Phoenix'
+    | 'America/Port_of_Spain'
+    | 'America/Port-au-Prince'
+    | 'America/Porto_Velho'
+    | 'America/Puerto_Rico'
+    | 'America/Punta_Arenas'
+    | 'America/Rankin_Inlet'
+    | 'America/Recife'
+    | 'America/Regina'
+    | 'America/Resolute'
+    | 'America/Rio_Branco'
+    | 'America/Santarem'
+    | 'America/Santiago'
+    | 'America/Santo_Domingo'
+    | 'America/Sao_Paulo'
+    | 'America/Scoresbysund'
+    | 'America/Sitka'
+    | 'America/St_Barthelemy'
+    | 'America/St_Johns'
+    | 'America/St_Kitts'
+    | 'America/St_Lucia'
+    | 'America/St_Thomas'
+    | 'America/St_Vincent'
+    | 'America/Swift_Current'
+    | 'America/Tegucigalpa'
+    | 'America/Thule'
+    | 'America/Tijuana'
+    | 'America/Toronto'
+    | 'America/Tortola'
+    | 'America/Vancouver'
+    | 'America/Whitehorse'
+    | 'America/Winnipeg'
+    | 'America/Yakutat'
+    | 'Antarctica/Casey'
+    | 'Antarctica/Davis'
+    | 'Antarctica/DumontDUrville'
+    | 'Antarctica/Macquarie'
+    | 'Antarctica/Mawson'
+    | 'Antarctica/McMurdo'
+    | 'Antarctica/Palmer'
+    | 'Antarctica/Rothera'
+    | 'Antarctica/Syowa'
+    | 'Antarctica/Troll'
+    | 'Antarctica/Vostok'
+    | 'Arctic/Longyearbyen'
+    | 'Asia/Aden'
+    | 'Asia/Almaty'
+    | 'Asia/Amman'
+    | 'Asia/Anadyr'
+    | 'Asia/Aqtau'
+    | 'Asia/Aqtobe'
+    | 'Asia/Ashgabat'
+    | 'Asia/Atyrau'
+    | 'Asia/Baghdad'
+    | 'Asia/Bahrain'
+    | 'Asia/Baku'
+    | 'Asia/Bangkok'
+    | 'Asia/Barnaul'
+    | 'Asia/Beirut'
+    | 'Asia/Bishkek'
+    | 'Asia/Brunei'
+    | 'Asia/Calcutta'
+    | 'Asia/Chita'
+    | 'Asia/Colombo'
+    | 'Asia/Damascus'
+    | 'Asia/Dhaka'
+    | 'Asia/Dili'
+    | 'Asia/Dubai'
+    | 'Asia/Dushanbe'
+    | 'Asia/Famagusta'
+    | 'Asia/Gaza'
+    | 'Asia/Hebron'
+    | 'Asia/Hong_Kong'
+    | 'Asia/Hovd'
+    | 'Asia/Irkutsk'
+    | 'Asia/Jakarta'
+    | 'Asia/Jayapura'
+    | 'Asia/Jerusalem'
+    | 'Asia/Kabul'
+    | 'Asia/Kamchatka'
+    | 'Asia/Karachi'
+    | 'Asia/Katmandu'
+    | 'Asia/Khandyga'
+    | 'Asia/Krasnoyarsk'
+    | 'Asia/Kuala_Lumpur'
+    | 'Asia/Kuching'
+    | 'Asia/Kuwait'
+    | 'Asia/Macau'
+    | 'Asia/Magadan'
+    | 'Asia/Makassar'
+    | 'Asia/Manila'
+    | 'Asia/Muscat'
+    | 'Asia/Nicosia'
+    | 'Asia/Novokuznetsk'
+    | 'Asia/Novosibirsk'
+    | 'Asia/Omsk'
+    | 'Asia/Oral'
+    | 'Asia/Phnom_Penh'
+    | 'Asia/Pontianak'
+    | 'Asia/Pyongyang'
+    | 'Asia/Qatar'
+    | 'Asia/Qostanay'
+    | 'Asia/Qyzylorda'
+    | 'Asia/Rangoon'
+    | 'Asia/Riyadh'
+    | 'Asia/Saigon'
+    | 'Asia/Sakhalin'
+    | 'Asia/Samarkand'
+    | 'Asia/Seoul'
+    | 'Asia/Shanghai'
+    | 'Asia/Singapore'
+    | 'Asia/Srednekolymsk'
+    | 'Asia/Taipei'
+    | 'Asia/Tashkent'
+    | 'Asia/Tbilisi'
+    | 'Asia/Tehran'
+    | 'Asia/Thimphu'
+    | 'Asia/Tokyo'
+    | 'Asia/Tomsk'
+    | 'Asia/Ulaanbaatar'
+    | 'Asia/Urumqi'
+    | 'Asia/Ust-Nera'
+    | 'Asia/Vientiane'
+    | 'Asia/Vladivostok'
+    | 'Asia/Yakutsk'
+    | 'Asia/Yekaterinburg'
+    | 'Asia/Yerevan'
+    | 'Atlantic/Azores'
+    | 'Atlantic/Bermuda'
+    | 'Atlantic/Canary'
+    | 'Atlantic/Cape_Verde'
+    | 'Atlantic/Faeroe'
+    | 'Atlantic/Madeira'
+    | 'Atlantic/Reykjavik'
+    | 'Atlantic/South_Georgia'
+    | 'Atlantic/St_Helena'
+    | 'Atlantic/Stanley'
+    | 'Australia/Adelaide'
+    | 'Australia/Brisbane'
+    | 'Australia/Broken_Hill'
+    | 'Australia/Darwin'
+    | 'Australia/Eucla'
+    | 'Australia/Hobart'
+    | 'Australia/Lindeman'
+    | 'Australia/Lord_Howe'
+    | 'Australia/Melbourne'
+    | 'Australia/Perth'
+    | 'Australia/Sydney'
+    | 'Europe/Amsterdam'
+    | 'Europe/Andorra'
+    | 'Europe/Astrakhan'
+    | 'Europe/Athens'
+    | 'Europe/Belgrade'
+    | 'Europe/Berlin'
+    | 'Europe/Bratislava'
+    | 'Europe/Brussels'
+    | 'Europe/Bucharest'
+    | 'Europe/Budapest'
+    | 'Europe/Busingen'
+    | 'Europe/Chisinau'
+    | 'Europe/Copenhagen'
+    | 'Europe/Dublin'
+    | 'Europe/Gibraltar'
+    | 'Europe/Guernsey'
+    | 'Europe/Helsinki'
+    | 'Europe/Isle_of_Man'
+    | 'Europe/Istanbul'
+    | 'Europe/Jersey'
+    | 'Europe/Kaliningrad'
+    | 'Europe/Kiev'
+    | 'Europe/Kirov'
+    | 'Europe/Lisbon'
+    | 'Europe/Ljubljana'
+    | 'Europe/London'
+    | 'Europe/Luxembourg'
+    | 'Europe/Madrid'
+    | 'Europe/Malta'
+    | 'Europe/Mariehamn'
+    | 'Europe/Minsk'
+    | 'Europe/Monaco'
+    | 'Europe/Moscow'
+    | 'Europe/Oslo'
+    | 'Europe/Paris'
+    | 'Europe/Podgorica'
+    | 'Europe/Prague'
+    | 'Europe/Riga'
+    | 'Europe/Rome'
+    | 'Europe/Samara'
+    | 'Europe/San_Marino'
+    | 'Europe/Sarajevo'
+    | 'Europe/Saratov'
+    | 'Europe/Simferopol'
+    | 'Europe/Skopje'
+    | 'Europe/Sofia'
+    | 'Europe/Stockholm'
+    | 'Europe/Tallinn'
+    | 'Europe/Tirane'
+    | 'Europe/Ulyanovsk'
+    | 'Europe/Vaduz'
+    | 'Europe/Vatican'
+    | 'Europe/Vienna'
+    | 'Europe/Vilnius'
+    | 'Europe/Volgograd'
+    | 'Europe/Warsaw'
+    | 'Europe/Zagreb'
+    | 'Europe/Zurich'
+    | 'Indian/Antananarivo'
+    | 'Indian/Chagos'
+    | 'Indian/Christmas'
+    | 'Indian/Cocos'
+    | 'Indian/Comoro'
+    | 'Indian/Kerguelen'
+    | 'Indian/Mahe'
+    | 'Indian/Maldives'
+    | 'Indian/Mauritius'
+    | 'Indian/Mayotte'
+    | 'Indian/Reunion'
+    | 'Pacific/Apia'
+    | 'Pacific/Bougainville'
+    | 'Pacific/Chatham'
+    | 'Pacific/Easter'
+    | 'Pacific/Efate'
+    | 'Pacific/Enderbury'
+    | 'Pacific/Fakaofo'
+    | 'Pacific/Fiji'
+    | 'Pacific/Funafuti'
+    | 'Pacific/Galapagos'
+    | 'Pacific/Gambier'
+    | 'Pacific/Guadalcanal'
+    | 'Pacific/Guam'
+    | 'Pacific/Honolulu'
+    | 'Pacific/Kiritimati'
+    | 'Pacific/Kosrae'
+    | 'Pacific/Kwajalein'
+    | 'Pacific/Majuro'
+    | 'Pacific/Marquesas'
+    | 'Pacific/Midway'
+    | 'Pacific/Nauru'
+    | 'Pacific/Niue'
+    | 'Pacific/Norfolk'
+    | 'Pacific/Noumea'
+    | 'Pacific/Pago_Pago'
+    | 'Pacific/Palau'
+    | 'Pacific/Pitcairn'
+    | 'Pacific/Ponape'
+    | 'Pacific/Port_Moresby'
+    | 'Pacific/Rarotonga'
+    | 'Pacific/Saipan'
+    | 'Pacific/Tahiti'
+    | 'Pacific/Tarawa'
+    | 'Pacific/Tongatapu'
+    | 'Pacific/Truk'
+    | 'Pacific/Wake'
+    | 'Pacific/Wallis'
+    | 'UTC';
+  /**
+   * Whole-minute precision.
+   */
+  startAt?: string | null;
+  /**
+   * Must be after start and no more than 24 hours later.
+   */
+  endAt?: string | null;
+  enteredHours?: number | null;
+  enteredMinutes?: number | null;
+  /**
+   * Required. Each entry remains a separate mapped line in the Xero invoice preview.
+   */
+  description: string;
+  /**
+   * Defaults from the selected project when the entry is first created.
+   */
+  billable?: boolean | null;
+  /**
+   * Required when an owner or administrator corrects an existing unbilled entry. Recorded in the audit trail.
+   */
+  privilegedCorrectionReason?: string | null;
+  /**
+   * Canonical whole-minute duration derived from the selected input mode.
+   */
+  durationSeconds: number;
+  /**
+   * Exact project hourly rate captured when the entry is created or reprojected.
+   */
+  rateSnapshotScaled: number;
+  /**
+   * ISO project/customer currency captured with the rate.
+   */
+  currencySnapshot: string;
+  /**
+   * Derived from the selected project; direct reassignment is prohibited.
+   */
+  customer: string | Customer;
+  customerNameSnapshot: string;
+  projectNameSnapshot: string;
+  projectCodeSnapshot: string;
+  /**
+   * Only unbilled entries can be edited or deleted. Export and release/rebill workflows update this field with overrideAccess.
+   */
+  billingStatus: 'unbilled' | 'reserved' | 'exported';
+  reservedAt?: string | null;
+  exportedAt?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "invoice-exports".
+ */
+export interface InvoiceExport {
+  id: string;
+  batch: string | ExportBatch;
+  customer: string | Customer;
+  requestedBy: string | User;
+  applicationReference: string;
+  state:
+    | 'preparing'
+    | 'queued'
+    | 'processing'
+    | 'retry-wait'
+    | 'action-required'
+    | 'reconciling'
+    | 'succeeded'
+    | 'cancelled'
+    | 'released'
+    | 'manual-review';
+  dispatchState: 'pending' | 'attached' | 'dispatched' | 'complete';
+  requestedMode: 'background' | 'wait-for-result';
+  actualMode: 'background' | 'wait-for-result';
+  modeOverrideReason?: string | null;
+  payloadHash: string;
+  selectionHash: string;
+  schemaVersion: number;
+  requestPayload:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  invoiceDate: string;
+  dueDate: string;
+  currency: string;
+  entryCount: number;
+  durationSeconds: number;
+  subtotalScaled: number;
+  taxScaled: number;
+  totalScaled: number;
+  jobId?: string | null;
+  currentAttempt?: (string | null) | XeroAttempt;
+  currentAttemptNumber?: number | null;
+  nextAttemptAt?: string | null;
+  processingLeaseId?: string | null;
+  processingLeaseExpiresAt?: string | null;
+  xeroInvoiceId?: string | null;
+  xeroInvoiceNumber?: string | null;
+  xeroInvoiceUrl?: string | null;
+  remoteStatus?: string | null;
+  lastRemoteUpdateAt?: string | null;
+  lastReconciledAt?: string | null;
+  lastAttemptAt?: string | null;
+  lastErrorCode?: string | null;
+  lastErrorMessage?: string | null;
+  stateHistory:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  releaseAction?: (string | null) | ReleaseAction;
+  rebillOf?: (string | null) | InvoiceExport;
+  queuedAt?: string | null;
+  processingAt?: string | null;
+  succeededAt?: string | null;
+  cancelledAt?: string | null;
+  releasedAt?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "export-batches".
+ */
+export interface ExportBatch {
+  id: string;
+  applicationReference: string;
+  requestedBy: string | User;
+  status: 'preparing' | 'queued' | 'processing' | 'partial' | 'succeeded' | 'action-required' | 'cancelled';
+  selectionType: 'explicit' | 'all-matching';
+  requestedMode: 'background' | 'wait-for-result';
+  actualMode: 'background' | 'wait-for-result';
+  normalizedFilterSnapshot:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  explicitEntryIds?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  snapshotHash: string;
+  entryCount: number;
+  invoiceCount: number;
+  durationSeconds: number;
+  totalAmountScaled: number;
+  schemaVersion: number;
+  completedAt?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "xero-attempts".
+ */
+export interface XeroAttempt {
+  id: string;
+  invoiceExport: string | InvoiceExport;
+  attemptNumber: number;
+  operation: 'create-invoice' | 'fetch-invoice';
+  method: 'GET' | 'POST';
+  safeResponseMetadata?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  payloadHash: string;
+  idempotencyKey: string;
+  claimId?: string | null;
+  leaseExpiresAt?: string | null;
+  requestStartedAt?: string | null;
+  requestMayHaveBeenSent: boolean;
+  completedAt?: string | null;
+  result: 'pending' | 'succeeded' | 'definitely-not-created' | 'retryable-before-send' | 'ambiguous' | 'manual-review';
+  httpStatus?: number | null;
+  xeroCorrelationId?: string | null;
+  rateLimitRemaining?: number | null;
+  retryAfterSeconds?: number | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  replacesAttempt?: (string | null) | XeroAttempt;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "release-actions".
+ */
+export interface ReleaseAction {
+  id: string;
+  sourceExport: string | InvoiceExport;
+  actor: string | User;
+  reason: string;
+  remoteStatus: 'DELETED' | 'VOIDED';
+  remoteVerifiedAt: string;
+  releasedAt: string;
+  entryIds:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  entryCount: number;
+  durationSeconds: number;
+  amountScaled: number;
+  before:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  after:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  replacementExports?: (string | InvoiceExport)[] | null;
+  schemaVersion: number;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "xero-connections".
+ */
+export interface XeroConnection {
+  id: string;
+  singletonKey: string;
+  oauthClientId?: string | null;
+  oauthClientSecretEnvelope?: string | null;
+  oauthConfigurationVersion?: number | null;
+  oauthConfiguredAt?: string | null;
+  oauthConfiguredBy?: (string | null) | User;
+  status: 'connected' | 'action-required' | 'disconnected';
+  tenantId?: string | null;
+  connectionId?: string | null;
+  tenantName?: string | null;
+  tenantType?: string | null;
+  grantedScopes?:
+    ('offline_access' | 'accounting.invoices' | 'accounting.contacts' | 'accounting.settings.read')[] | null;
+  authenticationEventId?: string | null;
+  authorizingXeroUserId?: string | null;
+  initiatedBy?: (string | null) | User;
+  authorizedAt?: string | null;
+  accessTokenExpiresAt?: string | null;
+  accessTokenEnvelope?: string | null;
+  refreshTokenEnvelope?: string | null;
+  tokenVersion: number;
+  refreshLockId?: string | null;
+  refreshLockExpiresAt?: string | null;
+  lastRefreshedAt?: string | null;
+  lastSuccessfulRequestAt?: string | null;
+  lastHealthCheckAt?: string | null;
+  lastReferenceDataSyncAt?: string | null;
+  lastErrorCode?: string | null;
+  lastErrorMessage?: string | null;
+  disconnectedAt?: string | null;
+  disconnectedBy?: (string | null) | User;
+  disconnectReason?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "xero-oauth-states".
+ */
+export interface XeroOauthState {
+  id: string;
+  family: 'accounting' | 'identity';
+  purpose: 'initial-connect' | 'reconnect' | 'authorizer-handover' | 'sign-in' | 'invite-acceptance' | 'identity-link';
+  status: 'pending' | 'consumed' | 'awaiting-selection' | 'completed' | 'failed';
+  stateHash: string;
+  browserBindingHash: string;
+  initiatingUser?: (string | null) | User;
+  invitation?: (string | null) | Invitation;
+  returnPath?: string | null;
+  nonceEnvelope?: string | null;
+  pkceVerifierEnvelope?: string | null;
+  pinnedTenantId?: string | null;
+  handoverReason?: string | null;
+  expiresAt: string;
+  consumedAt?: string | null;
+  completedAt?: string | null;
+  pendingConnections?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  pendingGrantEnvelope?: string | null;
+  failureCode?: string | null;
+  selectedTenantId?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Read-only reference values fetched from the pinned Xero organisation.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "xero-reference-data".
+ */
+export interface XeroReferenceDatum {
+  id: string;
+  resourceType:
+    'account' | 'tax-rate' | 'currency' | 'organisation-action' | 'organisation' | 'tracking-category' | 'contact';
+  xeroId?: string | null;
+  code?: string | null;
+  name: string;
+  status: 'active' | 'archived' | 'unavailable';
+  type?: string | null;
+  metadata?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  sourceTenantId: string;
+  fetchedAt: string;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "invoice-export-entries".
+ */
+export interface InvoiceExportEntry {
+  id: string;
+  invoiceExport: string | InvoiceExport;
+  timeEntry: string | TimeEntry;
+  customer: string | Customer;
+  project: string | Project;
+  user: string | User;
+  lineOrdinal: number;
+  xeroLineItemId?: string | null;
+  workDate: string;
+  timezone: string;
+  projectCode: string;
+  projectName: string;
+  userName: string;
+  description: string;
+  durationSeconds: number;
+  quantityScaled: number;
+  rateScaled: number;
+  amountScaled: number;
+  taxScaled: number;
+  currency: string;
+  accountCode: string;
+  taxType: string;
+  tracking:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  releasedAt?: string | null;
+  schemaVersion: number;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "xero-contact-operations".
+ */
+export interface XeroContactOperation {
+  id: string;
+  applicationReference: string;
+  idempotencyKey: string;
+  customer?: (string | null) | Customer;
+  requestedBy: string | User;
+  state: 'preparing' | 'processing' | 'succeeded' | 'ambiguous' | 'failed';
+  payloadHash: string;
+  requestPayload:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  xeroContactId?: string | null;
+  attemptCount: number;
+  lastErrorCode?: string | null;
+  lastErrorMessage?: string | null;
+  completedAt?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "xero-webhook-receipts".
+ */
+export interface XeroWebhookReceipt {
+  id: string;
+  deduplicationKey: string;
+  tenantId: string;
+  resourceType: string;
+  resourceId: string;
+  eventType: string;
+  eventAt: string;
+  receivedAt: string;
+  processedAt?: string | null;
+  status: 'pending' | 'processing' | 'processed' | 'ignored' | 'failed';
+  jobId?: string | null;
+  retryCount: number;
+  processingLeaseId?: string | null;
+  processingLeaseExpiresAt?: string | null;
+  failureCode?: string | null;
+  failureMessage?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "audit-events".
+ */
+export interface AuditEvent {
+  id: string;
+  eventType:
+    | 'authentication.login-succeeded'
+    | 'authentication.login-failed'
+    | 'authentication.logout'
+    | 'authentication.session-revoked'
+    | 'authentication.identity-linked'
+    | 'authentication.identity-unlinked'
+    | 'authentication.identity-recovered'
+    | 'authentication.identity-collision'
+    | 'invitation.created'
+    | 'invitation.accepted'
+    | 'invitation.revoked'
+    | 'user.role-changed'
+    | 'user.status-changed'
+    | 'user.owner-transitioned'
+    | 'settings.business-changed'
+    | 'settings.authentication-changed'
+    | 'settings.billing-changed'
+    | 'xero.accounting-configuration-changed'
+    | 'xero.accounting-connected'
+    | 'xero.accounting-reconnected'
+    | 'xero.accounting-handover'
+    | 'xero.accounting-disconnected'
+    | 'xero.reference-data-refreshed'
+    | 'xero.webhook-ignored'
+    | 'xero.webhook-processed'
+    | 'customer.mapping-changed'
+    | 'customer.changed'
+    | 'project.changed'
+    | 'time-entry.privileged-correction'
+    | 'time-entry.rate-recalculated'
+    | 'export.created'
+    | 'export.state-changed'
+    | 'export.retry-requested'
+    | 'export.reconciled'
+    | 'export.released'
+    | 'export.rebilled'
+    | 'security.kill-switch-changed'
+    | 'security.diagnostic-override';
+  actorType: 'human' | 'machine';
+  actor?: (string | null) | User;
+  machineActor?: string | null;
+  targetCollection?: string | null;
+  targetId?: string | null;
+  customerId?: string | null;
+  correlationId?: string | null;
+  exportId?: string | null;
+  xeroInvoiceId?: string | null;
+  occurredAt: string;
+  reason?: string | null;
+  before?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  after?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  metadata?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  schemaVersion: number;
+  updatedAt: string;
+  createdAt: string;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -180,6 +1748,130 @@ export interface PayloadKv {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payload-jobs".
+ */
+export interface PayloadJob {
+  id: string;
+  /**
+   * Input data provided to the job
+   */
+  input?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  taskStatus?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  completedAt?: string | null;
+  totalTried?: number | null;
+  /**
+   * If hasError is true this job will not be retried
+   */
+  hasError?: boolean | null;
+  /**
+   * If hasError is true, this is the error that caused it
+   */
+  error?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * Task execution log
+   */
+  log?:
+    | {
+        executedAt: string;
+        completedAt: string;
+        taskSlug:
+          | 'inline'
+          | 'create-xero-invoice'
+          | 'reconcile-xero-invoice'
+          | 'process-xero-webhook-receipt'
+          | 'refresh-xero-invoice-status'
+          | 'maintain-xero-accounting';
+        taskID: string;
+        input?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        output?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        state: 'failed' | 'succeeded';
+        error?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        parent?: {
+          taskSlug?:
+            | (
+                | 'inline'
+                | 'create-xero-invoice'
+                | 'reconcile-xero-invoice'
+                | 'process-xero-webhook-receipt'
+                | 'refresh-xero-invoice-status'
+                | 'maintain-xero-accounting'
+              )
+            | null;
+          taskID?: string | null;
+        };
+        id?: string | null;
+      }[]
+    | null;
+  taskSlug?:
+    | (
+        | 'inline'
+        | 'create-xero-invoice'
+        | 'reconcile-xero-invoice'
+        | 'process-xero-webhook-receipt'
+        | 'refresh-xero-invoice-status'
+        | 'maintain-xero-accounting'
+      )
+    | null;
+  queue?: string | null;
+  waitUntil?: string | null;
+  processing?: boolean | null;
+  /**
+   * Used for concurrency control. Jobs with the same key are subject to exclusive/supersedes rules.
+   */
+  concurrencyKey?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "payload-locked-documents".
  */
 export interface PayloadLockedDocument {
@@ -190,8 +1882,16 @@ export interface PayloadLockedDocument {
         value: string | User;
       } | null)
     | ({
-        relationTo: 'media';
-        value: string | Media;
+        relationTo: 'customers';
+        value: string | Customer;
+      } | null)
+    | ({
+        relationTo: 'projects';
+        value: string | Project;
+      } | null)
+    | ({
+        relationTo: 'time-entries';
+        value: string | TimeEntry;
       } | null);
   globalSlug?: string | null;
   user: {
@@ -240,6 +1940,16 @@ export interface PayloadMigration {
  * via the `definition` "users_select".
  */
 export interface UsersSelect<T extends boolean = true> {
+  displayName?: T;
+  role?: T;
+  active?: T;
+  bootstrapMarker?: T;
+  timezone?: T;
+  enabledLoginMethods?: T;
+  lastLoginProvider?: T;
+  lastLoginAt?: T;
+  linkedXeroDisplay?: T;
+  activeExternalSessionCount?: T;
   updatedAt?: T;
   createdAt?: T;
   email?: T;
@@ -247,6 +1957,8 @@ export interface UsersSelect<T extends boolean = true> {
   resetPasswordExpiration?: T;
   salt?: T;
   hash?: T;
+  _verified?: T;
+  _verificationToken?: T;
   loginAttempts?: T;
   lockUntil?: T;
   sessions?:
@@ -259,21 +1971,461 @@ export interface UsersSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "media_select".
+ * via the `definition` "invitations_select".
  */
-export interface MediaSelect<T extends boolean = true> {
-  alt?: T;
+export interface InvitationsSelect<T extends boolean = true> {
+  email?: T;
+  displayName?: T;
+  role?: T;
+  timezone?: T;
+  status?: T;
+  tokenHash?: T;
+  issuedAt?: T;
+  expiresAt?: T;
+  cleanupAt?: T;
+  invitedBy?: T;
+  acceptedBy?: T;
+  acceptanceProvider?: T;
+  acceptedAt?: T;
+  revokedAt?: T;
+  revokedBy?: T;
+  revocationReason?: T;
+  deliveryStatus?: T;
+  deliveryAttempts?: T;
+  lastDeliveredAt?: T;
+  lastDeliveryError?: T;
   updatedAt?: T;
   createdAt?: T;
-  url?: T;
-  thumbnailURL?: T;
-  filename?: T;
-  mimeType?: T;
-  filesize?: T;
-  width?: T;
-  height?: T;
-  focalX?: T;
-  focalY?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "auth-identities_select".
+ */
+export interface AuthIdentitiesSelect<T extends boolean = true> {
+  user?: T;
+  provider?: T;
+  status?: T;
+  issuer?: T;
+  subject?: T;
+  emailSnapshot?: T;
+  displayNameSnapshot?: T;
+  linkedAt?: T;
+  lastUsedAt?: T;
+  linkedBy?: T;
+  unlinkedBy?: T;
+  unlinkedAt?: T;
+  unlinkReason?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "external-auth-sessions_select".
+ */
+export interface ExternalAuthSessionsSelect<T extends boolean = true> {
+  user?: T;
+  identity?: T;
+  tokenHash?: T;
+  status?: T;
+  version?: T;
+  issuedAt?: T;
+  lastSeenAt?: T;
+  idleExpiresAt?: T;
+  absoluteExpiresAt?: T;
+  cleanupAt?: T;
+  deviceLabel?: T;
+  userAgentHash?: T;
+  revokedAt?: T;
+  revocationReason?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "customers_select".
+ */
+export interface CustomersSelect<T extends boolean = true> {
+  name?: T;
+  status?: T;
+  currency?: T;
+  billingEmail?: T;
+  notes?: T;
+  revenueAccountCode?: T;
+  taxType?: T;
+  xeroContactId?: T;
+  xeroMappingStatus?: T;
+  xeroContactNameSnapshot?: T;
+  xeroContactEmailSnapshot?: T;
+  xeroLastValidatedAt?: T;
+  xeroLinkedAt?: T;
+  xeroLinkedBy?: T;
+  createdBy?: T;
+  updatedBy?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "projects_select".
+ */
+export interface ProjectsSelect<T extends boolean = true> {
+  customer?: T;
+  name?: T;
+  code?: T;
+  description?: T;
+  status?: T;
+  currency?: T;
+  hourlyRateScaled?: T;
+  hourlyRateDisplay?: T;
+  billableByDefault?: T;
+  lineDescriptionPrefix?: T;
+  revenueAccountCode?: T;
+  taxType?: T;
+  trackingCategories?: T;
+  confirmUnbilledImpact?: T;
+  commercialChangeReason?: T;
+  createdBy?: T;
+  updatedBy?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "time-entries_select".
+ */
+export interface TimeEntriesSelect<T extends boolean = true> {
+  owner?: T;
+  project?: T;
+  currentExport?: T;
+  inputMode?: T;
+  workDate?: T;
+  timezone?: T;
+  startAt?: T;
+  endAt?: T;
+  enteredHours?: T;
+  enteredMinutes?: T;
+  description?: T;
+  billable?: T;
+  privilegedCorrectionReason?: T;
+  durationSeconds?: T;
+  rateSnapshotScaled?: T;
+  currencySnapshot?: T;
+  customer?: T;
+  customerNameSnapshot?: T;
+  projectNameSnapshot?: T;
+  projectCodeSnapshot?: T;
+  billingStatus?: T;
+  reservedAt?: T;
+  exportedAt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "xero-connections_select".
+ */
+export interface XeroConnectionsSelect<T extends boolean = true> {
+  singletonKey?: T;
+  oauthClientId?: T;
+  oauthClientSecretEnvelope?: T;
+  oauthConfigurationVersion?: T;
+  oauthConfiguredAt?: T;
+  oauthConfiguredBy?: T;
+  status?: T;
+  tenantId?: T;
+  connectionId?: T;
+  tenantName?: T;
+  tenantType?: T;
+  grantedScopes?: T;
+  authenticationEventId?: T;
+  authorizingXeroUserId?: T;
+  initiatedBy?: T;
+  authorizedAt?: T;
+  accessTokenExpiresAt?: T;
+  accessTokenEnvelope?: T;
+  refreshTokenEnvelope?: T;
+  tokenVersion?: T;
+  refreshLockId?: T;
+  refreshLockExpiresAt?: T;
+  lastRefreshedAt?: T;
+  lastSuccessfulRequestAt?: T;
+  lastHealthCheckAt?: T;
+  lastReferenceDataSyncAt?: T;
+  lastErrorCode?: T;
+  lastErrorMessage?: T;
+  disconnectedAt?: T;
+  disconnectedBy?: T;
+  disconnectReason?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "xero-oauth-states_select".
+ */
+export interface XeroOauthStatesSelect<T extends boolean = true> {
+  family?: T;
+  purpose?: T;
+  status?: T;
+  stateHash?: T;
+  browserBindingHash?: T;
+  initiatingUser?: T;
+  invitation?: T;
+  returnPath?: T;
+  nonceEnvelope?: T;
+  pkceVerifierEnvelope?: T;
+  pinnedTenantId?: T;
+  handoverReason?: T;
+  expiresAt?: T;
+  consumedAt?: T;
+  completedAt?: T;
+  pendingConnections?: T;
+  pendingGrantEnvelope?: T;
+  failureCode?: T;
+  selectedTenantId?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "xero-reference-data_select".
+ */
+export interface XeroReferenceDataSelect<T extends boolean = true> {
+  resourceType?: T;
+  xeroId?: T;
+  code?: T;
+  name?: T;
+  status?: T;
+  type?: T;
+  metadata?: T;
+  sourceTenantId?: T;
+  fetchedAt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "export-batches_select".
+ */
+export interface ExportBatchesSelect<T extends boolean = true> {
+  applicationReference?: T;
+  requestedBy?: T;
+  status?: T;
+  selectionType?: T;
+  requestedMode?: T;
+  actualMode?: T;
+  normalizedFilterSnapshot?: T;
+  explicitEntryIds?: T;
+  snapshotHash?: T;
+  entryCount?: T;
+  invoiceCount?: T;
+  durationSeconds?: T;
+  totalAmountScaled?: T;
+  schemaVersion?: T;
+  completedAt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "invoice-exports_select".
+ */
+export interface InvoiceExportsSelect<T extends boolean = true> {
+  batch?: T;
+  customer?: T;
+  requestedBy?: T;
+  applicationReference?: T;
+  state?: T;
+  dispatchState?: T;
+  requestedMode?: T;
+  actualMode?: T;
+  modeOverrideReason?: T;
+  payloadHash?: T;
+  selectionHash?: T;
+  schemaVersion?: T;
+  requestPayload?: T;
+  invoiceDate?: T;
+  dueDate?: T;
+  currency?: T;
+  entryCount?: T;
+  durationSeconds?: T;
+  subtotalScaled?: T;
+  taxScaled?: T;
+  totalScaled?: T;
+  jobId?: T;
+  currentAttempt?: T;
+  currentAttemptNumber?: T;
+  nextAttemptAt?: T;
+  processingLeaseId?: T;
+  processingLeaseExpiresAt?: T;
+  xeroInvoiceId?: T;
+  xeroInvoiceNumber?: T;
+  xeroInvoiceUrl?: T;
+  remoteStatus?: T;
+  lastRemoteUpdateAt?: T;
+  lastReconciledAt?: T;
+  lastAttemptAt?: T;
+  lastErrorCode?: T;
+  lastErrorMessage?: T;
+  stateHistory?: T;
+  releaseAction?: T;
+  rebillOf?: T;
+  queuedAt?: T;
+  processingAt?: T;
+  succeededAt?: T;
+  cancelledAt?: T;
+  releasedAt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "invoice-export-entries_select".
+ */
+export interface InvoiceExportEntriesSelect<T extends boolean = true> {
+  invoiceExport?: T;
+  timeEntry?: T;
+  customer?: T;
+  project?: T;
+  user?: T;
+  lineOrdinal?: T;
+  xeroLineItemId?: T;
+  workDate?: T;
+  timezone?: T;
+  projectCode?: T;
+  projectName?: T;
+  userName?: T;
+  description?: T;
+  durationSeconds?: T;
+  quantityScaled?: T;
+  rateScaled?: T;
+  amountScaled?: T;
+  taxScaled?: T;
+  currency?: T;
+  accountCode?: T;
+  taxType?: T;
+  tracking?: T;
+  releasedAt?: T;
+  schemaVersion?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "xero-attempts_select".
+ */
+export interface XeroAttemptsSelect<T extends boolean = true> {
+  invoiceExport?: T;
+  attemptNumber?: T;
+  operation?: T;
+  method?: T;
+  safeResponseMetadata?: T;
+  payloadHash?: T;
+  idempotencyKey?: T;
+  claimId?: T;
+  leaseExpiresAt?: T;
+  requestStartedAt?: T;
+  requestMayHaveBeenSent?: T;
+  completedAt?: T;
+  result?: T;
+  httpStatus?: T;
+  xeroCorrelationId?: T;
+  rateLimitRemaining?: T;
+  retryAfterSeconds?: T;
+  errorCode?: T;
+  errorMessage?: T;
+  replacesAttempt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "xero-contact-operations_select".
+ */
+export interface XeroContactOperationsSelect<T extends boolean = true> {
+  applicationReference?: T;
+  idempotencyKey?: T;
+  customer?: T;
+  requestedBy?: T;
+  state?: T;
+  payloadHash?: T;
+  requestPayload?: T;
+  xeroContactId?: T;
+  attemptCount?: T;
+  lastErrorCode?: T;
+  lastErrorMessage?: T;
+  completedAt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "xero-webhook-receipts_select".
+ */
+export interface XeroWebhookReceiptsSelect<T extends boolean = true> {
+  deduplicationKey?: T;
+  tenantId?: T;
+  resourceType?: T;
+  resourceId?: T;
+  eventType?: T;
+  eventAt?: T;
+  receivedAt?: T;
+  processedAt?: T;
+  status?: T;
+  jobId?: T;
+  retryCount?: T;
+  processingLeaseId?: T;
+  processingLeaseExpiresAt?: T;
+  failureCode?: T;
+  failureMessage?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "release-actions_select".
+ */
+export interface ReleaseActionsSelect<T extends boolean = true> {
+  sourceExport?: T;
+  actor?: T;
+  reason?: T;
+  remoteStatus?: T;
+  remoteVerifiedAt?: T;
+  releasedAt?: T;
+  entryIds?: T;
+  entryCount?: T;
+  durationSeconds?: T;
+  amountScaled?: T;
+  before?: T;
+  after?: T;
+  replacementExports?: T;
+  schemaVersion?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "audit-events_select".
+ */
+export interface AuditEventsSelect<T extends boolean = true> {
+  eventType?: T;
+  actorType?: T;
+  actor?: T;
+  machineActor?: T;
+  targetCollection?: T;
+  targetId?: T;
+  customerId?: T;
+  correlationId?: T;
+  exportId?: T;
+  xeroInvoiceId?: T;
+  occurredAt?: T;
+  reason?: T;
+  before?: T;
+  after?: T;
+  metadata?: T;
+  schemaVersion?: T;
+  updatedAt?: T;
+  createdAt?: T;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -282,6 +2434,44 @@ export interface MediaSelect<T extends boolean = true> {
 export interface PayloadKvSelect<T extends boolean = true> {
   key?: T;
   data?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payload-jobs_select".
+ */
+export interface PayloadJobsSelect<T extends boolean = true> {
+  input?: T;
+  taskStatus?: T;
+  completedAt?: T;
+  totalTried?: T;
+  hasError?: T;
+  error?: T;
+  log?:
+    | T
+    | {
+        executedAt?: T;
+        completedAt?: T;
+        taskSlug?: T;
+        taskID?: T;
+        input?: T;
+        output?: T;
+        state?: T;
+        error?: T;
+        parent?:
+          | T
+          | {
+              taskSlug?: T;
+              taskID?: T;
+            };
+        id?: T;
+      };
+  taskSlug?: T;
+  queue?: T;
+  waitUntil?: T;
+  processing?: T;
+  concurrencyKey?: T;
+  updatedAt?: T;
+  createdAt?: T;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -316,6 +2506,821 @@ export interface PayloadMigrationsSelect<T extends boolean = true> {
   createdAt?: T;
 }
 /**
+ * Business-wide display defaults. Historical time and invoice snapshots are not rewritten when these values change.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "business-settings".
+ */
+export interface BusinessSetting {
+  id: string;
+  /**
+   * Displayed throughout the application and on internal reports.
+   */
+  businessName: string;
+  /**
+   * Fallback only. Each user and time entry may select another IANA timezone.
+   */
+  defaultTimezone:
+    | 'Pacific/Auckland'
+    | 'Africa/Abidjan'
+    | 'Africa/Accra'
+    | 'Africa/Addis_Ababa'
+    | 'Africa/Algiers'
+    | 'Africa/Asmera'
+    | 'Africa/Bamako'
+    | 'Africa/Bangui'
+    | 'Africa/Banjul'
+    | 'Africa/Bissau'
+    | 'Africa/Blantyre'
+    | 'Africa/Brazzaville'
+    | 'Africa/Bujumbura'
+    | 'Africa/Cairo'
+    | 'Africa/Casablanca'
+    | 'Africa/Ceuta'
+    | 'Africa/Conakry'
+    | 'Africa/Dakar'
+    | 'Africa/Dar_es_Salaam'
+    | 'Africa/Djibouti'
+    | 'Africa/Douala'
+    | 'Africa/El_Aaiun'
+    | 'Africa/Freetown'
+    | 'Africa/Gaborone'
+    | 'Africa/Harare'
+    | 'Africa/Johannesburg'
+    | 'Africa/Juba'
+    | 'Africa/Kampala'
+    | 'Africa/Khartoum'
+    | 'Africa/Kigali'
+    | 'Africa/Kinshasa'
+    | 'Africa/Lagos'
+    | 'Africa/Libreville'
+    | 'Africa/Lome'
+    | 'Africa/Luanda'
+    | 'Africa/Lubumbashi'
+    | 'Africa/Lusaka'
+    | 'Africa/Malabo'
+    | 'Africa/Maputo'
+    | 'Africa/Maseru'
+    | 'Africa/Mbabane'
+    | 'Africa/Mogadishu'
+    | 'Africa/Monrovia'
+    | 'Africa/Nairobi'
+    | 'Africa/Ndjamena'
+    | 'Africa/Niamey'
+    | 'Africa/Nouakchott'
+    | 'Africa/Ouagadougou'
+    | 'Africa/Porto-Novo'
+    | 'Africa/Sao_Tome'
+    | 'Africa/Tripoli'
+    | 'Africa/Tunis'
+    | 'Africa/Windhoek'
+    | 'America/Adak'
+    | 'America/Anchorage'
+    | 'America/Anguilla'
+    | 'America/Antigua'
+    | 'America/Araguaina'
+    | 'America/Argentina/La_Rioja'
+    | 'America/Argentina/Rio_Gallegos'
+    | 'America/Argentina/Salta'
+    | 'America/Argentina/San_Juan'
+    | 'America/Argentina/San_Luis'
+    | 'America/Argentina/Tucuman'
+    | 'America/Argentina/Ushuaia'
+    | 'America/Aruba'
+    | 'America/Asuncion'
+    | 'America/Bahia'
+    | 'America/Bahia_Banderas'
+    | 'America/Barbados'
+    | 'America/Belem'
+    | 'America/Belize'
+    | 'America/Blanc-Sablon'
+    | 'America/Boa_Vista'
+    | 'America/Bogota'
+    | 'America/Boise'
+    | 'America/Buenos_Aires'
+    | 'America/Cambridge_Bay'
+    | 'America/Campo_Grande'
+    | 'America/Cancun'
+    | 'America/Caracas'
+    | 'America/Catamarca'
+    | 'America/Cayenne'
+    | 'America/Cayman'
+    | 'America/Chicago'
+    | 'America/Chihuahua'
+    | 'America/Ciudad_Juarez'
+    | 'America/Coral_Harbour'
+    | 'America/Cordoba'
+    | 'America/Costa_Rica'
+    | 'America/Creston'
+    | 'America/Cuiaba'
+    | 'America/Curacao'
+    | 'America/Danmarkshavn'
+    | 'America/Dawson'
+    | 'America/Dawson_Creek'
+    | 'America/Denver'
+    | 'America/Detroit'
+    | 'America/Dominica'
+    | 'America/Edmonton'
+    | 'America/Eirunepe'
+    | 'America/El_Salvador'
+    | 'America/Fort_Nelson'
+    | 'America/Fortaleza'
+    | 'America/Glace_Bay'
+    | 'America/Godthab'
+    | 'America/Goose_Bay'
+    | 'America/Grand_Turk'
+    | 'America/Grenada'
+    | 'America/Guadeloupe'
+    | 'America/Guatemala'
+    | 'America/Guayaquil'
+    | 'America/Guyana'
+    | 'America/Halifax'
+    | 'America/Havana'
+    | 'America/Hermosillo'
+    | 'America/Indiana/Knox'
+    | 'America/Indiana/Marengo'
+    | 'America/Indiana/Petersburg'
+    | 'America/Indiana/Tell_City'
+    | 'America/Indiana/Vevay'
+    | 'America/Indiana/Vincennes'
+    | 'America/Indiana/Winamac'
+    | 'America/Indianapolis'
+    | 'America/Inuvik'
+    | 'America/Iqaluit'
+    | 'America/Jamaica'
+    | 'America/Jujuy'
+    | 'America/Juneau'
+    | 'America/Kentucky/Monticello'
+    | 'America/Kralendijk'
+    | 'America/La_Paz'
+    | 'America/Lima'
+    | 'America/Los_Angeles'
+    | 'America/Louisville'
+    | 'America/Lower_Princes'
+    | 'America/Maceio'
+    | 'America/Managua'
+    | 'America/Manaus'
+    | 'America/Marigot'
+    | 'America/Martinique'
+    | 'America/Matamoros'
+    | 'America/Mazatlan'
+    | 'America/Mendoza'
+    | 'America/Menominee'
+    | 'America/Merida'
+    | 'America/Metlakatla'
+    | 'America/Mexico_City'
+    | 'America/Miquelon'
+    | 'America/Moncton'
+    | 'America/Monterrey'
+    | 'America/Montevideo'
+    | 'America/Montserrat'
+    | 'America/Nassau'
+    | 'America/New_York'
+    | 'America/Nome'
+    | 'America/Noronha'
+    | 'America/North_Dakota/Beulah'
+    | 'America/North_Dakota/Center'
+    | 'America/North_Dakota/New_Salem'
+    | 'America/Ojinaga'
+    | 'America/Panama'
+    | 'America/Paramaribo'
+    | 'America/Phoenix'
+    | 'America/Port_of_Spain'
+    | 'America/Port-au-Prince'
+    | 'America/Porto_Velho'
+    | 'America/Puerto_Rico'
+    | 'America/Punta_Arenas'
+    | 'America/Rankin_Inlet'
+    | 'America/Recife'
+    | 'America/Regina'
+    | 'America/Resolute'
+    | 'America/Rio_Branco'
+    | 'America/Santarem'
+    | 'America/Santiago'
+    | 'America/Santo_Domingo'
+    | 'America/Sao_Paulo'
+    | 'America/Scoresbysund'
+    | 'America/Sitka'
+    | 'America/St_Barthelemy'
+    | 'America/St_Johns'
+    | 'America/St_Kitts'
+    | 'America/St_Lucia'
+    | 'America/St_Thomas'
+    | 'America/St_Vincent'
+    | 'America/Swift_Current'
+    | 'America/Tegucigalpa'
+    | 'America/Thule'
+    | 'America/Tijuana'
+    | 'America/Toronto'
+    | 'America/Tortola'
+    | 'America/Vancouver'
+    | 'America/Whitehorse'
+    | 'America/Winnipeg'
+    | 'America/Yakutat'
+    | 'Antarctica/Casey'
+    | 'Antarctica/Davis'
+    | 'Antarctica/DumontDUrville'
+    | 'Antarctica/Macquarie'
+    | 'Antarctica/Mawson'
+    | 'Antarctica/McMurdo'
+    | 'Antarctica/Palmer'
+    | 'Antarctica/Rothera'
+    | 'Antarctica/Syowa'
+    | 'Antarctica/Troll'
+    | 'Antarctica/Vostok'
+    | 'Arctic/Longyearbyen'
+    | 'Asia/Aden'
+    | 'Asia/Almaty'
+    | 'Asia/Amman'
+    | 'Asia/Anadyr'
+    | 'Asia/Aqtau'
+    | 'Asia/Aqtobe'
+    | 'Asia/Ashgabat'
+    | 'Asia/Atyrau'
+    | 'Asia/Baghdad'
+    | 'Asia/Bahrain'
+    | 'Asia/Baku'
+    | 'Asia/Bangkok'
+    | 'Asia/Barnaul'
+    | 'Asia/Beirut'
+    | 'Asia/Bishkek'
+    | 'Asia/Brunei'
+    | 'Asia/Calcutta'
+    | 'Asia/Chita'
+    | 'Asia/Colombo'
+    | 'Asia/Damascus'
+    | 'Asia/Dhaka'
+    | 'Asia/Dili'
+    | 'Asia/Dubai'
+    | 'Asia/Dushanbe'
+    | 'Asia/Famagusta'
+    | 'Asia/Gaza'
+    | 'Asia/Hebron'
+    | 'Asia/Hong_Kong'
+    | 'Asia/Hovd'
+    | 'Asia/Irkutsk'
+    | 'Asia/Jakarta'
+    | 'Asia/Jayapura'
+    | 'Asia/Jerusalem'
+    | 'Asia/Kabul'
+    | 'Asia/Kamchatka'
+    | 'Asia/Karachi'
+    | 'Asia/Katmandu'
+    | 'Asia/Khandyga'
+    | 'Asia/Krasnoyarsk'
+    | 'Asia/Kuala_Lumpur'
+    | 'Asia/Kuching'
+    | 'Asia/Kuwait'
+    | 'Asia/Macau'
+    | 'Asia/Magadan'
+    | 'Asia/Makassar'
+    | 'Asia/Manila'
+    | 'Asia/Muscat'
+    | 'Asia/Nicosia'
+    | 'Asia/Novokuznetsk'
+    | 'Asia/Novosibirsk'
+    | 'Asia/Omsk'
+    | 'Asia/Oral'
+    | 'Asia/Phnom_Penh'
+    | 'Asia/Pontianak'
+    | 'Asia/Pyongyang'
+    | 'Asia/Qatar'
+    | 'Asia/Qostanay'
+    | 'Asia/Qyzylorda'
+    | 'Asia/Rangoon'
+    | 'Asia/Riyadh'
+    | 'Asia/Saigon'
+    | 'Asia/Sakhalin'
+    | 'Asia/Samarkand'
+    | 'Asia/Seoul'
+    | 'Asia/Shanghai'
+    | 'Asia/Singapore'
+    | 'Asia/Srednekolymsk'
+    | 'Asia/Taipei'
+    | 'Asia/Tashkent'
+    | 'Asia/Tbilisi'
+    | 'Asia/Tehran'
+    | 'Asia/Thimphu'
+    | 'Asia/Tokyo'
+    | 'Asia/Tomsk'
+    | 'Asia/Ulaanbaatar'
+    | 'Asia/Urumqi'
+    | 'Asia/Ust-Nera'
+    | 'Asia/Vientiane'
+    | 'Asia/Vladivostok'
+    | 'Asia/Yakutsk'
+    | 'Asia/Yekaterinburg'
+    | 'Asia/Yerevan'
+    | 'Atlantic/Azores'
+    | 'Atlantic/Bermuda'
+    | 'Atlantic/Canary'
+    | 'Atlantic/Cape_Verde'
+    | 'Atlantic/Faeroe'
+    | 'Atlantic/Madeira'
+    | 'Atlantic/Reykjavik'
+    | 'Atlantic/South_Georgia'
+    | 'Atlantic/St_Helena'
+    | 'Atlantic/Stanley'
+    | 'Australia/Adelaide'
+    | 'Australia/Brisbane'
+    | 'Australia/Broken_Hill'
+    | 'Australia/Darwin'
+    | 'Australia/Eucla'
+    | 'Australia/Hobart'
+    | 'Australia/Lindeman'
+    | 'Australia/Lord_Howe'
+    | 'Australia/Melbourne'
+    | 'Australia/Perth'
+    | 'Australia/Sydney'
+    | 'Europe/Amsterdam'
+    | 'Europe/Andorra'
+    | 'Europe/Astrakhan'
+    | 'Europe/Athens'
+    | 'Europe/Belgrade'
+    | 'Europe/Berlin'
+    | 'Europe/Bratislava'
+    | 'Europe/Brussels'
+    | 'Europe/Bucharest'
+    | 'Europe/Budapest'
+    | 'Europe/Busingen'
+    | 'Europe/Chisinau'
+    | 'Europe/Copenhagen'
+    | 'Europe/Dublin'
+    | 'Europe/Gibraltar'
+    | 'Europe/Guernsey'
+    | 'Europe/Helsinki'
+    | 'Europe/Isle_of_Man'
+    | 'Europe/Istanbul'
+    | 'Europe/Jersey'
+    | 'Europe/Kaliningrad'
+    | 'Europe/Kiev'
+    | 'Europe/Kirov'
+    | 'Europe/Lisbon'
+    | 'Europe/Ljubljana'
+    | 'Europe/London'
+    | 'Europe/Luxembourg'
+    | 'Europe/Madrid'
+    | 'Europe/Malta'
+    | 'Europe/Mariehamn'
+    | 'Europe/Minsk'
+    | 'Europe/Monaco'
+    | 'Europe/Moscow'
+    | 'Europe/Oslo'
+    | 'Europe/Paris'
+    | 'Europe/Podgorica'
+    | 'Europe/Prague'
+    | 'Europe/Riga'
+    | 'Europe/Rome'
+    | 'Europe/Samara'
+    | 'Europe/San_Marino'
+    | 'Europe/Sarajevo'
+    | 'Europe/Saratov'
+    | 'Europe/Simferopol'
+    | 'Europe/Skopje'
+    | 'Europe/Sofia'
+    | 'Europe/Stockholm'
+    | 'Europe/Tallinn'
+    | 'Europe/Tirane'
+    | 'Europe/Ulyanovsk'
+    | 'Europe/Vaduz'
+    | 'Europe/Vatican'
+    | 'Europe/Vienna'
+    | 'Europe/Vilnius'
+    | 'Europe/Volgograd'
+    | 'Europe/Warsaw'
+    | 'Europe/Zagreb'
+    | 'Europe/Zurich'
+    | 'Indian/Antananarivo'
+    | 'Indian/Chagos'
+    | 'Indian/Christmas'
+    | 'Indian/Cocos'
+    | 'Indian/Comoro'
+    | 'Indian/Kerguelen'
+    | 'Indian/Mahe'
+    | 'Indian/Maldives'
+    | 'Indian/Mauritius'
+    | 'Indian/Mayotte'
+    | 'Indian/Reunion'
+    | 'Pacific/Apia'
+    | 'Pacific/Bougainville'
+    | 'Pacific/Chatham'
+    | 'Pacific/Easter'
+    | 'Pacific/Efate'
+    | 'Pacific/Enderbury'
+    | 'Pacific/Fakaofo'
+    | 'Pacific/Fiji'
+    | 'Pacific/Funafuti'
+    | 'Pacific/Galapagos'
+    | 'Pacific/Gambier'
+    | 'Pacific/Guadalcanal'
+    | 'Pacific/Guam'
+    | 'Pacific/Honolulu'
+    | 'Pacific/Kiritimati'
+    | 'Pacific/Kosrae'
+    | 'Pacific/Kwajalein'
+    | 'Pacific/Majuro'
+    | 'Pacific/Marquesas'
+    | 'Pacific/Midway'
+    | 'Pacific/Nauru'
+    | 'Pacific/Niue'
+    | 'Pacific/Norfolk'
+    | 'Pacific/Noumea'
+    | 'Pacific/Pago_Pago'
+    | 'Pacific/Palau'
+    | 'Pacific/Pitcairn'
+    | 'Pacific/Ponape'
+    | 'Pacific/Port_Moresby'
+    | 'Pacific/Rarotonga'
+    | 'Pacific/Saipan'
+    | 'Pacific/Tahiti'
+    | 'Pacific/Tarawa'
+    | 'Pacific/Tongatapu'
+    | 'Pacific/Truk'
+    | 'Pacific/Wake'
+    | 'Pacific/Wallis'
+    | 'UTC';
+  /**
+   * Default ISO currency for newly created customers and projects.
+   */
+  baseCurrency:
+    | 'NZD'
+    | 'AED'
+    | 'AFN'
+    | 'ALL'
+    | 'AMD'
+    | 'ANG'
+    | 'AOA'
+    | 'ARS'
+    | 'AUD'
+    | 'AWG'
+    | 'AZN'
+    | 'BAM'
+    | 'BBD'
+    | 'BDT'
+    | 'BGN'
+    | 'BHD'
+    | 'BIF'
+    | 'BMD'
+    | 'BND'
+    | 'BOB'
+    | 'BRL'
+    | 'BSD'
+    | 'BTN'
+    | 'BWP'
+    | 'BYN'
+    | 'BZD'
+    | 'CAD'
+    | 'CDF'
+    | 'CHF'
+    | 'CLP'
+    | 'CNY'
+    | 'COP'
+    | 'CRC'
+    | 'CUC'
+    | 'CUP'
+    | 'CVE'
+    | 'CZK'
+    | 'DJF'
+    | 'DKK'
+    | 'DOP'
+    | 'DZD'
+    | 'EGP'
+    | 'ERN'
+    | 'ETB'
+    | 'EUR'
+    | 'FJD'
+    | 'FKP'
+    | 'GBP'
+    | 'GEL'
+    | 'GHS'
+    | 'GIP'
+    | 'GMD'
+    | 'GNF'
+    | 'GTQ'
+    | 'GYD'
+    | 'HKD'
+    | 'HNL'
+    | 'HRK'
+    | 'HTG'
+    | 'HUF'
+    | 'IDR'
+    | 'ILS'
+    | 'INR'
+    | 'IQD'
+    | 'IRR'
+    | 'ISK'
+    | 'JMD'
+    | 'JOD'
+    | 'JPY'
+    | 'KES'
+    | 'KGS'
+    | 'KHR'
+    | 'KMF'
+    | 'KPW'
+    | 'KRW'
+    | 'KWD'
+    | 'KYD'
+    | 'KZT'
+    | 'LAK'
+    | 'LBP'
+    | 'LKR'
+    | 'LRD'
+    | 'LSL'
+    | 'LYD'
+    | 'MAD'
+    | 'MDL'
+    | 'MGA'
+    | 'MKD'
+    | 'MMK'
+    | 'MNT'
+    | 'MOP'
+    | 'MRU'
+    | 'MUR'
+    | 'MVR'
+    | 'MWK'
+    | 'MXN'
+    | 'MYR'
+    | 'MZN'
+    | 'NAD'
+    | 'NGN'
+    | 'NIO'
+    | 'NOK'
+    | 'NPR'
+    | 'OMR'
+    | 'PAB'
+    | 'PEN'
+    | 'PGK'
+    | 'PHP'
+    | 'PKR'
+    | 'PLN'
+    | 'PYG'
+    | 'QAR'
+    | 'RON'
+    | 'RSD'
+    | 'RUB'
+    | 'RWF'
+    | 'SAR'
+    | 'SBD'
+    | 'SCR'
+    | 'SDG'
+    | 'SEK'
+    | 'SGD'
+    | 'SHP'
+    | 'SLE'
+    | 'SLL'
+    | 'SOS'
+    | 'SRD'
+    | 'SSP'
+    | 'STN'
+    | 'SVC'
+    | 'SYP'
+    | 'SZL'
+    | 'THB'
+    | 'TJS'
+    | 'TMT'
+    | 'TND'
+    | 'TOP'
+    | 'TRY'
+    | 'TTD'
+    | 'TWD'
+    | 'TZS'
+    | 'UAH'
+    | 'UGX'
+    | 'USD'
+    | 'UYU'
+    | 'UZS'
+    | 'VES'
+    | 'VND'
+    | 'VUV'
+    | 'WST'
+    | 'XAF'
+    | 'XCD'
+    | 'XCG'
+    | 'XDR'
+    | 'XOF'
+    | 'XPF'
+    | 'XSU'
+    | 'YER'
+    | 'ZAR'
+    | 'ZMW'
+    | 'ZWG'
+    | 'ZWL';
+  /**
+   * BCP 47 locale used for application display, for example en-NZ.
+   */
+  locale: string;
+  dateDisplayStyle: 'medium' | 'short' | 'long';
+  timeDisplayStyle: '24-hour' | '12-hour';
+  /**
+   * Optional address shown to users who need help.
+   */
+  supportEmail?: string | null;
+  supportPhone?: string | null;
+  updatedAt?: string | null;
+  createdAt?: string | null;
+}
+/**
+ * Controls optional Xero identity sign-in and local external-session policy. Email/password recovery remains enabled.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "authentication-settings".
+ */
+export interface AuthenticationSetting {
+  id: string;
+  /**
+   * Always enabled so the final owner retains a recovery path independent of Xero.
+   */
+  emailPasswordEnabled: boolean;
+  /**
+   * Enables identity-only “Sign in with Xero”. This does not affect the business accounting connection.
+   */
+  xeroIdentityLoginEnabled?: boolean | null;
+  /**
+   * Allows an authenticated user to link a Xero identity.
+   */
+  xeroIdentityLinkingEnabled?: boolean | null;
+  /**
+   * Allows a valid invitation to be accepted using Xero identity.
+   */
+  xeroIdentityInviteAcceptanceEnabled?: boolean | null;
+  /**
+   * Roles offered Xero identity sign-in during staged rollout. Local roles remain authoritative.
+   */
+  xeroIdentityRolloutRoles?: ('owner' | 'admin' | 'biller' | 'member')[] | null;
+  /**
+   * Idle lifetime in minutes. Default: 7 days.
+   */
+  externalSessionIdleMinutes: number;
+  /**
+   * Maximum lifetime in minutes. Default: 30 days.
+   */
+  externalSessionAbsoluteMinutes: number;
+  /**
+   * Shows safe active-session metadata on the account-security page.
+   */
+  showSessionManagement?: boolean | null;
+  /**
+   * After a successful login, a non-blocking accounting health check may be queued when the last check is older than this. Identity tokens are never used.
+   */
+  staleAccountingHealthCheckHours: number;
+  updatedAt?: string | null;
+  createdAt?: string | null;
+}
+/**
+ * Defaults for future invoice previews and exports. Saved time and invoice snapshots are immutable.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "billing-settings".
+ */
+export interface BillingSetting {
+  id: string;
+  /**
+   * Leave blank until a revenue account is selected from the connected Xero organisation.
+   */
+  defaultRevenueAccountCode?: string | null;
+  /**
+   * Xero TaxType selected from reference data. Leave blank until Xero is connected.
+   */
+  defaultTaxType?: string | null;
+  /**
+   * Sent explicitly on each new draft invoice.
+   */
+  lineAmountType: 'Exclusive' | 'Inclusive' | 'NoTax';
+  paymentTerms: {
+    basis: 'days-after-invoice' | 'day-of-following-month';
+    /**
+     * For following-month terms, enter a calendar day from 1 to 31.
+     */
+    value: number;
+  };
+  /**
+   * Prefix for the stable application reference used in reconciliation.
+   */
+  invoiceReferencePrefix: string;
+  /**
+   * One Xero line is created per time entry. Supported tokens: {{description}}, {{projectCode}}, {{projectName}}, {{workDate}}, {{userName}}.
+   */
+  invoiceLineDescriptionTemplate: string;
+  /**
+   * Optional default array of {name, option} values. A project may replace this list.
+   */
+  defaultTrackingCategories?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * Optional array of category names that every invoice line must resolve.
+   */
+  requiredTrackingCategoryNames?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * Owner-controlled kill switch. Existing export history and queued work are retained.
+   */
+  acceptingNewExports: boolean;
+  /**
+   * Allows queue workers to contact Xero. Disabling this preserves pending work for safe resumption.
+   */
+  processingEnabled: boolean;
+  /**
+   * Allows synchronous wait mode. Background exports can remain enabled independently.
+   */
+  waitForResultEnabled: boolean;
+  /**
+   * Both modes persist the same durable job. “Wait for Xero” may still finish in the background after a timeout or interruption.
+   */
+  xeroExportMode: 'background' | 'wait-for-result';
+  /**
+   * When disabled, billers cannot override the configured mode for an individual export.
+   */
+  allowBillerModeOverride?: boolean | null;
+  /**
+   * A larger batch is forced to background mode regardless of the configured mode.
+   */
+  maxWaitInvoices: number;
+  /**
+   * Maximum total invoice lines allowed in “Wait for Xero” mode.
+   */
+  maxWaitLines: number;
+  updatedAt?: string | null;
+  createdAt?: string | null;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "business-settings_select".
+ */
+export interface BusinessSettingsSelect<T extends boolean = true> {
+  businessName?: T;
+  defaultTimezone?: T;
+  baseCurrency?: T;
+  locale?: T;
+  dateDisplayStyle?: T;
+  timeDisplayStyle?: T;
+  supportEmail?: T;
+  supportPhone?: T;
+  updatedAt?: T;
+  createdAt?: T;
+  globalType?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "authentication-settings_select".
+ */
+export interface AuthenticationSettingsSelect<T extends boolean = true> {
+  emailPasswordEnabled?: T;
+  xeroIdentityLoginEnabled?: T;
+  xeroIdentityLinkingEnabled?: T;
+  xeroIdentityInviteAcceptanceEnabled?: T;
+  xeroIdentityRolloutRoles?: T;
+  externalSessionIdleMinutes?: T;
+  externalSessionAbsoluteMinutes?: T;
+  showSessionManagement?: T;
+  staleAccountingHealthCheckHours?: T;
+  updatedAt?: T;
+  createdAt?: T;
+  globalType?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "billing-settings_select".
+ */
+export interface BillingSettingsSelect<T extends boolean = true> {
+  defaultRevenueAccountCode?: T;
+  defaultTaxType?: T;
+  lineAmountType?: T;
+  paymentTerms?:
+    | T
+    | {
+        basis?: T;
+        value?: T;
+      };
+  invoiceReferencePrefix?: T;
+  invoiceLineDescriptionTemplate?: T;
+  defaultTrackingCategories?: T;
+  requiredTrackingCategoryNames?: T;
+  acceptingNewExports?: T;
+  processingEnabled?: T;
+  waitForResultEnabled?: T;
+  xeroExportMode?: T;
+  allowBillerModeOverride?: T;
+  maxWaitInvoices?: T;
+  maxWaitLines?: T;
+  updatedAt?: T;
+  createdAt?: T;
+  globalType?: T;
+}
+/**
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "collections_widget".
  */
@@ -324,6 +3329,66 @@ export interface CollectionsWidget {
     [k: string]: unknown;
   };
   width: 'full';
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskCreate-xero-invoice".
+ */
+export interface TaskCreateXeroInvoice {
+  input: {
+    exportID: string;
+  };
+  output: {
+    state: string;
+  };
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskReconcile-xero-invoice".
+ */
+export interface TaskReconcileXeroInvoice {
+  input: {
+    exportID: string;
+  };
+  output: {
+    state: string;
+  };
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskProcess-xero-webhook-receipt".
+ */
+export interface TaskProcessXeroWebhookReceipt {
+  input: {
+    receiptID: string;
+  };
+  output: {
+    state: string;
+  };
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskRefresh-xero-invoice-status".
+ */
+export interface TaskRefreshXeroInvoiceStatus {
+  input: {
+    exportID: string;
+  };
+  output: {
+    state: string;
+  };
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskMaintain-xero-accounting".
+ */
+export interface TaskMaintainXeroAccounting {
+  input: {
+    reason: string;
+  };
+  output: {
+    state: string;
+  };
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["syd1"],
+  "crons": [
+    {
+      "path": "/api/jobs/xero/run",
+      "schedule": "* * * * *"
+    }
+  ],
+  "functions": {
+    "src/app/(frontend)/api/jobs/xero/run/route.ts": {
+      "maxDuration": 60
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "Invoices": [
+    {
+      "Contact": { "ContactID": "44444444-4444-4444-8444-444444444444" },
+      "CurrencyCode": "NZD",
+      "InvoiceID": "55555555-5555-4555-8555-555555555555",
+      "InvoiceNumber": "INV-REDACTED-1",
+      "LineItems": [
+        {
+          "AccountCode": "200",
+          "Description": "2026-07-18 · REDACTED · Representative work description",
+          "LineItemID": "66666666-6666-4666-8666-666666666666",
+          "Quantity": 1,
+          "TaxType": "OUTPUT2",
+          "UnitAmount": 150
+        }
+      ],
+      "Reference": "TIME-REDACTED-1",
+      "Status": "DRAFT",
+      "SubTotal": 150,
+      "Total": 172.5
+    }
+  ]
+}

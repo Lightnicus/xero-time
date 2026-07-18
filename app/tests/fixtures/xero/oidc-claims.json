@@ -1,0 +1,9 @@
+{
+  "aud": "redacted-identity-client",
+  "email": "redacted.member@example.test",
+  "email_verified": true,
+  "iss": "https://identity.xero.com",
+  "name": "Redacted Member",
+  "nonce": "REDACTED_NONCE",
+  "sub": "redacted-provider-subject"
+}

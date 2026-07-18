@@ -1,0 +1,17 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /app
+    schedule:
+      interval: weekly
+    groups:
+      payload:
+        patterns:
+          - payload
+          - "@payloadcms/*"
+      next-react:
+        patterns:
+          - next
+          - react
+          - react-dom
+    open-pull-requests-limit: 10

@@ -8,6 +8,7 @@
   "scripts": {
     "build": "cross-env NODE_OPTIONS=\"--no-deprecation --max-old-space-size=8000\" next build",
     "check": "pnpm lint && pnpm typecheck && pnpm format:check",
+    "check:compat": "cross-env NODE_OPTIONS=--no-deprecation tsx scripts/compatibility-smoke.ts",
     "db:start": "node scripts/mongodb.mjs start",
     "db:status": "node scripts/mongodb.mjs status",
     "db:stop": "node scripts/mongodb.mjs stop",
@@ -18,26 +19,41 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "cross-env NODE_OPTIONS=--no-deprecation eslint .",
+    "migrate": "cross-env NODE_OPTIONS=--no-deprecation payload migrate",
+    "migrate:create": "cross-env NODE_OPTIONS=--no-deprecation payload migrate:create",
+    "migrate:status": "cross-env NODE_OPTIONS=--no-deprecation payload migrate:status",
     "payload": "cross-env NODE_OPTIONS=--no-deprecation payload",
+    "seed:owner": "cross-env NODE_OPTIONS=--no-deprecation tsx scripts/seed-owner.ts",
     "start": "cross-env NODE_OPTIONS=--no-deprecation next start",
-    "test": "pnpm run test:int && pnpm run test:e2e",
+    "test": "pnpm run test:unit && pnpm run test:int && pnpm run test:e2e",
+    "test:coverage": "cross-env NODE_OPTIONS=--no-deprecation vitest run --coverage --config ./vitest.config.mts tests/unit tests/int",
     "test:e2e": "cross-env NODE_OPTIONS=\"--no-deprecation --import=tsx/esm\" playwright test --config=playwright.config.ts",
-    "test:int": "cross-env NODE_OPTIONS=--no-deprecation vitest run --config ./vitest.config.mts",
-    "typecheck": "tsc --noEmit"
+    "test:int": "cross-env NODE_OPTIONS=--no-deprecation vitest run --config ./vitest.config.mts tests/int",
+    "test:perf": "cross-env NODE_OPTIONS=--no-deprecation vitest run --config ./vitest.config.mts tests/performance",
+    "test:unit": "cross-env NODE_OPTIONS=--no-deprecation vitest run --config ./vitest.config.mts tests/unit",
+    "test:xero-contract": "cross-env NODE_OPTIONS=--no-deprecation tsx tests/manual/xero-demo-company-contract.ts",
+    "typecheck": "tsc --noEmit",
+    "verify:generated": "node scripts/verify-generated.mjs",
+    "verify:indexes": "cross-env NODE_OPTIONS=--no-deprecation tsx scripts/verify-indexes.ts",
+    "verify:licenses": "node scripts/verify-licenses.mjs",
+    "verify:secrets": "node scripts/scan-secrets.mjs"
   },
   "dependencies": {
+    "@payloadcms/db-mongodb": "3.86.0",
+    "@payloadcms/email-resend": "3.86.0",
     "@payloadcms/next": "3.86.0",
     "@payloadcms/richtext-lexical": "3.86.0",
     "@payloadcms/ui": "3.86.0",
     "cross-env": "^7.0.3",
     "dotenv": "16.4.7",
     "graphql": "^16.8.1",
+    "jose": "^6.2.3",
     "next": "16.2.6",
+    "openid-client": "6.8.4",
     "payload": "3.86.0",
     "react": "19.2.6",
     "react-dom": "19.2.6",
-    "sharp": "0.34.2",
-    "@payloadcms/db-mongodb": "3.86.0"
+    "sharp": "0.34.2"
   },
   "devDependencies": {
     "@playwright/test": "1.58.2",
@@ -46,8 +62,10 @@
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "4.5.2",
+    "@vitest/coverage-v8": "4.0.18",
     "eslint": "^9.16.0",
     "eslint-config-next": "16.2.6",
+    "eslint-plugin-import": "2.32.0",
     "jsdom": "28.0.0",
     "prettier": "^3.4.2",
     "tsx": "4.22.4",
@@ -61,6 +79,10 @@
   },
   "packageManager": "pnpm@10.28.1",
   "pnpm": {
+    "overrides": {
+      "dompurify": "3.4.11",
+      "postcss": "8.5.10"
+    },
     "onlyBuiltDependencies": [
       "sharp",
       "esbuild",

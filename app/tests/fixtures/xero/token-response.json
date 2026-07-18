@@ -1,0 +1,7 @@
+{
+  "access_token": "REDACTED_ACCESS_TOKEN",
+  "expires_in": 1800,
+  "refresh_token": "REDACTED_REFRESH_TOKEN",
+  "scope": "offline_access accounting.invoices accounting.contacts accounting.settings.read",
+  "token_type": "Bearer"
+}
