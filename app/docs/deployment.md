@@ -1,6 +1,6 @@
 # Deployment and environment isolation
 
-Set Vercel Root Directory to `app`, Node.js 24, and a region close to the chosen Atlas region. Use separate Vercel projects/environments, Atlas databases (prefer separate projects), Resend keys/senders, hostnames, and two Xero app registrations per hosted environment. Never expose production database or provider secrets to preview deployments; preview must default to an isolated database or no protected integration credentials.
+Set Vercel Root Directory to `app`, Framework Preset to Next.js, the Output Directory override to disabled, Node.js to 24, and a region close to the chosen Atlas region. Do not set a static `public` or `.next` output directory; Vercel must use its Next.js runtime defaults. Use separate Vercel projects/environments, Atlas databases (prefer separate projects), Resend keys/senders, hostnames, and two Xero app registrations per hosted environment. Never expose production database or provider secrets to preview deployments; preview must default to an isolated database or no protected integration credentials.
 
 Production requires Vercel Pro for the one-minute cron and Atlas Flex or better for backup support. Choose either restricted static egress where available, or a documented broad Atlas network allow-list combined with a least-privilege application database user, TLS, short credential rotation, and alerts. Do not retain a Marketplace administrator credential.
 

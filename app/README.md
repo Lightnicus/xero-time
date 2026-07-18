@@ -147,6 +147,7 @@ End-to-end tests additionally require Playwright's browser binaries. Playwright 
 When creating the Vercel project:
 
 - Set **Root Directory** to `app`.
+- Use the **Next.js** Framework Preset and leave the Output Directory override disabled; do not set it to `public` or `.next`.
 - Use Node.js 24.
 - Confirm the MongoDB integration supplies `MONGODB_URI`, then copy the other required values from `.env.example` into the appropriate Vercel environment; use distinct secrets and databases for staging and production.
 - Never expose the production MongoDB URI or Xero secrets to unrestricted preview deployments.
