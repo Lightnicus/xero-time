@@ -140,7 +140,7 @@ export default buildConfig({
     ])
 
     const expiryIndex = (await oauthStateCollection.indexes()).find(
-      (index) => index.key?.expiresAt === 1,
+      (index) => Object.keys(index.key ?? {}).length === 1 && index.key?.expiresAt === 1,
     )
     if (!expiryIndex) {
       await oauthStateCollection.createIndex(
@@ -157,7 +157,7 @@ export default buildConfig({
     }
 
     const externalSessionExpiryIndex = (await externalSessionCollection.indexes()).find(
-      (index) => index.key?.cleanupAt === 1,
+      (index) => Object.keys(index.key ?? {}).length === 1 && index.key?.cleanupAt === 1,
     )
     if (!externalSessionExpiryIndex) {
       await externalSessionCollection.createIndex(
