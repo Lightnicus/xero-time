@@ -21,16 +21,6 @@ env:
 jobs:
   quality:
     runs-on: ubuntu-24.04
-    services:
-      mongodb:
-        image: mongo:8.0
-        ports:
-          - 27018:27017
-        options: >-
-          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok'"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
     defaults:
       run:
         working-directory: app
@@ -45,13 +35,20 @@ jobs:
           cache: pnpm
           cache-dependency-path: app/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - name: Initiate MongoDB replica set
+      - name: Start MongoDB replica set
         working-directory: .
         run: |
-          container="$(docker ps --filter ancestor=mongo:8.0 --format '{{.ID}}' | head -1)"
-          test -n "$container"
-          docker exec "$container" mongosh --quiet --eval "rs.initiate({_id:'xero_time_rs0',members:[{_id:0,host:'localhost:27017'}]})"
-          docker exec "$container" mongosh --quiet --eval "while (!db.hello().isWritablePrimary) { sleep(200) }"
+          docker run --detach --name xero-time-mongodb --publish 27018:27017 \
+            mongo:8.0 mongod --replSet xero_time_rs0 --bind_ip_all
+          for attempt in {1..30}; do
+            if docker exec xero-time-mongodb mongosh --quiet --eval "db.adminCommand({ ping: 1 }).ok" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          docker exec xero-time-mongodb mongosh --quiet --eval "db.adminCommand({ ping: 1 })"
+          docker exec xero-time-mongodb mongosh --quiet --eval "rs.initiate({_id:'xero_time_rs0',members:[{_id:0,host:'localhost:27017'}]})"
+          docker exec xero-time-mongodb mongosh --quiet --eval "while (!db.hello().isWritablePrimary) { sleep(200) }"
       - run: pnpm verify:secrets
       - run: pnpm verify:licenses
       - run: pnpm verify:generated
@@ -84,16 +81,6 @@ jobs:
   e2e:
     if: github.event_name == 'push' || github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-24.04
-    services:
-      mongodb:
-        image: mongo:8.0
-        ports:
-          - 27018:27017
-        options: >-
-          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok'"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
     defaults:
       run:
         working-directory: app
@@ -108,13 +95,20 @@ jobs:
           cache: pnpm
           cache-dependency-path: app/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - name: Initiate MongoDB replica set
+      - name: Start MongoDB replica set
         working-directory: .
         run: |
-          container="$(docker ps --filter ancestor=mongo:8.0 --format '{{.ID}}' | head -1)"
-          test -n "$container"
-          docker exec "$container" mongosh --quiet --eval "rs.initiate({_id:'xero_time_rs0',members:[{_id:0,host:'localhost:27017'}]})"
-          docker exec "$container" mongosh --quiet --eval "while (!db.hello().isWritablePrimary) { sleep(200) }"
+          docker run --detach --name xero-time-mongodb --publish 27018:27017 \
+            mongo:8.0 mongod --replSet xero_time_rs0 --bind_ip_all
+          for attempt in {1..30}; do
+            if docker exec xero-time-mongodb mongosh --quiet --eval "db.adminCommand({ ping: 1 }).ok" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          docker exec xero-time-mongodb mongosh --quiet --eval "db.adminCommand({ ping: 1 })"
+          docker exec xero-time-mongodb mongosh --quiet --eval "rs.initiate({_id:'xero_time_rs0',members:[{_id:0,host:'localhost:27017'}]})"
+          docker exec xero-time-mongodb mongosh --quiet --eval "while (!db.hello().isWritablePrimary) { sleep(200) }"
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
       - if: always()
