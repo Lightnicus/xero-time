@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 
 const candidates = spawnSync(
   'git',
@@ -29,14 +29,16 @@ const canary = ['re', 'deliberate_canary_0123456789abcdef'].join('_')
 if (!scannerPattern.test(canary)) {
   throw new Error('Secret-scanner canary was not detected.')
 }
-const scan = spawnSync('rg', ['-n', '--pcre2', '-e', patterns.join('|'), '--', ...files], {
-  encoding: 'utf8',
-})
-if (scan.status === 0) {
-  process.stderr.write(`Potential credential material found:\n${scan.stdout}`)
-  process.exit(1)
+
+const findings = []
+for (const file of files) {
+  const contents = readFileSync(file, 'utf8')
+  const match = scannerPattern.exec(contents)
+  if (!match) continue
+  const line = contents.slice(0, match.index).split(/\r?\n/).length
+  findings.push(`${file}:${line}`)
 }
-if (scan.status !== 1) {
-  if (scan.stderr) process.stderr.write(scan.stderr)
-  process.exit(scan.status ?? 1)
+if (findings.length > 0) {
+  process.stderr.write(`Potential credential material found:\n${findings.join('\n')}\n`)
+  process.exit(1)
 }
