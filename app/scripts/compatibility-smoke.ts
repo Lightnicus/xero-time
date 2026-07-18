@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 
 import { config as loadEnvironment } from 'dotenv'
 
-loadEnvironment()
+loadEnvironment({ quiet: true })
 
 const packageDocument = JSON.parse(
   await readFile(new URL('../package.json', import.meta.url), 'utf8'),

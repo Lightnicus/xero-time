@@ -2,7 +2,7 @@ import { config as loadEnvironment } from 'dotenv'
 
 import { MIN_PASSWORD_LENGTH } from '../src/lib/account-lifecycle/password-policy'
 
-loadEnvironment()
+loadEnvironment({ quiet: true })
 
 const email = process.env.SEED_OWNER_EMAIL?.trim().toLowerCase()
 const password = process.env.SEED_OWNER_PASSWORD

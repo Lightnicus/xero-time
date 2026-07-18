@@ -1,6 +1,6 @@
 import { config as loadEnvironment } from 'dotenv'
 
-loadEnvironment()
+loadEnvironment({ quiet: true })
 
 if (process.env.RUN_XERO_DEMO_CONTRACT !== 'true') {
   throw new Error(

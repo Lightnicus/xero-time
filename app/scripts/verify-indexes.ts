@@ -2,7 +2,7 @@ import { config as loadEnvironment } from 'dotenv'
 
 import { APPLICATION_INDEXES } from '@/migrations/20260718_001700_application_indexes'
 
-loadEnvironment()
+loadEnvironment({ quiet: true })
 
 const sameKey = (
   actual: Record<string, unknown> | undefined,
