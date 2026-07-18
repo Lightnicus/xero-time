@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  DATABASE_URL: mongodb://127.0.0.1:27018/xero_time_test?replicaSet=xero_time_rs0&directConnection=true
+  MONGODB_URI: mongodb://127.0.0.1:27018/xero_time_test?replicaSet=xero_time_rs0&directConnection=true
   NEXT_PUBLIC_SERVER_URL: http://127.0.0.1:3101
   PAYLOAD_SECRET: ci-only-payload-secret-not-used-outside-tests-0123456789
   ACCOUNT_EMAIL_DELIVERY_MODE: manual

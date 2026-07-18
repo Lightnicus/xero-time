@@ -1,5 +1,5 @@
 function requiredEnvironmentValue(
-  name: 'DATABASE_URL' | 'NEXT_PUBLIC_SERVER_URL' | 'PAYLOAD_SECRET',
+  name: 'MONGODB_URI' | 'NEXT_PUBLIC_SERVER_URL' | 'PAYLOAD_SECRET',
 ): string {
   const value = process.env[name]?.trim()
 
@@ -158,7 +158,7 @@ const protectedMachineSecret = (name: 'CRON_SECRET' | 'XERO_WEBHOOK_KEY'): strin
 
 export const environment = {
   accountEmail: parseAccountEmailEnvironment(process.env),
-  databaseURL: requiredEnvironmentValue('DATABASE_URL'),
+  mongoURI: requiredEnvironmentValue('MONGODB_URI'),
   mongoMaxPoolSize: positiveInteger('MONGODB_MAX_POOL_SIZE', 10),
   payloadSecret: requiredEnvironmentValue('PAYLOAD_SECRET'),
   cronSecret: protectedMachineSecret('CRON_SECRET'),

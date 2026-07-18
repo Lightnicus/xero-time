@@ -502,7 +502,7 @@ Outcome: Isolated local, test, staging, and production environments with transac
 - [x] Select Resend and integrate Payload's official adapter for invitations and password reset.
 - [ ] Verify the Resend sender domain and provision/test environment-specific API keys and senders.
 - [x] Define environment variables:
-  - [x] DATABASE_URL;
+  - [x] MONGODB_URI;
   - [x] PAYLOAD_SECRET;
   - [x] AUTH_FLOW_ENCRYPTION_KEY and key version;
   - [x] NEXT_PUBLIC_SERVER_URL or equivalent public origin;

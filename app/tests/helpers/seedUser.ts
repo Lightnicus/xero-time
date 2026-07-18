@@ -23,19 +23,19 @@ export const memberAppUser = {
 }
 
 const assertIsolatedE2EDatabase = (): void => {
-  let databaseURL: URL
+  let mongoURI: URL
 
   try {
-    databaseURL = new URL(process.env.DATABASE_URL ?? '')
+    mongoURI = new URL(process.env.MONGODB_URI ?? '')
   } catch {
     throw new Error('E2E tests refuse to modify any database except local xero_time_e2e.')
   }
 
   if (
-    databaseURL.protocol !== 'mongodb:' ||
-    databaseURL.hostname !== 'localhost' ||
-    databaseURL.port !== '27018' ||
-    databaseURL.pathname !== '/xero_time_e2e'
+    mongoURI.protocol !== 'mongodb:' ||
+    mongoURI.hostname !== 'localhost' ||
+    mongoURI.port !== '27018' ||
+    mongoURI.pathname !== '/xero_time_e2e'
   ) {
     throw new Error('E2E tests refuse to modify any database except local xero_time_e2e.')
   }

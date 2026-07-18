@@ -265,19 +265,19 @@ const createUser = async (
 
 describe.sequential('Payload authorization and domain integration', () => {
   beforeAll(async () => {
-    let databaseURL: URL
+    let mongoURI: URL
 
     try {
-      databaseURL = new URL(process.env.DATABASE_URL ?? '')
+      mongoURI = new URL(process.env.MONGODB_URI ?? '')
     } catch {
       throw new Error('Integration tests refuse to clean any database except local xero_time_test.')
     }
 
     if (
-      databaseURL.protocol !== 'mongodb:' ||
-      databaseURL.hostname !== 'localhost' ||
-      databaseURL.port !== '27018' ||
-      databaseURL.pathname !== '/xero_time_test'
+      mongoURI.protocol !== 'mongodb:' ||
+      mongoURI.hostname !== 'localhost' ||
+      mongoURI.port !== '27018' ||
+      mongoURI.pathname !== '/xero_time_test'
     ) {
       throw new Error('Integration tests refuse to clean any database except local xero_time_test.')
     }

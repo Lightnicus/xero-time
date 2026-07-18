@@ -191,7 +191,7 @@ export default buildConfig({
       readConcern: { level: 'snapshot' },
       writeConcern: { w: 'majority' },
     },
-    url: environment.databaseURL,
+    url: environment.mongoURI,
   }),
   sharp,
   plugins: [],

@@ -34,6 +34,8 @@ Replace the placeholder `PAYLOAD_SECRET` in a newly copied `.env` with the resul
 openssl rand -hex 32
 ```
 
+`MONGODB_URI` is the application database connection string; its name matches the variable supplied by Vercel MongoDB integrations.
+
 On this original development checkout, an ignored `.env` with generated local secrets has already been created.
 
 Open:
@@ -146,7 +148,7 @@ When creating the Vercel project:
 
 - Set **Root Directory** to `app`.
 - Use Node.js 24.
-- Copy required values from `.env.example` into the appropriate Vercel environment; use distinct secrets and databases for staging and production.
+- Confirm the MongoDB integration supplies `MONGODB_URI`, then copy the other required values from `.env.example` into the appropriate Vercel environment; use distinct secrets and databases for staging and production.
 - Never expose the production MongoDB URI or Xero secrets to unrestricted preview deployments.
 - While deployment protection is enabled, create the first owner through Payload Admin or the optional controlled seed before sending public traffic.
 - Payload media uploads are intentionally disabled until persistent object storage is configured; Vercel's application filesystem is not durable storage.
