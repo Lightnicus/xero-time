@@ -22,11 +22,24 @@ const payloadVersions = new Set(payloadPackages.map((name) => packageDocument.de
 if (payloadVersions.size !== 1 || payloadVersions.has(undefined)) {
   throw new Error('All Payload packages must be pinned to the same exact version.')
 }
-for (const dependency of ['next', 'react', 'react-dom', ...payloadPackages]) {
+for (const dependency of ['next', 'react', 'react-dom', 'sharp', ...payloadPackages]) {
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(packageDocument.dependencies[dependency] ?? '')) {
     throw new Error(`${dependency} must use an exact compatibility-tested version.`)
   }
 }
+
+const { default: sharp } = await import('sharp')
+const sharpProbe = await sharp({
+  create: {
+    background: { alpha: 1, b: 0, g: 0, r: 0 },
+    channels: 4,
+    height: 1,
+    width: 1,
+  },
+})
+  .png()
+  .toBuffer()
+if (sharpProbe.length === 0) throw new Error('Sharp could not process an image.')
 
 const { default: configPromise } = await import('../src/payload.config')
 const config = await configPromise
@@ -41,5 +54,5 @@ for (const slug of ['authentication-settings', 'billing-settings', 'business-set
 if (config.graphQL?.disable !== true) throw new Error('GraphQL must remain disabled.')
 
 process.stdout.write(
-  `Compatibility smoke passed for Payload ${[...payloadVersions][0]}, Next ${packageDocument.dependencies.next}, and React ${packageDocument.dependencies.react}.\n`,
+  `Compatibility smoke passed for Payload ${[...payloadVersions][0]}, Next ${packageDocument.dependencies.next}, React ${packageDocument.dependencies.react}, and Sharp ${packageDocument.dependencies.sharp}.\n`,
 )

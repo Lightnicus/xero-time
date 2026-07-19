@@ -52,7 +52,8 @@
     "openid-client": "6.8.4",
     "payload": "3.86.0",
     "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "react-dom": "19.2.7",
+    "sharp": "0.34.5"
   },
   "devDependencies": {
     "@playwright/test": "1.61.1",
@@ -83,6 +84,7 @@
       "postcss": "8.5.10"
     },
     "onlyBuiltDependencies": [
+      "sharp",
       "esbuild",
       "unrs-resolver"
     ]

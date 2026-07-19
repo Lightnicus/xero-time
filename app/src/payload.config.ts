@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url'
 import { mongooseAdapter } from '@payloadcms/db-mongodb'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import { buildConfig } from 'payload'
+import sharp from 'sharp'
 
 import { AuditEvents } from './collections/AuditEvents'
 import { AuthIdentities } from './collections/AuthIdentities'
@@ -192,5 +193,6 @@ export default buildConfig({
     },
     url: environment.mongoURI,
   }),
+  sharp,
   plugins: [],
 })
