@@ -936,12 +936,15 @@ describe.sequential('Payload authorization and domain integration', () => {
     })
     const deleteConnection = vi.fn(async () => undefined)
     const revokeRefreshToken = vi.fn(async () => undefined)
+    const listConnections = vi.fn(async (_accessToken: string, authEventID?: string) =>
+      authEventID === authenticationEventId ? [] : connections,
+    )
     const client: XeroAccountingClient = {
       accountingGet: vi.fn(async () => ({ data: {} })),
       accountingPost: vi.fn(async () => ({ data: {} })),
       deleteConnection,
       exchangeCode: vi.fn(async () => initialTokenSet),
-      listConnections: vi.fn(async () => connections),
+      listConnections,
       refreshTokens,
       revokeRefreshToken,
     }
@@ -998,6 +1001,12 @@ describe.sequential('Payload authorization and domain integration', () => {
     )
     expect(callback).toMatchObject({ status: 'select-tenant' })
     expect(callback.flowID).toBeTypeOf('string')
+    expect(listConnections).toHaveBeenNthCalledWith(
+      1,
+      initialTokenSet.accessToken,
+      authenticationEventId,
+    )
+    expect(listConnections).toHaveBeenNthCalledWith(2, initialTokenSet.accessToken)
 
     const selection = await getAccountingTenantSelection(
       session,

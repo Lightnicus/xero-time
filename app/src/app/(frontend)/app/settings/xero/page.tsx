@@ -20,6 +20,10 @@ const errorMessage = (code: string): string | null => {
   const messages: Record<string, string> = {
     'already-connected': 'A Xero organisation is already connected.',
     'authorization-denied': 'Xero authorization was cancelled or denied.',
+    'code-exchange-invalid-client':
+      'Xero rejected the saved client ID or secret. Update both from the same dedicated Xero accounting application, then try again.',
+    'code-exchange-invalid-grant':
+      'The Xero callback expired or was already used. Start the connection again.',
     'code-exchange-network-error': 'Xero could not be reached. Start the connection again.',
     'credential-boundary':
       'Use a different client ID and secret from the optional Xero identity application.',
@@ -44,6 +48,7 @@ const errorMessage = (code: string): string | null => {
     'operation-failed': 'The accounting operation could not be completed.',
     'reauthentication-failed': 'Password confirmation failed.',
     'state-replayed': 'That Xero connection attempt has already been used.',
+    'token-refresh-invalid-grant': 'Xero requires this organisation to be reconnected.',
     'token-refresh-invalid_grant': 'Xero requires this organisation to be reconnected.',
     'wrong-tenant': 'The authorized organisation does not match the pinned Xero organisation.',
     'unsafe-export-state':
@@ -73,7 +78,7 @@ export default async function XeroAccountingPage({
   })
   const formatDateTime = (date?: string): string =>
     date ? dateTimeFormatter.format(new Date(date)) : 'Not yet'
-  const connectLabel = connection.status === 'not-connected' ? 'Connect Xero' : 'Reconnect Xero'
+  const connectLabel = connection.tenantId ? 'Reconnect Xero' : 'Connect Xero'
 
   return (
     <div className="narrow-page page-stack">
@@ -297,6 +302,10 @@ export default async function XeroAccountingPage({
                 <p>
                   You will be sent to Xero to authorize invoices, contacts, settings read access,
                   and offline token refresh. Confirm your local password first.
+                </p>
+                <p>
+                  If Xero says the organisation is already connected, continue through that screen
+                  so Xero can return here and finish the local connection.
                 </p>
               </div>
               {connection.tenantId && (

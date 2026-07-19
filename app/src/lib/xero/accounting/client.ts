@@ -42,8 +42,11 @@ export type XeroAccountingClient = {
   revokeRefreshToken(refreshToken: string): Promise<void>
 }
 
-const safeProviderCode = (value: unknown): string | null =>
+const safeProviderIdentifier = (value: unknown): string | null =>
   typeof value === 'string' && /^[a-z0-9_.-]{1,100}$/i.test(value) ? value : null
+
+const safeProviderErrorCode = (value: unknown): string | null =>
+  safeProviderIdentifier(value)?.toLowerCase().replaceAll(/[_.]+/g, '-') ?? null
 
 export function createXeroAccountingClient(
   config: XeroAccountingRuntimeConfig,
@@ -77,12 +80,13 @@ export function createXeroAccountingClient(
     let providerCode: string | null = null
     try {
       const body = (await response.clone().json()) as { error?: unknown }
-      providerCode = safeProviderCode(body.error)
+      providerCode = safeProviderErrorCode(body.error)
     } catch {
       // Provider response bodies are intentionally not surfaced or logged.
     }
 
-    const correlationID = safeProviderCode(response.headers.get('xero-correlation-id')) ?? undefined
+    const correlationID =
+      safeProviderIdentifier(response.headers.get('xero-correlation-id')) ?? undefined
     const rateLimitRemaining = Number(response.headers.get('x-rate-limit-remaining'))
     const retryAfterSeconds = Number(response.headers.get('retry-after'))
     throw new AccountingIntegrationError(

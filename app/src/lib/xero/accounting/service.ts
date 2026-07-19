@@ -911,10 +911,19 @@ export async function completeAccountingCallback(
       )
     }
 
-    const candidates = await client.listConnections(
+    let candidates = await client.listConnections(
       tokenSet.accessToken,
       metadata.authenticationEventId,
     )
+    if (candidates.length === 0) {
+      // Xero can retain the remote tenant connection when an earlier callback
+      // fails. On the next authorization it shows the tenant as already
+      // connected, so that tenant is not necessarily associated with the new
+      // authentication event. The newly issued token is still the authority
+      // boundary; recover its existing connections and retain the normal
+      // pinned-tenant or explicit-selection checks below.
+      candidates = await client.listConnections(tokenSet.accessToken)
+    }
     if (candidates.length === 0) {
       throw new AccountingIntegrationError(
         'no-organisation',

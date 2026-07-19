@@ -198,6 +198,10 @@ describe.sequential('Xero accounting authorizer handover', () => {
       refreshToken: 'wrong-tenant-refresh-token',
       xeroUserId: '55555555-5555-4555-8555-555555555555',
     })
+    const wrongTenantCandidates = vi.mocked(wrongTenant.client.listConnections)
+    wrongTenantCandidates.mockImplementation(async (_accessToken, authEventID) =>
+      authEventID ? [] : [candidate('99999999-9999-4999-8999-999999999999')],
+    )
 
     await expect(
       completeAccountingCallback(session, callbackInput(authorization, 'wrong-tenant-code'), {
@@ -214,6 +218,7 @@ describe.sequential('Xero accounting authorizer handover', () => {
       tenantId: TENANT_ID,
       tokenVersion: initialConnection.tokenVersion,
     })
+    expect(wrongTenantCandidates).toHaveBeenCalledTimes(2)
     expect(wrongTenant.revokeRefreshToken).not.toHaveBeenCalled()
   })
 

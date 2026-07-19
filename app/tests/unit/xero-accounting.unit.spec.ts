@@ -212,7 +212,7 @@ describe('Xero accounting HTTP client', () => {
     const client = createXeroAccountingClient(clientConfig, fetchMock)
 
     await expect(client.refreshTokens('old-refresh-token')).rejects.toMatchObject({
-      code: 'token-refresh-invalid_grant',
+      code: 'token-refresh-invalid-grant',
       message: 'Xero rejected the accounting request.',
       status: 400,
     })
