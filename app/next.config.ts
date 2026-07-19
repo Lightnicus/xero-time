@@ -8,6 +8,7 @@ import type { NextConfig } from 'next'
 const __filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(__filename)
 const distDir = process.env.NEXT_DIST_DIR?.trim()
+const monacoCDNSource = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.55.1/min/vs/'
 const securityHeaders = [
   {
     key: 'Content-Security-Policy',
@@ -20,8 +21,8 @@ const securityHeaders = [
       "frame-ancestors 'none'",
       "img-src 'self' data: blob: https:",
       "object-src 'none'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-      "style-src 'self' 'unsafe-inline'",
+      `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${monacoCDNSource}`,
+      `style-src 'self' 'unsafe-inline' ${monacoCDNSource}`,
       "worker-src 'self' blob:",
     ].join('; '),
   },
