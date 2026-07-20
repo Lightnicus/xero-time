@@ -820,33 +820,56 @@ const verifyAccountingGrantCapability = async (
   accessToken: string,
   candidate: XeroConnectionCandidate,
 ): Promise<void> => {
-  const response = await client.accountingGet(accessToken, candidate.tenantId, 'Organisation')
-  if (!isRecord(response.data) || !Array.isArray(response.data.Organisations)) {
-    throw new AccountingIntegrationError(
-      'invalid-organisation-response',
-      'Xero did not return valid organisation capability data.',
-    )
-  }
-  const organisation = response.data.Organisations[0]
-  if (!isRecord(organisation) || response.data.Organisations.length !== 1) {
-    throw new AccountingIntegrationError(
-      'invalid-organisation-response',
-      'Xero did not return valid organisation capability data.',
-    )
-  }
+  const organisationResponse = await client.accountingGet(
+    accessToken,
+    candidate.tenantId,
+    'Organisation',
+  )
   if (
-    typeof organisation.OrganisationID === 'string' &&
-    organisation.OrganisationID !== candidate.tenantId
+    !isRecord(organisationResponse.data) ||
+    !Array.isArray(organisationResponse.data.Organisations)
   ) {
+    throw new AccountingIntegrationError(
+      'invalid-organisation-response',
+      'Xero did not return valid organisation capability data.',
+    )
+  }
+  const organisation = organisationResponse.data.Organisations[0]
+  if (!isRecord(organisation) || organisationResponse.data.Organisations.length !== 1) {
+    throw new AccountingIntegrationError(
+      'invalid-organisation-response',
+      'Xero did not return valid organisation capability data.',
+    )
+  }
+  if (typeof organisation.OrganisationID !== 'string') {
+    throw new AccountingIntegrationError(
+      'invalid-organisation-response',
+      'Xero did not return valid organisation capability data.',
+    )
+  }
+  if (organisation.OrganisationID !== candidate.tenantId) {
     throw new AccountingIntegrationError(
       'wrong-tenant',
       'The Xero organisation response does not match the pinned organisation.',
     )
   }
-  if (
-    !Array.isArray(organisation.OrganisationActions) ||
-    !organisation.OrganisationActions.includes('CreateDraftInvoice')
-  ) {
+
+  const actionResponse = await client.accountingGet(
+    accessToken,
+    candidate.tenantId,
+    'Organisation/Actions',
+  )
+  if (!isRecord(actionResponse.data) || !Array.isArray(actionResponse.data.Actions)) {
+    throw new AccountingIntegrationError(
+      'invalid-organisation-response',
+      'Xero did not return valid organisation capability data.',
+    )
+  }
+  const canCreateDraftInvoice = actionResponse.data.Actions.some(
+    (action) =>
+      isRecord(action) && action.Name === 'CreateDraftInvoice' && action.Status === 'ALLOWED',
+  )
+  if (!canCreateDraftInvoice) {
     throw new AccountingIntegrationError(
       'missing-create-draft-capability',
       'The selected Xero organisation cannot create draft invoices.',

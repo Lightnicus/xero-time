@@ -37,7 +37,11 @@ const candidate = (sequence: number): XeroConnectionCandidate => ({
   tenantType: 'ORGANISATION',
 })
 
-const provider = (candidates: XeroConnectionCandidate[], actions: string[] = []) => {
+const provider = (
+  candidates: XeroConnectionCandidate[],
+  actions: Array<{ Name: string; Status: string }> = [],
+  organisationIdentity: { id?: unknown; omit?: boolean } = {},
+) => {
   const tokenSet = {
     accessToken: 'capability-access-token',
     expiresIn: 1_800,
@@ -46,20 +50,23 @@ const provider = (candidates: XeroConnectionCandidate[], actions: string[] = [])
   }
   return {
     client: {
-      accountingGet: vi.fn(async (_accessToken, tenantID, path) => ({
-        data:
-          path === 'Organisation'
-            ? {
-                Organisations: [
-                  {
-                    Name: candidates.find((item) => item.tenantId === tenantID)?.tenantName,
-                    OrganisationActions: actions,
-                    OrganisationID: tenantID,
-                  },
-                ],
-              }
-            : {},
-      })),
+      accountingGet: vi.fn(async (_accessToken, tenantID, path) => {
+        if (path === 'Organisation') {
+          const organisation = {
+            Name: candidates.find((item) => item.tenantId === tenantID)?.tenantName,
+            ...(organisationIdentity.omit
+              ? {}
+              : { OrganisationID: organisationIdentity.id ?? tenantID }),
+          }
+          return {
+            data: {
+              Organisations: [organisation],
+            },
+          }
+        }
+        if (path === 'Organisation/Actions') return { data: { Actions: actions } }
+        return { data: {} }
+      }),
       accountingPost: vi.fn(async () => ({ data: {} })),
       deleteConnection: vi.fn(async () => undefined),
       exchangeCode: vi.fn(async () => tokenSet),
@@ -119,6 +126,7 @@ describe.sequential('Xero accounting capability validation', () => {
     await clearConnectionState()
     await payload.db.collections.users?.deleteMany({})
     await payload.db.versions.users?.deleteMany({})
+    await payload.db.connection.db?.collection('application_bootstrap_locks').deleteMany({})
 
     const anonymousReq = await createLocalReq({}, payload)
     const bootstrap = await registerFirstUserOperation({
@@ -172,6 +180,83 @@ describe.sequential('Xero accounting capability validation', () => {
       candidate(1).tenantId,
       'Organisation',
     )
+    expect(incapable.client.accountingGet).toHaveBeenCalledWith(
+      'capability-access-token',
+      candidate(1).tenantId,
+      'Organisation/Actions',
+    )
+    await expectNoConnection()
+  })
+
+  it('requires CreateDraftInvoice to be explicitly allowed', async () => {
+    const denied = provider([candidate(1)], [{ Name: 'CreateDraftInvoice', Status: 'NOT-ALLOWED' }])
+    const authorization = await createAccountingAuthorization(session, {
+      config: accountingConfig,
+    })
+
+    await expect(
+      completeAccountingCallback(session, callbackInput(authorization), {
+        client: denied.client,
+        config: accountingConfig,
+        validateAccessToken: denied.validateAccessToken,
+      }),
+    ).rejects.toMatchObject({ code: 'missing-create-draft-capability' })
+
+    await expectNoConnection()
+  })
+
+  it('preserves organisation identity validation before checking actions', async () => {
+    const wrongTenant = provider(
+      [candidate(1)],
+      [{ Name: 'CreateDraftInvoice', Status: 'ALLOWED' }],
+      { id: candidate(2).tenantId },
+    )
+    const authorization = await createAccountingAuthorization(session, {
+      config: accountingConfig,
+    })
+
+    await expect(
+      completeAccountingCallback(session, callbackInput(authorization), {
+        client: wrongTenant.client,
+        config: accountingConfig,
+        validateAccessToken: wrongTenant.validateAccessToken,
+      }),
+    ).rejects.toMatchObject({ code: 'wrong-tenant' })
+
+    expect(wrongTenant.client.accountingGet).not.toHaveBeenCalledWith(
+      'capability-access-token',
+      candidate(1).tenantId,
+      'Organisation/Actions',
+    )
+    await expectNoConnection()
+  })
+
+  it.each([
+    ['missing', { omit: true }],
+    ['non-string', { id: 42 }],
+  ])('rejects a %s organisation identity before checking actions', async (_label, identity) => {
+    const invalidOrganisation = provider(
+      [candidate(1)],
+      [{ Name: 'CreateDraftInvoice', Status: 'ALLOWED' }],
+      identity,
+    )
+    const authorization = await createAccountingAuthorization(session, {
+      config: accountingConfig,
+    })
+
+    await expect(
+      completeAccountingCallback(session, callbackInput(authorization), {
+        client: invalidOrganisation.client,
+        config: accountingConfig,
+        validateAccessToken: invalidOrganisation.validateAccessToken,
+      }),
+    ).rejects.toMatchObject({ code: 'invalid-organisation-response' })
+
+    expect(invalidOrganisation.client.accountingGet).not.toHaveBeenCalledWith(
+      'capability-access-token',
+      candidate(1).tenantId,
+      'Organisation/Actions',
+    )
     await expectNoConnection()
   })
 
@@ -205,6 +290,34 @@ describe.sequential('Xero accounting capability validation', () => {
       candidates[1]!.tenantId,
       'Organisation',
     )
+    expect(incapable.client.accountingGet).toHaveBeenCalledWith(
+      'capability-access-token',
+      candidates[1]!.tenantId,
+      'Organisation/Actions',
+    )
     await expectNoConnection()
+  })
+
+  it('accepts an explicitly allowed organisation action', async () => {
+    const capable = provider([candidate(1)], [{ Name: 'CreateDraftInvoice', Status: 'ALLOWED' }])
+    const authorization = await createAccountingAuthorization(session, {
+      config: accountingConfig,
+    })
+
+    await expect(
+      completeAccountingCallback(session, callbackInput(authorization), {
+        client: capable.client,
+        config: accountingConfig,
+        validateAccessToken: capable.validateAccessToken,
+      }),
+    ).resolves.toEqual({ status: 'connected' })
+
+    const connections = await payload.find({
+      collection: 'xero-connections',
+      depth: 0,
+      overrideAccess: true,
+      req: session.req,
+    })
+    expect(connections.docs).toHaveLength(1)
   })
 })

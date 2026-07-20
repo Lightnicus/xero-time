@@ -14,6 +14,25 @@ const verifier = 'v'.repeat(64)
 const pkceChallenge = createHash('sha256').update(verifier).digest('base64url')
 
 describe('controllable fake Xero accounting server', () => {
+  it("serves organisation actions using Xero's current action contract", async () => {
+    const server = new FakeXeroAccountingServer()
+    server.setOrganisationActions([
+      { Name: 'CreateDraftInvoice', Status: 'ALLOWED' },
+      { Name: 'CreateRepeatingInvoice', Status: 'NOT-ALLOWED' },
+    ])
+
+    await expect(
+      server.client().accountingGet('fake-access', 'fake-tenant', 'Organisation/Actions'),
+    ).resolves.toMatchObject({
+      data: {
+        Actions: [
+          { Name: 'CreateDraftInvoice', Status: 'ALLOWED' },
+          { Name: 'CreateRepeatingInvoice', Status: 'NOT-ALLOWED' },
+        ],
+      },
+    })
+  })
+
   it('creates and reconciles an invoice after an ambiguous lost response', async () => {
     const server = new FakeXeroAccountingServer()
     const client = server.client()

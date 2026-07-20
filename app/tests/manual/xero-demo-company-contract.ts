@@ -13,6 +13,18 @@ if (!expectedTenantID) {
   throw new Error('Set XERO_DEMO_EXPECTED_TENANT_ID to pin the read-only contract run.')
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+
+const resources = [
+  'Organisation',
+  'Organisation/Actions',
+  'Accounts',
+  'TaxRates',
+  'Currencies',
+  'Contacts',
+] as const
+
 const [
   { getPayload },
   { default: config },
@@ -33,21 +45,40 @@ try {
     throw new Error('The connected tenant does not match XERO_DEMO_EXPECTED_TENANT_ID.')
   }
 
-  for (const path of ['Organisation', 'Accounts', 'TaxRates', 'Currencies', 'Contacts']) {
+  for (const path of resources) {
     const response = await client.accountingGet(
       token.accessToken,
       expectedTenantID,
       path,
       path === 'Contacts' ? { page: '1' } : undefined,
     )
-    if (!response.data || typeof response.data !== 'object') {
+    if (!isRecord(response.data)) {
       throw new Error(`Xero returned an invalid ${path} contract response.`)
+    }
+    if (path === 'Organisation') {
+      const organisations = response.data.Organisations
+      const organisation = Array.isArray(organisations) ? organisations[0] : undefined
+      if (!isRecord(organisation) || organisation.OrganisationID !== expectedTenantID) {
+        throw new Error('Xero returned organisation data for an unexpected tenant.')
+      }
+    }
+    if (path === 'Organisation/Actions') {
+      const actions = response.data.Actions
+      const canCreateDraftInvoice =
+        Array.isArray(actions) &&
+        actions.some(
+          (action) =>
+            isRecord(action) && action.Name === 'CreateDraftInvoice' && action.Status === 'ALLOWED',
+        )
+      if (!canCreateDraftInvoice) {
+        throw new Error('The connected Xero user cannot create draft invoices in this tenant.')
+      }
     }
   }
 
   payload.logger.info({
     event: 'xero-demo-read-contract-passed',
-    resources: ['Organisation', 'Accounts', 'TaxRates', 'Currencies', 'Contacts'],
+    resources,
   })
 } finally {
   await payload.destroy()

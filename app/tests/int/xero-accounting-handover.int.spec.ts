@@ -74,7 +74,7 @@ const candidate = (
 
 const provider = (input: {
   accessToken: string
-  actions?: string[]
+  actions?: Array<{ Name: string; Status: string }>
   candidates?: XeroConnectionCandidate[]
   refreshToken: string
   xeroUserId: string
@@ -90,20 +90,28 @@ const provider = (input: {
   const revokeRefreshToken = vi.fn(async () => undefined)
   return {
     client: {
-      accountingGet: vi.fn(async (_token, tenantID, path) => ({
-        data:
-          path === 'Organisation'
-            ? {
-                Organisations: [
-                  {
-                    Name: 'Pinned Demo Company',
-                    OrganisationActions: input.actions ?? ['CreateDraftInvoice'],
-                    OrganisationID: tenantID,
-                  },
-                ],
-              }
-            : {},
-      })),
+      accountingGet: vi.fn(async (_token, tenantID, path) => {
+        if (path === 'Organisation') {
+          return {
+            data: {
+              Organisations: [
+                {
+                  Name: 'Pinned Demo Company',
+                  OrganisationID: tenantID,
+                },
+              ],
+            },
+          }
+        }
+        if (path === 'Organisation/Actions') {
+          return {
+            data: {
+              Actions: input.actions ?? [{ Name: 'CreateDraftInvoice', Status: 'ALLOWED' }],
+            },
+          }
+        }
+        return { data: {} }
+      }),
       accountingPost: vi.fn(async () => ({ data: {} })),
       deleteConnection: vi.fn(async () => undefined),
       exchangeCode: vi.fn(async () => tokenSet),
@@ -249,6 +257,11 @@ describe.sequential('Xero accounting authorizer handover', () => {
       refreshTokenEnvelope: initialConnection.refreshTokenEnvelope,
       tokenVersion: initialConnection.tokenVersion,
     })
+    expect(incapable.client.accountingGet).toHaveBeenCalledWith(
+      'incapable-access-token',
+      TENANT_ID,
+      'Organisation/Actions',
+    )
     expect(incapable.revokeRefreshToken).not.toHaveBeenCalled()
   })
 

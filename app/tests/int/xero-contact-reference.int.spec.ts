@@ -39,6 +39,8 @@ let firstCustomerID: string
 let secondCustomerID: string
 let nextContactSequence = 10
 let ambiguousNextContactCreate = false
+let draftInvoiceActionStatus = 'ALLOWED'
+let organisationResponseTenantID = TENANT_ID
 
 const contacts = new Map<string, ContactRecord>([
   [
@@ -101,11 +103,17 @@ const client: XeroAccountingClient = {
               BaseCurrency: 'NZD',
               IsDemoCompany: true,
               Name: 'Contact Demo Company',
-              OrganisationActions: ['CreateDraftInvoice'],
-              OrganisationID: TENANT_ID,
+              OrganisationID: organisationResponseTenantID,
               OrganisationType: 'COMPANY',
             },
           ],
+        },
+      }
+    }
+    if (path === 'Organisation/Actions') {
+      return {
+        data: {
+          Actions: [{ Name: 'CreateDraftInvoice', Status: draftInvoiceActionStatus }],
         },
       }
     }
@@ -333,9 +341,15 @@ describe.sequential('Xero contacts and reference data', () => {
         expect.objectContaining({ code: 'OUTPUT2', resourceType: 'tax-rate' }),
         expect.objectContaining({
           code: 'CreateDraftInvoice',
+          metadata: { providerStatus: 'ALLOWED' },
           resourceType: 'organisation-action',
+          status: 'active',
+          type: 'ALLOWED',
         }),
       ]),
+    )
+    expect(vi.mocked(client.accountingGet).mock.calls.map((call) => call[2])).toEqual(
+      expect.arrayContaining(['Organisation', 'Organisation/Actions']),
     )
     await expect(
       validateXeroBillingDefaults(ownerSession.req, {
@@ -349,6 +363,61 @@ describe.sequential('Xero contacts and reference data', () => {
         taxType: 'OUTPUT2',
       }),
     ).rejects.toMatchObject({ code: 'invalid-billing-defaults' })
+  })
+
+  it('keeps a denied draft-invoice action without reporting the capability', async () => {
+    draftInvoiceActionStatus = 'NOT-ALLOWED'
+    try {
+      await expect(refreshXeroReferenceData(ownerSession, overrides())).resolves.toMatchObject({
+        capabilityAvailable: false,
+        resourceCount: 6,
+      })
+      const references = await payload.find({
+        collection: 'xero-reference-data',
+        depth: 0,
+        overrideAccess: true,
+        pagination: false,
+      })
+      expect(references.docs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: 'CreateDraftInvoice',
+            metadata: { providerStatus: 'NOT-ALLOWED' },
+            resourceType: 'organisation-action',
+            status: 'unavailable',
+            type: 'NOT-ALLOWED',
+          }),
+        ]),
+      )
+    } finally {
+      draftInvoiceActionStatus = 'ALLOWED'
+    }
+  })
+
+  it('rejects reference data for another tenant without replacing the existing cache', async () => {
+    const before = await payload.find({
+      collection: 'xero-reference-data',
+      depth: 0,
+      overrideAccess: true,
+      pagination: false,
+      sort: 'id',
+    })
+    organisationResponseTenantID = '99999999-9999-4999-8999-999999999999'
+    try {
+      await expect(refreshXeroReferenceData(ownerSession, overrides())).rejects.toMatchObject({
+        code: 'wrong-tenant',
+      })
+      const after = await payload.find({
+        collection: 'xero-reference-data',
+        depth: 0,
+        overrideAccess: true,
+        pagination: false,
+        sort: 'id',
+      })
+      expect(after.docs).toEqual(before.docs)
+    } finally {
+      organisationResponseTenantID = TENANT_ID
+    }
   })
 
   it('links, searches, imports, and prevents duplicate ContactID mappings', async () => {

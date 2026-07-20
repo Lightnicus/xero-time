@@ -980,20 +980,28 @@ describe.sequential('Payload authorization and domain integration', () => {
       authEventID === authenticationEventId ? [] : connections,
     )
     const client: XeroAccountingClient = {
-      accountingGet: vi.fn(async (_accessToken, tenantID, path) => ({
-        data:
-          path === 'Organisation'
-            ? {
-                Organisations: [
-                  {
-                    Name: 'Pinned Demo Company',
-                    OrganisationActions: ['CreateDraftInvoice'],
-                    OrganisationID: tenantID,
-                  },
-                ],
-              }
-            : {},
-      })),
+      accountingGet: vi.fn(async (_accessToken, tenantID, path) => {
+        if (path === 'Organisation') {
+          return {
+            data: {
+              Organisations: [
+                {
+                  Name: 'Pinned Demo Company',
+                  OrganisationID: tenantID,
+                },
+              ],
+            },
+          }
+        }
+        if (path === 'Organisation/Actions') {
+          return {
+            data: {
+              Actions: [{ Name: 'CreateDraftInvoice', Status: 'ALLOWED' }],
+            },
+          }
+        }
+        return { data: {} }
+      }),
       accountingPost: vi.fn(async () => ({ data: {} })),
       deleteConnection,
       exchangeCode: vi.fn(async () => initialTokenSet),
@@ -1095,6 +1103,11 @@ describe.sequential('Payload authorization and domain integration', () => {
       initialTokenSet.accessToken,
       selectedConnection.tenantId,
       'Organisation',
+    )
+    expect(client.accountingGet).toHaveBeenCalledWith(
+      initialTokenSet.accessToken,
+      selectedConnection.tenantId,
+      'Organisation/Actions',
     )
 
     const privateConnections = await payload.find({

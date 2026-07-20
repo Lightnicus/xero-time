@@ -149,20 +149,22 @@ const parseTrackingCategories = (value: unknown): ReferenceResource[] =>
     ]
   })
 
-const parseOrganisation = (value: unknown): ReferenceResource[] => {
-  const organisation = arrayFrom(value, 'Organisations')[0]
-  if (!isRecord(organisation)) {
+const parseOrganisation = (value: unknown, tenantID: string): ReferenceResource[] => {
+  const organisations = arrayFrom(value, 'Organisations')
+  const organisation = organisations[0]
+  if (organisations.length !== 1 || !isRecord(organisation)) {
     throw new AccountingIntegrationError(
       'invalid-reference-response',
       'Xero returned invalid organisation data.',
     )
   }
   const organisationID = requiredString(organisation.OrganisationID, 100)
-  const actions = Array.isArray(organisation.OrganisationActions)
-    ? organisation.OrganisationActions.filter(
-        (action): action is string => typeof action === 'string' && action.length <= 100,
-      )
-    : []
+  if (organisation.OrganisationID !== tenantID) {
+    throw new AccountingIntegrationError(
+      'wrong-tenant',
+      'The Xero organisation response does not match the pinned organisation.',
+    )
+  }
   return [
     {
       code: optionalString(organisation.ShortCode, 100),
@@ -179,15 +181,26 @@ const parseOrganisation = (value: unknown): ReferenceResource[] => {
       type: optionalString(organisation.OrganisationType, 100),
       xeroId: organisationID,
     },
-    ...actions.map((action): ReferenceResource => ({
-      code: action,
-      name: action,
-      resourceType: 'organisation-action',
-      status: 'active',
-      xeroId: action,
-    })),
   ]
 }
+
+const parseOrganisationActions = (value: unknown): ReferenceResource[] =>
+  arrayFrom(value, 'Actions').flatMap((candidate) => {
+    if (!isRecord(candidate)) return []
+    const name = requiredString(candidate.Name, 100)
+    const providerStatus = requiredString(candidate.Status, 100).toUpperCase()
+    return [
+      {
+        code: name,
+        metadata: { providerStatus },
+        name,
+        resourceType: 'organisation-action',
+        status: providerStatus === 'ALLOWED' ? 'active' : 'unavailable',
+        type: providerStatus,
+        xeroId: name,
+      },
+    ]
+  })
 
 const persistReferences = async (
   session: AppSession,
@@ -287,15 +300,18 @@ const refreshWithClient = async (
   client: XeroAccountingClient,
   machineActor?: string,
 ): Promise<{ capabilityAvailable: boolean; resourceCount: number }> => {
-  const [organisation, accounts, taxRates, currencies, trackingCategories] = await Promise.all([
-    client.accountingGet(accessToken, tenantID, 'Organisation'),
-    client.accountingGet(accessToken, tenantID, 'Accounts'),
-    client.accountingGet(accessToken, tenantID, 'TaxRates'),
-    client.accountingGet(accessToken, tenantID, 'Currencies'),
-    client.accountingGet(accessToken, tenantID, 'TrackingCategories'),
-  ])
+  const [organisation, organisationActions, accounts, taxRates, currencies, trackingCategories] =
+    await Promise.all([
+      client.accountingGet(accessToken, tenantID, 'Organisation'),
+      client.accountingGet(accessToken, tenantID, 'Organisation/Actions'),
+      client.accountingGet(accessToken, tenantID, 'Accounts'),
+      client.accountingGet(accessToken, tenantID, 'TaxRates'),
+      client.accountingGet(accessToken, tenantID, 'Currencies'),
+      client.accountingGet(accessToken, tenantID, 'TrackingCategories'),
+    ])
   const resources = [
-    ...parseOrganisation(organisation.data),
+    ...parseOrganisation(organisation.data, tenantID),
+    ...parseOrganisationActions(organisationActions.data),
     ...parseAccounts(accounts.data),
     ...parseTaxRates(taxRates.data),
     ...parseCurrencies(currencies.data),
@@ -304,7 +320,10 @@ const refreshWithClient = async (
   await persistReferences(session, tenantID, resources, machineActor)
   return {
     capabilityAvailable: resources.some(
-      (item) => item.resourceType === 'organisation-action' && item.code === 'CreateDraftInvoice',
+      (item) =>
+        item.resourceType === 'organisation-action' &&
+        item.code === 'CreateDraftInvoice' &&
+        item.status === 'active',
     ),
     resourceCount: resources.length,
   }

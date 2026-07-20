@@ -19,6 +19,11 @@ export type FakeAccountingFailure =
 
 type Operation = 'delete' | 'exchange' | 'get' | 'list' | 'post' | 'refresh' | 'revoke'
 
+type OrganisationAction = {
+  Name: string
+  Status: string
+}
+
 type StoredInvoice = Record<string, unknown> & {
   Contact: { ContactID: string }
   CurrencyCode: string
@@ -56,6 +61,9 @@ export class FakeXeroAccountingServer {
   private invoiceSequence = 100
   private invoices = new Map<string, StoredInvoice>()
   private invoicesByIdempotencyKey = new Map<string, StoredInvoice>()
+  private organisationActions: OrganisationAction[] = [
+    { Name: 'CreateDraftInvoice', Status: 'ALLOWED' },
+  ]
   private tokenSequence = 0
 
   enqueue(operation: Operation, failure: FakeAccountingFailure): void {
@@ -72,6 +80,10 @@ export class FakeXeroAccountingServer {
 
   setInvoice(invoice: StoredInvoice): void {
     this.invoices.set(invoice.InvoiceID, structuredClone(invoice))
+  }
+
+  setOrganisationActions(actions: OrganisationAction[]): void {
+    this.organisationActions = structuredClone(actions)
   }
 
   private async applyFailure(
@@ -149,6 +161,13 @@ export class FakeXeroAccountingServer {
       accountingGet: async (_accessToken, _tenantID, path, parameters = {}) => {
         await this.applyFailure('get', false)
         this.requests[this.requests.length - 1] = { operation: 'get', path }
+        if (path === 'Organisation/Actions') {
+          return {
+            correlationID: uuid(900),
+            data: { Actions: structuredClone(this.organisationActions) },
+            rateLimitRemaining: 59,
+          } satisfies XeroAPIResponse
+        }
         const invoiceID = path.startsWith('Invoices/') ? path.slice('Invoices/'.length) : null
         let invoices = invoiceID
           ? [this.invoices.get(invoiceID)].filter(Boolean)

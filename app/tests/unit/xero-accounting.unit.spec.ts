@@ -172,6 +172,40 @@ describe('Xero accounting security primitives', () => {
 })
 
 describe('Xero accounting HTTP client', () => {
+  it('preserves the Accounting API base path for nested organisation actions', async () => {
+    const requests: Array<{ headers: Headers; method: string; url: string }> = []
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      requests.push({
+        headers: new Headers(init?.headers),
+        method: init?.method ?? 'GET',
+        url: String(input),
+      })
+      return new Response(
+        JSON.stringify({ Actions: [{ Name: 'CreateDraftInvoice', Status: 'ALLOWED' }] }),
+        { status: 200 },
+      )
+    })
+    const client = createXeroAccountingClient(clientConfig, fetchMock)
+
+    await expect(
+      client.accountingGet('access-token', connectionFixture.tenantId, 'Organisation/Actions'),
+    ).resolves.toMatchObject({
+      data: { Actions: [{ Name: 'CreateDraftInvoice', Status: 'ALLOWED' }] },
+    })
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({
+      method: 'GET',
+      url: 'https://api.xero.com/api.xro/2.0/Organisation/Actions',
+    })
+    expect(requests[0]?.headers.get('authorization')).toBe('Bearer access-token')
+    expect(requests[0]?.headers.get('xero-tenant-id')).toBe(connectionFixture.tenantId)
+    await expect(
+      client.accountingGet('access-token', connectionFixture.tenantId, '/Organisation/Actions'),
+    ).rejects.toMatchObject({ code: 'invalid-api-path' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('uses the standard code exchange and filters connections by auth event', async () => {
     const requests: Array<{ body: string; headers: Headers; method: string; url: string }> = []
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
