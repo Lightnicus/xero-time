@@ -198,7 +198,7 @@ export default async function InvoiceExportDetailPage({
                 <th scope="col">Source</th>
                 <th scope="col">Description</th>
                 <th scope="col">Quantity / rate</th>
-                <th scope="col">Account / tax</th>
+                <th scope="col">Item / account / tax</th>
                 <th scope="col">Amount</th>
               </tr>
             </thead>
@@ -223,8 +223,15 @@ export default async function InvoiceExportDetailPage({
                     <small>{formatScaledAmount(line.rateScaled, line.currency)}/h</small>
                   </td>
                   <td>
-                    {line.accountCode}
-                    <small>{line.taxType}</small>
+                    <strong>
+                      {line.itemCode && line.itemName
+                        ? `${line.itemCode} — ${line.itemName}`
+                        : 'No item snapshot'}
+                    </strong>
+                    <small>
+                      {line.accountCode} · {line.taxType}
+                    </small>
+                    {line.xeroItemId && <small>ItemID {line.xeroItemId}</small>}
                   </td>
                   <td>
                     {formatScaledAmount(line.amountScaled, line.currency)}

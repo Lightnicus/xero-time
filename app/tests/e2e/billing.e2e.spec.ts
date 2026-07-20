@@ -25,6 +25,7 @@ const openAndCancelOnlyExport = async (
   await exportRow.getByRole('link').first().click()
   await expect(page.getByRole('heading', { name: expectedReference, exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Mapped invoice lines' })).toBeVisible()
+  await expect(page.getByText('TIME — Professional services').first()).toBeVisible()
   await page.getByLabel('Reason').fill('Cancelled safely by the billing browser test.')
   await page.getByRole('button', { name: 'Cancel export' }).click()
   await expect(page).toHaveURL(/status=cancelled/)
@@ -88,7 +89,10 @@ test.describe.serial('Billing application', () => {
     ).toBeVisible()
     await expect(page.getByText('2 unbilled entries have a different snapshot rate.')).toBeVisible()
 
-    await page.getByLabel('Commercial reason').fill('Apply the approved browser-test project rate.')
+    await page
+      .locator('#recalculation-preview')
+      .getByLabel('Commercial reason')
+      .fill('Apply the approved browser-test project rate.')
     await page.getByLabel('Type RECALCULATE').fill('RECALCULATE')
     await page.getByRole('button', { name: 'Recalculate unbilled snapshots' }).click()
 
@@ -120,6 +124,7 @@ test.describe.serial('Billing application', () => {
     await expect(page.getByText('Billing implementation review')).toHaveCount(0)
     await expect(page.getByRole('region', { name: 'Preview summary' })).toContainText('1h 15m')
     await expect(page.getByText('E2E-CUSTOMER-0001', { exact: true })).toBeVisible()
+    await expect(page.getByText('TIME — Professional services')).toBeVisible()
 
     await reserveCurrentPreview(page)
     await openAndCancelOnlyExport(page, 'E2E-CUSTOMER-0001')

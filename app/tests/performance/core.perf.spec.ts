@@ -77,6 +77,7 @@ describe('bounded core performance smoke', () => {
       id: 'project-1',
       name: 'Performance Project',
       status: 'active',
+      xeroItemId: '22222222-2222-4222-8222-222222222222',
     }
     const user = { active: true, displayName: 'Performance Member', id: 'member-1' }
     const entries = Array.from({ length: 5_000 }, (_, index) => ({
@@ -98,6 +99,14 @@ describe('bounded core performance smoke', () => {
       workDate: '2026-07-18',
     }))
     const references = [
+      ...Array.from({ length: 1_001 }, (_, index) => ({
+        code: `OLD-${index}`,
+        metadata: { isSold: false },
+        name: `Unavailable item ${index}`,
+        resourceType: 'item',
+        status: 'unavailable',
+        xeroId: `unavailable-item-${index}`,
+      })),
       { code: '200', resourceType: 'account', status: 'active' },
       {
         code: 'OUTPUT2',
@@ -106,6 +115,14 @@ describe('bounded core performance smoke', () => {
         status: 'active',
       },
       { code: 'NZD', resourceType: 'currency', status: 'active' },
+      {
+        code: 'TIME',
+        metadata: { isSold: true },
+        name: 'Professional services',
+        resourceType: 'item',
+        status: 'active',
+        xeroId: '22222222-2222-4222-8222-222222222222',
+      },
       { code: 'CreateDraftInvoice', resourceType: 'organisation-action', status: 'active' },
     ]
     const fakePayload = {
@@ -135,7 +152,14 @@ describe('bounded core performance smoke', () => {
             ],
           }
         }
-        if (args.collection === 'xero-reference-data') return { docs: references }
+        if (args.collection === 'xero-reference-data') {
+          const page = args.page ?? 1
+          const limit = args.limit ?? 1_000
+          return {
+            docs: references.slice((page - 1) * limit, page * limit),
+            hasNextPage: page * limit < references.length,
+          }
+        }
         return { docs: [] }
       },
       findGlobal: async () => ({

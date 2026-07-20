@@ -161,9 +161,11 @@ export const materiallyMatches = (
       typeof expected === 'number' && typeof actual === 'number'
         ? Math.abs(expected - actual) < 0.000_05
         : expected === actual
+    const optionalItemCode = (value: unknown): string => (typeof value === 'string' ? value : '')
     return (
       line.Description === remoteLine.Description &&
       line.AccountCode === remoteLine.AccountCode &&
+      optionalItemCode(line.ItemCode) === optionalItemCode(remoteLine.ItemCode) &&
       line.TaxType === remoteLine.TaxType &&
       numberMatches(line.Quantity, remoteLine.Quantity) &&
       numberMatches(line.UnitAmount, remoteLine.UnitAmount) &&

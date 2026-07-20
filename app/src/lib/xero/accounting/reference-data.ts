@@ -19,6 +19,7 @@ type ReferenceResource = {
   resourceType:
     | 'account'
     | 'currency'
+    | 'item'
     | 'organisation'
     | 'organisation-action'
     | 'tax-rate'
@@ -52,6 +53,38 @@ const optionalString = (value: unknown, max = 255): string | undefined =>
   typeof value === 'string' && value.trim().length > 0 && value.length <= max
     ? value.trim()
     : undefined
+
+const strictOptionalString = (value: unknown, max: number): string | undefined => {
+  if (value === null || typeof value === 'undefined' || value === '') return undefined
+  if (typeof value !== 'string' || value.length > max || value.trim().length === 0) {
+    throw new AccountingIntegrationError(
+      'invalid-reference-response',
+      'Xero returned invalid accounting reference data.',
+    )
+  }
+  return value.trim()
+}
+
+const requiredBoolean = (value: unknown): boolean => {
+  if (typeof value !== 'boolean') {
+    throw new AccountingIntegrationError(
+      'invalid-reference-response',
+      'Xero returned invalid accounting reference data.',
+    )
+  }
+  return value
+}
+
+const optionalFiniteNumber = (value: unknown): number | undefined => {
+  if (value === null || typeof value === 'undefined') return undefined
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new AccountingIntegrationError(
+      'invalid-reference-response',
+      'Xero returned invalid accounting reference data.',
+    )
+  }
+  return value
+}
 
 const parseAccounts = (value: unknown): ReferenceResource[] =>
   arrayFrom(value, 'Accounts').flatMap((candidate) => {
@@ -115,6 +148,59 @@ const parseCurrencies = (value: unknown): ReferenceResource[] =>
         xeroId: code,
       },
     ]
+  })
+
+const parseItems = (value: unknown): ReferenceResource[] =>
+  arrayFrom(value, 'Items').map((candidate) => {
+    if (!isRecord(candidate)) {
+      throw new AccountingIntegrationError(
+        'invalid-reference-response',
+        'Xero returned invalid accounting reference data.',
+      )
+    }
+    const itemID = requiredString(candidate.ItemID, 100)
+    const code = requiredString(candidate.Code, 30)
+    const name = strictOptionalString(candidate.Name, 50) ?? code
+    const isSold = requiredBoolean(candidate.IsSold)
+    const isPurchased = requiredBoolean(candidate.IsPurchased)
+    const isTrackedAsInventory = requiredBoolean(candidate.IsTrackedAsInventory)
+    const salesDescription = strictOptionalString(candidate.Description, 4_000)
+    const salesDetailsValue = candidate.SalesDetails
+    if (
+      salesDetailsValue !== null &&
+      typeof salesDetailsValue !== 'undefined' &&
+      !isRecord(salesDetailsValue)
+    ) {
+      throw new AccountingIntegrationError(
+        'invalid-reference-response',
+        'Xero returned invalid accounting reference data.',
+      )
+    }
+    const salesDetails = isRecord(salesDetailsValue)
+      ? {
+          accountCode: strictOptionalString(salesDetailsValue.AccountCode, 100),
+          taxType: strictOptionalString(salesDetailsValue.TaxType, 100),
+          unitPrice: optionalFiniteNumber(salesDetailsValue.UnitPrice),
+        }
+      : undefined
+
+    return {
+      code,
+      metadata: {
+        isPurchased,
+        isSold,
+        isTrackedAsInventory,
+        salesDescription,
+        salesDetails,
+      },
+      name,
+      resourceType: 'item',
+      // The Items API does not expose archive status. IsSold only represents
+      // whether the item is currently selectable on a sales transaction.
+      status: isSold ? 'active' : 'unavailable',
+      type: isTrackedAsInventory ? 'tracked' : 'untracked',
+      xeroId: itemID,
+    }
   })
 
 const parseTrackingCategories = (value: unknown): ReferenceResource[] =>
@@ -300,15 +386,23 @@ const refreshWithClient = async (
   client: XeroAccountingClient,
   machineActor?: string,
 ): Promise<{ capabilityAvailable: boolean; resourceCount: number }> => {
-  const [organisation, organisationActions, accounts, taxRates, currencies, trackingCategories] =
-    await Promise.all([
-      client.accountingGet(accessToken, tenantID, 'Organisation'),
-      client.accountingGet(accessToken, tenantID, 'Organisation/Actions'),
-      client.accountingGet(accessToken, tenantID, 'Accounts'),
-      client.accountingGet(accessToken, tenantID, 'TaxRates'),
-      client.accountingGet(accessToken, tenantID, 'Currencies'),
-      client.accountingGet(accessToken, tenantID, 'TrackingCategories'),
-    ])
+  const [
+    organisation,
+    organisationActions,
+    accounts,
+    taxRates,
+    currencies,
+    trackingCategories,
+    items,
+  ] = await Promise.all([
+    client.accountingGet(accessToken, tenantID, 'Organisation'),
+    client.accountingGet(accessToken, tenantID, 'Organisation/Actions'),
+    client.accountingGet(accessToken, tenantID, 'Accounts'),
+    client.accountingGet(accessToken, tenantID, 'TaxRates'),
+    client.accountingGet(accessToken, tenantID, 'Currencies'),
+    client.accountingGet(accessToken, tenantID, 'TrackingCategories'),
+    client.accountingGet(accessToken, tenantID, 'Items'),
+  ])
   const resources = [
     ...parseOrganisation(organisation.data, tenantID),
     ...parseOrganisationActions(organisationActions.data),
@@ -316,6 +410,7 @@ const refreshWithClient = async (
     ...parseTaxRates(taxRates.data),
     ...parseCurrencies(currencies.data),
     ...parseTrackingCategories(trackingCategories.data),
+    ...parseItems(items.data),
   ]
   await persistReferences(session, tenantID, resources, machineActor)
   return {

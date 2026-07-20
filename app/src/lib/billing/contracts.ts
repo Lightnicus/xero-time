@@ -13,6 +13,8 @@ export const BILLING_BLOCKER_CODES = [
   'unmapped-contact',
   'archived-contact',
   'stale-contact',
+  'missing-item',
+  'invalid-item',
   'missing-account',
   'invalid-account',
   'missing-tax',
@@ -76,6 +78,9 @@ export type EligibleBillingEntry = BillingEntryBase & {
   customerReferenceLastSequence: number | null
   customerReferenceSequence: number
   customerReferenceStartNumber: number
+  itemCode: string
+  itemID: string
+  itemName: string
   taxRatePercent: number
   taxType: string
   tracking: BillingTrackingItem[]

@@ -64,6 +64,14 @@ export const InvoiceExportEntries: CollectionConfig = {
     {
       type: 'row',
       fields: [
+        { name: 'xeroItemId', type: 'text', maxLength: 100 },
+        { name: 'itemCode', type: 'text', maxLength: 30 },
+        { name: 'itemName', type: 'text', maxLength: 255 },
+      ],
+    },
+    {
+      type: 'row',
+      fields: [
         { name: 'workDate', type: 'text', maxLength: 10, required: true },
         { name: 'timezone', type: 'text', maxLength: 100, required: true },
         { name: 'projectCode', type: 'text', maxLength: 40, required: true },

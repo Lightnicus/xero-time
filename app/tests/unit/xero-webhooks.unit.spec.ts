@@ -5,8 +5,9 @@ import { createHmac } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 
 import { AccountingIntegrationError } from '@/lib/xero/accounting/contracts'
-import { classifyExportFailure } from '@/lib/xero/export/processor'
+import { classifyExportFailure, materiallyMatches } from '@/lib/xero/export/processor'
 import { parseXeroWebhookEvents, validXeroWebhookSignature } from '@/lib/xero/export/webhooks'
+import type { InvoiceExport, InvoiceExportEntry } from '@/payload-types'
 
 const key = 'webhook-test-key-that-is-long-enough-for-tests'
 
@@ -94,5 +95,47 @@ describe('Xero export retry classification', () => {
     expect(classifyExportFailure(new AccountingIntegrationError('worker', 'safe'), true)).toBe(
       'reconciling',
     )
+  })
+})
+
+describe('Xero export material comparison', () => {
+  it('keeps legacy snapshots compatible when neither line contains an ItemCode', () => {
+    const legacyLine = {
+      AccountCode: '200',
+      Description: 'Legacy professional time',
+      Quantity: 1,
+      TaxType: 'OUTPUT2',
+      Tracking: [],
+      UnitAmount: 150,
+    }
+    const exportDocument = {
+      applicationReference: 'LEGACY-0001',
+      requestPayload: {
+        Contact: { ContactID: '11111111-1111-4111-8111-111111111111' },
+        CurrencyCode: 'NZD',
+        LineItems: [legacyLine],
+        Reference: 'LEGACY-0001',
+      },
+      subtotalScaled: 1_500_000,
+      totalScaled: 1_725_000,
+    } as unknown as InvoiceExport
+
+    expect(
+      materiallyMatches(
+        exportDocument,
+        {
+          contactID: '11111111-1111-4111-8111-111111111111',
+          currency: 'NZD',
+          invoiceID: '22222222-2222-4222-8222-222222222222',
+          lineItemIDs: ['33333333-3333-4333-8333-333333333333'],
+          lineItems: [legacyLine],
+          reference: 'LEGACY-0001',
+          status: 'DRAFT',
+          subtotal: 150,
+          total: 172.5,
+        },
+        [{} as InvoiceExportEntry],
+      ),
+    ).toBe(true)
   })
 })

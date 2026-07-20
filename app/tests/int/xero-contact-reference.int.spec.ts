@@ -22,6 +22,8 @@ const PASSWORD = 'contact-reference-password-123!'
 const TENANT_ID = '11111111-1111-4111-8111-111111111111'
 const FIRST_CONTACT_ID = '22222222-2222-4222-8222-222222222222'
 const SECOND_CONTACT_ID = '33333333-3333-4333-8333-333333333333'
+const SELLABLE_ITEM_ID = '55555555-5555-4555-8555-555555555555'
+const UNAVAILABLE_ITEM_ID = '66666666-6666-4666-8666-666666666666'
 
 type ContactRecord = {
   ContactID: string
@@ -41,6 +43,28 @@ let nextContactSequence = 10
 let ambiguousNextContactCreate = false
 let draftInvoiceActionStatus = 'ALLOWED'
 let organisationResponseTenantID = TENANT_ID
+
+const validItems: Array<Record<string, unknown>> = [
+  {
+    Code: 'TIME',
+    Description: 'Professional time',
+    IsPurchased: false,
+    IsSold: true,
+    IsTrackedAsInventory: false,
+    ItemID: SELLABLE_ITEM_ID,
+    Name: 'Professional services',
+    SalesDetails: { AccountCode: '200', TaxType: 'OUTPUT2', UnitPrice: 150 },
+  },
+  {
+    Code: 'OLD-TIME',
+    IsPurchased: false,
+    IsSold: false,
+    IsTrackedAsInventory: false,
+    ItemID: UNAVAILABLE_ITEM_ID,
+    SalesDetails: null,
+  },
+]
+let itemResponse: unknown[] = structuredClone(validItems)
 
 const contacts = new Map<string, ContactRecord>([
   [
@@ -171,6 +195,7 @@ const client: XeroAccountingClient = {
         },
       }
     }
+    if (path === 'Items') return { data: { Items: structuredClone(itemResponse) } }
     if (path.startsWith('Contacts/')) {
       const contact = contacts.get(path.slice('Contacts/'.length))
       return contactResponse(contact ? [structuredClone(contact)] : [])
@@ -326,7 +351,7 @@ describe.sequential('Xero contacts and reference data', () => {
   it('refreshes tenant reference data and validates billing defaults', async () => {
     await expect(refreshXeroReferenceData(ownerSession, overrides())).resolves.toMatchObject({
       capabilityAvailable: true,
-      resourceCount: 6,
+      resourceCount: 8,
     })
     const references = await payload.find({
       collection: 'xero-reference-data',
@@ -334,11 +359,34 @@ describe.sequential('Xero contacts and reference data', () => {
       overrideAccess: true,
       pagination: false,
     })
-    expect(references.docs).toHaveLength(6)
+    expect(references.docs).toHaveLength(8)
     expect(references.docs).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: '200', resourceType: 'account', status: 'active' }),
         expect.objectContaining({ code: 'OUTPUT2', resourceType: 'tax-rate' }),
+        expect.objectContaining({
+          code: 'TIME',
+          metadata: {
+            isPurchased: false,
+            isSold: true,
+            isTrackedAsInventory: false,
+            salesDescription: 'Professional time',
+            salesDetails: { accountCode: '200', taxType: 'OUTPUT2', unitPrice: 150 },
+          },
+          name: 'Professional services',
+          resourceType: 'item',
+          status: 'active',
+          type: 'untracked',
+          xeroId: SELLABLE_ITEM_ID,
+        }),
+        expect.objectContaining({
+          code: 'OLD-TIME',
+          metadata: expect.objectContaining({ isSold: false }),
+          name: 'OLD-TIME',
+          resourceType: 'item',
+          status: 'unavailable',
+          xeroId: UNAVAILABLE_ITEM_ID,
+        }),
         expect.objectContaining({
           code: 'CreateDraftInvoice',
           metadata: { providerStatus: 'ALLOWED' },
@@ -349,7 +397,7 @@ describe.sequential('Xero contacts and reference data', () => {
       ]),
     )
     expect(vi.mocked(client.accountingGet).mock.calls.map((call) => call[2])).toEqual(
-      expect.arrayContaining(['Organisation', 'Organisation/Actions']),
+      expect.arrayContaining(['Organisation', 'Organisation/Actions', 'Items']),
     )
     await expect(
       validateXeroBillingDefaults(ownerSession.req, {
@@ -370,7 +418,7 @@ describe.sequential('Xero contacts and reference data', () => {
     try {
       await expect(refreshXeroReferenceData(ownerSession, overrides())).resolves.toMatchObject({
         capabilityAvailable: false,
-        resourceCount: 6,
+        resourceCount: 8,
       })
       const references = await payload.find({
         collection: 'xero-reference-data',
@@ -417,6 +465,42 @@ describe.sequential('Xero contacts and reference data', () => {
       expect(after.docs).toEqual(before.docs)
     } finally {
       organisationResponseTenantID = TENANT_ID
+    }
+  })
+
+  it.each([
+    ['ItemID', { ...validItems[0], ItemID: null }],
+    ['Code', { ...validItems[0], Code: 42 }],
+    ['Name', { ...validItems[0], Name: false }],
+    ['IsSold', { ...validItems[0], IsSold: 'true' }],
+    ['IsPurchased', { ...validItems[0], IsPurchased: 'false' }],
+    ['IsTrackedAsInventory', { ...validItems[0], IsTrackedAsInventory: 0 }],
+    ['SalesDetails', { ...validItems[0], SalesDetails: [] }],
+    [
+      'SalesDetails.UnitPrice',
+      { ...validItems[0], SalesDetails: { AccountCode: '200', UnitPrice: '150' } },
+    ],
+  ])('rejects an invalid Item %s without replacing the existing cache', async (_field, item) => {
+    itemResponse = [item]
+    try {
+      await expect(refreshXeroReferenceData(ownerSession, overrides())).rejects.toMatchObject({
+        code: 'invalid-reference-response',
+      })
+      const references = await payload.find({
+        collection: 'xero-reference-data',
+        depth: 0,
+        overrideAccess: true,
+        pagination: false,
+      })
+      expect(references.docs).toHaveLength(8)
+      expect(references.docs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ resourceType: 'item', xeroId: SELLABLE_ITEM_ID }),
+          expect.objectContaining({ resourceType: 'item', xeroId: UNAVAILABLE_ITEM_ID }),
+        ]),
+      )
+    } finally {
+      itemResponse = structuredClone(validItems)
     }
   })
 

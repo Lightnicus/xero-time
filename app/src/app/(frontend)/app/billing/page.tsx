@@ -44,7 +44,8 @@ const statusNotice = (status: string): { message: string; tone: 'success' | 'war
   }
   if (status === 'references-refreshed') {
     return {
-      message: 'Xero accounts, tax types, currencies, and invoice permissions were refreshed.',
+      message:
+        'Xero sales items, accounts, tax types, currencies, tracking, and invoice permissions were refreshed.',
       tone: 'success',
     }
   }

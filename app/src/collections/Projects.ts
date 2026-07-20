@@ -1,6 +1,6 @@
 import { ValidationError } from 'payload'
 
-import { adminOnly, financialField, readBusinessDirectory } from '@/access/domain'
+import { adminOnly, financialField, readBusinessDirectory, systemFieldWrite } from '@/access/domain'
 import { ownerOrAdmin } from '@/access/roles'
 import { auditCollectionChange } from '@/lib/audit/change-hooks'
 import { formatScaledAmount } from '@/lib/domain/money'
@@ -11,12 +11,15 @@ import {
   normalizeCurrencyCode,
   relationshipID,
   validateCurrencyCode,
+  validateOptionalXeroID,
   validateScaledInteger,
 } from '@/lib/domain/validation'
 import { attributeChange, attributionFields } from '@/lib/payload/attribution'
+import { activeSalesItemReference } from '@/lib/projects/xero-items'
 
 import type {
   CollectionConfig,
+  CollectionBeforeChangeHook,
   CollectionBeforeValidateHook,
   CollectionSlug,
   FilterOptions,
@@ -78,11 +81,15 @@ const commercialFields = [
   'revenueAccountCode',
   'taxType',
   'trackingCategories',
+  'xeroItemId',
 ] as const
 
-const protectCommercialChanges: import('payload').CollectionBeforeChangeHook<
-  ProjectHookDocument
-> = async ({ data, operation, originalDoc, req }) => {
+export const protectCommercialChanges: CollectionBeforeChangeHook<ProjectHookDocument> = async ({
+  data,
+  operation,
+  originalDoc,
+  req,
+}) => {
   if (operation !== 'update') return data
   const changed = commercialFields.some(
     (field) =>
@@ -104,18 +111,107 @@ const protectCommercialChanges: import('payload').CollectionBeforeChangeHook<
   })
   if (entries.docs.length === 0) return data
   const reason = data.commercialChangeReason
-  if (
-    data.confirmUnbilledImpact !== true ||
-    typeof reason !== 'string' ||
-    reason.trim().length < 10
-  ) {
+  const trimmedReason = typeof reason === 'string' ? reason.trim() : ''
+  const errors: { message: string; path: string }[] = []
+  if (data.confirmUnbilledImpact !== true) {
+    errors.push({
+      message:
+        'Confirm that existing unbilled entries may use the updated project billing configuration.',
+      path: 'confirmUnbilledImpact',
+    })
+  }
+  if (trimmedReason.length < 10) {
+    errors.push({
+      message: 'Enter a commercial-change reason of at least 10 characters.',
+      path: 'commercialChangeReason',
+    })
+  }
+  if (errors.length > 0) {
+    throw new ValidationError({ collection: 'projects', errors, req })
+  }
+  req.context = { ...(req.context ?? {}), auditReason: trimmedReason }
+  return data
+}
+
+const itemID = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
+
+/**
+ * Resolve every changed project item against the currently pinned tenant.
+ * Unchanged mappings are deliberately not revalidated so an unrelated edit
+ * remains possible after an item is removed or while Xero is disconnected.
+ */
+export const validateXeroItemMappingChange: CollectionBeforeChangeHook<
+  ProjectHookDocument
+> = async ({ data, operation, originalDoc, req }) => {
+  const previousID = itemID(originalDoc?.xeroItemId)
+  const nextID = itemID(
+    Object.hasOwn(data, 'xeroItemId') ? data.xeroItemId : originalDoc?.xeroItemId,
+  )
+  if (operation !== 'create' && previousID === nextID) return data
+  if (operation === 'create' && !nextID) return data
+
+  if (!nextID) {
+    data.xeroItemId = null
+    data.xeroItemCodeSnapshot = null
+    data.xeroItemNameSnapshot = null
+    return data
+  }
+
+  if (validateOptionalXeroID(nextID) !== true) {
+    return projectValidationError('xeroItemId', 'Choose a valid Xero invoice item.', req)
+  }
+
+  const connections = await req.payload.find({
+    collection: 'xero-connections',
+    depth: 0,
+    limit: 1,
+    overrideAccess: true,
+    pagination: false,
+    req,
+    where: {
+      and: [
+        { singletonKey: { equals: 'business-accounting' } },
+        { status: { equals: 'connected' } },
+      ],
+    },
+  })
+  const tenantID = connections.docs[0]?.tenantId
+  if (!tenantID) {
     return projectValidationError(
-      'confirmUnbilledImpact',
-      'Unbilled entries exist. Confirm that saved snapshots stay unchanged and enter a commercial-change reason.',
+      'xeroItemId',
+      'Connect a Xero organisation and refresh reference data before choosing an invoice item.',
       req,
     )
   }
-  req.context = { ...(req.context ?? {}), auditReason: reason.trim() }
+
+  const references = await req.payload.find({
+    collection: 'xero-reference-data',
+    depth: 0,
+    limit: 1,
+    overrideAccess: true,
+    pagination: false,
+    req,
+    where: {
+      and: [
+        { sourceTenantId: { equals: tenantID } },
+        { resourceType: { equals: 'item' } },
+        { xeroId: { equals: nextID } },
+        { status: { equals: 'active' } },
+      ],
+    } as never,
+  })
+  const item = activeSalesItemReference(references.docs[0])
+  if (!item || item.id !== nextID) {
+    return projectValidationError(
+      'xeroItemId',
+      'Choose an active sales item from the connected Xero organisation.',
+      req,
+    )
+  }
+
+  data.xeroItemId = item.id
+  data.xeroItemCodeSnapshot = item.code
+  data.xeroItemNameSnapshot = item.name
   return data
 }
 
@@ -380,6 +476,66 @@ export const Projects: CollectionConfig = {
               type: 'row',
               fields: [
                 {
+                  name: 'xeroItemId',
+                  label: 'Xero invoice item ID',
+                  type: 'text',
+                  maxLength: 100,
+                  validate: validateOptionalXeroID,
+                  access: {
+                    create: systemFieldWrite,
+                    read: financialField,
+                    update: systemFieldWrite,
+                  },
+                  admin: {
+                    description:
+                      'Protected ItemID mapping set from Projects, rates and Xero items in the application.',
+                    readOnly: true,
+                    width: '34%',
+                  },
+                  hooks: {
+                    beforeValidate: [
+                      ({ value }) => (typeof value === 'string' ? value.trim() || null : value),
+                    ],
+                  },
+                },
+                {
+                  name: 'xeroItemCodeSnapshot',
+                  label: 'Xero item code snapshot',
+                  type: 'text',
+                  maxLength: 30,
+                  access: {
+                    create: systemFieldWrite,
+                    read: financialField,
+                    update: systemFieldWrite,
+                  },
+                  admin: {
+                    description: 'Last confirmed provider code; exact case is preserved.',
+                    readOnly: true,
+                    width: '33%',
+                  },
+                },
+                {
+                  name: 'xeroItemNameSnapshot',
+                  label: 'Xero item name snapshot',
+                  type: 'text',
+                  maxLength: 50,
+                  access: {
+                    create: systemFieldWrite,
+                    read: financialField,
+                    update: systemFieldWrite,
+                  },
+                  admin: {
+                    description: 'Display snapshot only; ItemID remains the durable mapping.',
+                    readOnly: true,
+                    width: '33%',
+                  },
+                },
+              ],
+            },
+            {
+              type: 'row',
+              fields: [
+                {
                   name: 'revenueAccountCode',
                   type: 'text',
                   maxLength: 20,
@@ -431,7 +587,7 @@ export const Projects: CollectionConfig = {
                   virtual: true,
                   admin: {
                     description:
-                      'Required for a rate/currency/account/tax/tracking change when unbilled entries exist. Existing snapshots remain unchanged.',
+                      'Required for an item/rate/currency/account/tax/tracking change when unbilled entries exist. Future previews may use the change; reserved/exported snapshots remain unchanged.',
                     width: '33%',
                   },
                 },
@@ -466,9 +622,12 @@ export const Projects: CollectionConfig = {
         'status',
         'taxType',
         'trackingCategories',
+        'xeroItemCodeSnapshot',
+        'xeroItemId',
+        'xeroItemNameSnapshot',
       ]),
     ],
-    beforeChange: [protectCommercialChanges, attributeChange],
+    beforeChange: [validateXeroItemMappingChange, protectCommercialChanges, attributeChange],
     beforeValidate: [validateCustomerCurrency],
   },
   indexes: [{ fields: ['customer', 'status'] }, { fields: ['status', 'name'] }],

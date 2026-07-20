@@ -24,6 +24,7 @@ import { FakeXeroAccountingServer } from '../fakes/xero-accounting'
 const PASSWORD = 'export-recovery-password-123!'
 const TENANT_ID = '22222222-2222-4222-8222-222222222222'
 const CONTACT_ID = '33333333-3333-4333-8333-333333333333'
+const ITEM_ID = '44444444-4444-4444-8444-444444444444'
 
 let payload: Payload
 let ownerSession: AppSession
@@ -202,6 +203,14 @@ describe.sequential('Xero export and webhook recovery', () => {
         xeroId: 'NZD',
       },
       {
+        code: 'TIME',
+        metadata: { isSold: true },
+        name: 'Professional services',
+        resourceType: 'item',
+        status: 'active',
+        xeroId: ITEM_ID,
+      },
+      {
         code: 'CreateDraftInvoice',
         name: 'CreateDraftInvoice',
         resourceType: 'organisation-action',
@@ -257,8 +266,9 @@ describe.sequential('Xero export and webhook recovery', () => {
         hourlyRateScaled: 1_500_000,
         name: 'Recovery Project',
         status: 'active',
+        xeroItemId: ITEM_ID,
       },
-      overrideAccess: false,
+      overrideAccess: true,
       req: ownerReq,
     })
     projectID = String(project.id)
@@ -326,6 +336,46 @@ describe.sequential('Xero export and webhook recovery', () => {
     expect(fake.requests.filter((request) => request.operation === 'post')).toHaveLength(1)
     succeededExportID = reserved.exportID
     succeededInvoiceID = exportDocument.xeroInvoiceId as string
+  })
+
+  it('requires the remote ItemCode to match the immutable line snapshot', async () => {
+    const reserved = await reserveOneEntry(
+      'Item code mismatch recovery',
+      'ACACACAC-ACAC-4CAC-8CAC-ACACACACACAC',
+    )
+    const fake = new FakeXeroAccountingServer()
+    fake.setInvoiceSequence(300)
+    fake.enqueue('post', 'ambiguous-create')
+
+    await expect(
+      processInvoiceExport(ownerSession.req, reserved.exportID, {
+        client: fake.client(),
+        token: token(),
+      }),
+    ).resolves.toEqual({ state: 'reconciling' })
+
+    const invoiceID = '00000000-0000-4000-8000-000000000301'
+    const created = fake.invoice(invoiceID)
+    if (!created) throw new Error('The fake Xero invoice was not created.')
+    fake.setInvoice({
+      ...created,
+      LineItems: created.LineItems.map((line) => ({ ...line, ItemCode: 'DIFFERENT' })),
+    })
+
+    await expect(
+      reconcileInvoiceExport(ownerSession.req, reserved.exportID, {
+        client: fake.client(),
+        token: token(),
+      }),
+    ).resolves.toEqual({ state: 'manual-review' })
+    await expect(
+      payload.findByID({
+        collection: 'invoice-exports',
+        depth: 0,
+        id: reserved.exportID,
+        overrideAccess: true,
+      }),
+    ).resolves.toMatchObject({ lastErrorCode: 'reconciliation-mismatch', state: 'manual-review' })
   })
 
   it('routes an unknown exception after the send marker to reconciliation', async () => {

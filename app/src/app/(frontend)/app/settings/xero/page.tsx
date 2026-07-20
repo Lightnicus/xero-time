@@ -120,9 +120,9 @@ export default async function XeroAccountingPage({
       )}
       {params.connected === '1' && params.references === 'failed' && (
         <div aria-live="polite" className="notice notice-warning" role="alert">
-          Xero is connected, but its accounts, tax rates, currencies, and invoice capability could
-          not be loaded. <Link href="#reference-data">Refresh Xero reference data</Link> before
-          exporting invoices.
+          Xero is connected, but its sales items, accounts, tax rates, currencies, tracking, and
+          invoice capability could not be loaded.{' '}
+          <Link href="#reference-data">Refresh Xero reference data</Link> before exporting invoices.
         </div>
       )}
       {params.connected === '1' && params.references === '1' && params.capability !== 'yes' && (
@@ -150,7 +150,7 @@ export default async function XeroAccountingPage({
           role="status"
         >
           {params.capability === 'yes'
-            ? 'Xero accounts, tax rates, currencies, and organisation capabilities refreshed.'
+            ? 'Xero sales items, accounts, tax rates, currencies, tracking, and organisation capabilities refreshed.'
             : 'Reference data refreshed, but Xero did not report CreateDraftInvoice capability.'}
         </div>
       )}

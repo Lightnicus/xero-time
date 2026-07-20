@@ -33,6 +33,7 @@ export const XeroReferenceData: CollectionConfig = {
         { label: 'Organisation action', value: 'organisation-action' },
         { label: 'Organisation', value: 'organisation' },
         { label: 'Tracking category', value: 'tracking-category' },
+        { label: 'Item', value: 'item' },
         { label: 'Contact', value: 'contact' },
       ],
       required: true,

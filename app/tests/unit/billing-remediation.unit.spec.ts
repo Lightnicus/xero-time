@@ -109,5 +109,7 @@ describe('billing blocker remediation', () => {
     expect(billingBlockerActionLabel('unmapped-contact')).toBe('Map customer')
     expect(billingBlockerActionLabel('invalid-duration')).toBe('Edit time entry')
     expect(billingBlockerActionLabel('missing-customer-reference')).toBe('Set invoice reference')
+    expect(billingBlockerActionLabel('missing-item')).toBe('Choose Xero item')
+    expect(billingBlockerActionLabel('invalid-item')).toBe('Review Xero item')
   })
 })

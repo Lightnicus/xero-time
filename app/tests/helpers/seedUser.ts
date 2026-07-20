@@ -97,6 +97,7 @@ export async function seedBillingAppFixture(): Promise<void> {
   const ownerReq = await createLocalReq({ user: owner }, payload)
 
   const tenantID = 'e2e-demo-tenant'
+  const itemID = '22222222-2222-4222-8222-222222222222'
   const fetchedAt = new Date().toISOString()
   await payload.create({
     collection: 'xero-connections',
@@ -139,6 +140,13 @@ export async function seedBillingAppFixture(): Promise<void> {
       code: 'NZD',
       name: 'New Zealand Dollar',
       resourceType: 'currency' as const,
+    },
+    {
+      code: 'TIME',
+      metadata: { isSold: true },
+      name: 'Professional services',
+      resourceType: 'item' as const,
+      xeroId: itemID,
     },
   ]
 
@@ -200,6 +208,7 @@ export async function seedBillingAppFixture(): Promise<void> {
       hourlyRateScaled: 1_800_000,
       name: 'Browser Billing Project',
       status: 'active',
+      xeroItemId: itemID,
     },
     overrideAccess: true,
     req: ownerReq,

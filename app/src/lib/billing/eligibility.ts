@@ -177,9 +177,13 @@ type ReferenceMaps = {
   accounts: Map<string, Record<string, unknown>>
   capabilityAvailable: boolean
   currencies: Set<string>
+  items: Map<string, Record<string, unknown>>
   taxes: Map<string, Record<string, unknown>>
   tracking: Map<string, Record<string, unknown>>
 }
+
+const REFERENCE_PAGE_SIZE = 1_000
+const MAX_REFERENCE_PAGES = 100
 
 const referenceMaps = async (
   session: AppSession,
@@ -189,32 +193,61 @@ const referenceMaps = async (
     accounts: new Map(),
     capabilityAvailable: false,
     currencies: new Set(),
+    items: new Map(),
     taxes: new Map(),
     tracking: new Map(),
   }
   if (!tenantID) return maps
-  const result = await session.payload.find({
-    collection: 'xero-reference-data',
-    depth: 0,
-    limit: 1_000,
-    overrideAccess: true,
-    pagination: false,
-    req: session.req,
-    where: { sourceTenantId: { equals: tenantID } },
-  })
-  for (const item of result.docs as unknown as Record<string, unknown>[]) {
-    if (item.status !== 'active') continue
-    const code = stringValue(item.code, 255)
-    if (item.resourceType === 'account' && code) maps.accounts.set(code, item)
-    if (item.resourceType === 'tax-rate' && code) maps.taxes.set(code, item)
-    if (item.resourceType === 'currency' && code) maps.currencies.add(code)
-    if (item.resourceType === 'tracking-category')
-      maps.tracking.set(stringValue(item.name, 255), item)
-    if (item.resourceType === 'organisation-action' && code === 'CreateDraftInvoice') {
-      maps.capabilityAvailable = true
+  const seenReferenceIDs = new Set<string>()
+
+  for (let page = 1; page <= MAX_REFERENCE_PAGES; page += 1) {
+    const result = await session.payload.find({
+      collection: 'xero-reference-data',
+      depth: 0,
+      limit: REFERENCE_PAGE_SIZE,
+      overrideAccess: true,
+      page,
+      req: session.req,
+      sort: 'id',
+      where: { sourceTenantId: { equals: tenantID } },
+    })
+    for (const item of result.docs as unknown as Record<string, unknown>[]) {
+      const referenceID = stringValue(item.id, 100)
+      if (referenceID && seenReferenceIDs.has(referenceID)) {
+        throw new Error('Xero reference pagination repeated a saved record.')
+      }
+      if (referenceID) seenReferenceIDs.add(referenceID)
+      if (item.status !== 'active') continue
+      const code = stringValue(item.code, 255)
+      if (item.resourceType === 'account' && code) maps.accounts.set(code, item)
+      if (item.resourceType === 'tax-rate' && code) maps.taxes.set(code, item)
+      if (item.resourceType === 'currency' && code) maps.currencies.add(code)
+      if (
+        item.resourceType === 'item' &&
+        code &&
+        isRecord(item.metadata) &&
+        item.metadata.isSold === true
+      ) {
+        const itemID = stringValue(item.xeroId, 100)
+        if (itemID) maps.items.set(itemID, item)
+      }
+      if (item.resourceType === 'tracking-category')
+        maps.tracking.set(stringValue(item.name, 255), item)
+      if (item.resourceType === 'organisation-action' && code === 'CreateDraftInvoice') {
+        maps.capabilityAvailable = true
+      }
+    }
+    if (result.hasNextPage !== true) return maps
+    if (result.docs.length === 0) {
+      throw new Error('Xero reference pagination did not advance.')
     }
   }
-  return maps
+
+  throw new Error(
+    `The Xero reference cache exceeds the supported ${(
+      REFERENCE_PAGE_SIZE * MAX_REFERENCE_PAGES
+    ).toLocaleString('en-NZ')} records.`,
+  )
 }
 
 const trackingIsValid = (
@@ -471,6 +504,25 @@ export async function getBillingEligibility(
       )
     }
 
+    const projectItemID = stringValue(project?.xeroItemId, 100)
+    const itemReference = projectItemID ? references.items.get(projectItemID) : undefined
+    const itemCode = stringValue(itemReference?.code, 30)
+    const itemName = stringValue(itemReference?.name, 255) || itemCode
+    const itemRemediationHref = `/app/settings/projects#project-item-${encodeURIComponent(projectID)}`
+    if (project && !projectItemID) {
+      reasons.push(
+        blocker('missing-item', 'Choose a Xero sales item for this project.', itemRemediationHref),
+      )
+    } else if (project && tenantID && (!itemReference || !itemCode || !itemName)) {
+      reasons.push(
+        blocker(
+          'invalid-item',
+          'The selected Xero item is not an active sales item in the connected organisation.',
+          itemRemediationHref,
+        ),
+      )
+    }
+
     const projectAccountCode = stringValue(project?.revenueAccountCode, 20)
     const customerAccountCode = stringValue(customer?.revenueAccountCode, 20)
     const accountCode =
@@ -560,6 +612,9 @@ export async function getBillingEligibility(
         customerReferenceLastSequence,
         customerReferenceSequence,
         customerReferenceStartNumber,
+        itemCode,
+        itemID: projectItemID,
+        itemName,
         taxRatePercent:
           settings.lineAmountType === 'NoTax' ? 0 : taxPercent(references.taxes.get(taxType)),
         taxType: settings.lineAmountType === 'NoTax' ? taxType || 'NONE' : taxType,

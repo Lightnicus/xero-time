@@ -26,6 +26,9 @@ const entry = (overrides: Partial<EligibleBillingEntry> = {}): EligibleBillingEn
   description: 'Complete implementation detail',
   durationSeconds: 60,
   entryID: 'entry-1',
+  itemCode: 'TIME',
+  itemID: '22222222-2222-4222-8222-222222222222',
+  itemName: 'Professional services',
   projectCode: 'WEB',
   projectID: 'project-1',
   projectName: 'Website',
@@ -157,7 +160,36 @@ describe('invoice preview construction', () => {
       'EXAMPLE-0001',
       'SECOND-0001',
     ])
-    expect(preview.invoices[0]?.payload).toMatchObject({ Status: 'DRAFT', Type: 'ACCREC' })
+    expect(preview.invoices[0]?.payload).toMatchObject({
+      LineItems: expect.arrayContaining([expect.objectContaining({ ItemCode: 'TIME' })]),
+      Status: 'DRAFT',
+      Type: 'ACCREC',
+    })
+  })
+
+  it('binds the selected Xero item identity and code into the immutable preview hashes', () => {
+    const base = buildBillingPreview({
+      batchReference: 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE',
+      entries: [entry()],
+      invoiceDate: '2026-07-18',
+      settings,
+    })
+    const renamed = buildBillingPreview({
+      batchReference: 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE',
+      entries: [entry({ itemCode: 'TIME-NEW' })],
+      invoiceDate: '2026-07-18',
+      settings,
+    })
+    const replaced = buildBillingPreview({
+      batchReference: 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE',
+      entries: [entry({ itemID: '33333333-3333-4333-8333-333333333333' })],
+      invoiceDate: '2026-07-18',
+      settings,
+    })
+
+    expect(renamed.selectionHash).not.toBe(base.selectionHash)
+    expect(renamed.checksum).not.toBe(base.checksum)
+    expect(replaced.selectionHash).not.toBe(base.selectionHash)
   })
 
   it('uses the configured starting number and pads only sequences shorter than four digits', () => {

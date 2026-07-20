@@ -145,7 +145,7 @@ export default async function BillingPreviewPage({
                   <th scope="col">Invoice description</th>
                   <th scope="col">Quantity</th>
                   <th scope="col">Unit rate</th>
-                  <th scope="col">Account / tax / tracking</th>
+                  <th scope="col">Item / account / tax / tracking</th>
                   <th scope="col">Amount</th>
                 </tr>
               </thead>
@@ -166,8 +166,11 @@ export default async function BillingPreviewPage({
                     <td>{formatScaledAmount(line.rateScaled, line.currency)}</td>
                     <td>
                       <strong>
-                        {line.accountCode} · {line.taxType}
+                        {line.itemCode} — {line.itemName}
                       </strong>
+                      <small>
+                        {line.accountCode} · {line.taxType}
+                      </small>
                       <small>
                         {line.tracking.length > 0
                           ? line.tracking.map((item) => `${item.name}: ${item.option}`).join(', ')
@@ -238,7 +241,7 @@ export default async function BillingPreviewPage({
         <label className="confirmation-field">
           <input name="confirmed" required type="checkbox" value="yes" />
           <span>
-            I reviewed every invoice header, source entry, line description, quantity, rate,
+            I reviewed every invoice header, source entry, line description, quantity, rate, item,
             account, tax, tracking value, and total.
           </span>
         </label>

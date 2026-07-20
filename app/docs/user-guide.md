@@ -12,7 +12,7 @@ Open the single-use invitation link and choose email/password or, when enabled, 
 
 ## Customers, projects, and rates
 
-Owners/admins create local customers/projects in Admin. Customer currency and project currency must match. Use Customer mappings to search/select by Xero ContactID, import a Xero contact, link a local customer, or explicitly create one. Mapping is never inferred from a name. Remapping requires reason/confirmation. A project rate change affects new entries; use Projects and rates to preview/confirm retrospective recalculation of unbilled snapshots only.
+Owners/admins create local customers/projects in Admin. Customer currency and project currency must match. Use Customer mappings to search/select by Xero ContactID, import a Xero contact, link a local customer, or explicitly create one. Mapping is never inferred from a name. Remapping requires reason/confirmation. After refreshing Xero reference data, use Projects to select an active Xero sales item for every billable project; that item fills Xero's Item column on future invoice lines. A project rate change affects new entries; use Projects to preview/confirm retrospective recalculation of unbilled snapshots only.
 
 ## Billing and export
 

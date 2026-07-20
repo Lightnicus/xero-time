@@ -24,6 +24,21 @@ type OrganisationAction = {
   Status: string
 }
 
+export type FakeXeroItem = {
+  Code: string
+  Description?: string
+  IsPurchased: boolean
+  IsSold: boolean
+  IsTrackedAsInventory: boolean
+  ItemID: string
+  Name?: string
+  SalesDetails?: {
+    AccountCode?: string
+    TaxType?: string
+    UnitPrice?: number
+  } | null
+}
+
 type StoredInvoice = Record<string, unknown> & {
   Contact: { ContactID: string }
   CurrencyCode: string
@@ -61,6 +76,18 @@ export class FakeXeroAccountingServer {
   private invoiceSequence = 100
   private invoices = new Map<string, StoredInvoice>()
   private invoicesByIdempotencyKey = new Map<string, StoredInvoice>()
+  private items: FakeXeroItem[] = [
+    {
+      Code: 'TIME',
+      Description: 'Professional time',
+      IsPurchased: false,
+      IsSold: true,
+      IsTrackedAsInventory: false,
+      ItemID: uuid(4),
+      Name: 'Professional services',
+      SalesDetails: { AccountCode: '200', TaxType: 'OUTPUT2', UnitPrice: 150 },
+    },
+  ]
   private organisationActions: OrganisationAction[] = [
     { Name: 'CreateDraftInvoice', Status: 'ALLOWED' },
   ]
@@ -87,6 +114,10 @@ export class FakeXeroAccountingServer {
       throw new Error('Choose a non-negative whole fake invoice sequence.')
     }
     this.invoiceSequence = sequence
+  }
+
+  setItems(items: FakeXeroItem[]): void {
+    this.items = structuredClone(items)
   }
 
   setOrganisationActions(actions: OrganisationAction[]): void {
@@ -172,6 +203,13 @@ export class FakeXeroAccountingServer {
           return {
             correlationID: uuid(900),
             data: { Actions: structuredClone(this.organisationActions) },
+            rateLimitRemaining: 59,
+          } satisfies XeroAPIResponse
+        }
+        if (path === 'Items') {
+          return {
+            correlationID: uuid(900),
+            data: { Items: structuredClone(this.items) },
             rateLimitRemaining: 59,
           } satisfies XeroAPIResponse
         }

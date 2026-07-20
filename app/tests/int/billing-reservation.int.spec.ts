@@ -22,6 +22,7 @@ let payload: Payload
 let ownerSession: AppSession
 let billerSession: AppSession
 let customerID: string
+let projectID: string
 let remainingEntryID: string
 const entryIDs: string[] = []
 
@@ -157,6 +158,14 @@ describe.sequential('billing reservation saga', () => {
         xeroId: 'NZD',
       },
       {
+        code: 'TIME',
+        metadata: { isSold: true },
+        name: 'Professional services',
+        resourceType: 'item',
+        status: 'active',
+        xeroId: '44444444-4444-4444-8444-444444444444',
+      },
+      {
         code: 'CreateDraftInvoice',
         name: 'CreateDraftInvoice',
         resourceType: 'organisation-action',
@@ -214,10 +223,12 @@ describe.sequential('billing reservation saga', () => {
         hourlyRateScaled: 1_500_000,
         name: 'Billing Project',
         status: 'active',
+        xeroItemId: '44444444-4444-4444-8444-444444444444',
       },
-      overrideAccess: false,
+      overrideAccess: true,
       req: ownerReq,
     })
+    projectID = String(project.id)
     for (const [description, minutes] of [
       ['First complete line', 1],
       ['Second complete line', 59],
@@ -246,6 +257,90 @@ describe.sequential('billing reservation saga', () => {
     if (!payload) return
     await clear()
     await payload.destroy()
+  })
+
+  it('requires an active Xero sales item mapping with direct project remediation', async () => {
+    await payload.update({
+      collection: 'projects',
+      data: {
+        commercialChangeReason: 'Verify the required Xero item billing blocker.',
+        confirmUnbilledImpact: true,
+        xeroItemId: null,
+      },
+      id: projectID,
+      overrideAccess: true,
+      req: ownerSession.req,
+    })
+
+    const missing = await getBillingEligibility(
+      billerSession,
+      { timezone: 'Pacific/Auckland' },
+      { entryIDs },
+    )
+    expect(missing.eligible).toHaveLength(0)
+    expect(
+      missing.blocked.every((entry) =>
+        entry.blockers.some(
+          (item) =>
+            item.code === 'missing-item' &&
+            item.remediationHref === `/app/settings/projects#project-item-${projectID}`,
+        ),
+      ),
+    ).toBe(true)
+
+    await payload.update({
+      collection: 'projects',
+      data: {
+        commercialChangeReason: 'Restore the active Xero item billing mapping.',
+        confirmUnbilledImpact: true,
+        xeroItemId: '44444444-4444-4444-8444-444444444444',
+      },
+      id: projectID,
+      overrideAccess: true,
+      req: ownerSession.req,
+    })
+    const itemReference = await payload.find({
+      collection: 'xero-reference-data',
+      depth: 0,
+      limit: 1,
+      overrideAccess: true,
+      req: ownerSession.req,
+      where: { xeroId: { equals: '44444444-4444-4444-8444-444444444444' } },
+    })
+    const referenceID = itemReference.docs[0]?.id
+    if (!referenceID) throw new Error('The item reference fixture is missing.')
+    await payload.update({
+      collection: 'xero-reference-data',
+      data: { status: 'unavailable' },
+      id: referenceID,
+      overrideAccess: true,
+      req: ownerSession.req,
+    })
+    try {
+      const invalid = await getBillingEligibility(
+        billerSession,
+        { timezone: 'Pacific/Auckland' },
+        { entryIDs },
+      )
+      expect(invalid.eligible).toHaveLength(0)
+      expect(
+        invalid.blocked.every((entry) =>
+          entry.blockers.some(
+            (item) =>
+              item.code === 'invalid-item' &&
+              item.remediationHref === `/app/settings/projects#project-item-${projectID}`,
+          ),
+        ),
+      ).toBe(true)
+    } finally {
+      await payload.update({
+        collection: 'xero-reference-data',
+        data: { status: 'active' },
+        id: referenceID,
+        overrideAccess: true,
+        req: ownerSession.req,
+      })
+    }
   })
 
   it('blocks billing until the customer has a valid invoice-reference code', async () => {
@@ -312,6 +407,7 @@ describe.sequential('billing reservation saga', () => {
       depth: 0,
       id: exportID,
       overrideAccess: true,
+      showHiddenFields: true,
     })
     const entries = await payload.find({
       collection: 'time-entries',
@@ -346,9 +442,21 @@ describe.sequential('billing reservation saga', () => {
       applicationReference: 'MAPPED-0001',
       customerReferenceCode: 'MAPPED',
       customerReferenceSequence: 1,
+      requestPayload: {
+        LineItems: expect.arrayContaining([expect.objectContaining({ ItemCode: 'TIME' })]),
+      },
     })
     expect(entries.docs.every((entry) => String(entry.currentExport) === exportID)).toBe(true)
     expect(allocations.docs).toHaveLength(2)
+    expect(allocations.docs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          itemCode: 'TIME',
+          itemName: 'Professional services',
+          xeroItemId: '44444444-4444-4444-8444-444444444444',
+        }),
+      ]),
+    )
     expect(new Set(allocations.docs.map((line) => String(line.timeEntry)))).toEqual(
       new Set(entryIDs),
     )

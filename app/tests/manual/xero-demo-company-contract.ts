@@ -22,6 +22,7 @@ const resources = [
   'Accounts',
   'TaxRates',
   'Currencies',
+  'Items',
   'Contacts',
 ] as const
 
@@ -72,6 +73,28 @@ try {
         )
       if (!canCreateDraftInvoice) {
         throw new Error('The connected Xero user cannot create draft invoices in this tenant.')
+      }
+    }
+    if (path === 'Items') {
+      const items = response.data.Items
+      if (!Array.isArray(items)) {
+        throw new Error('Xero returned an invalid Items contract response.')
+      }
+      for (const item of items) {
+        if (
+          !isRecord(item) ||
+          typeof item.ItemID !== 'string' ||
+          typeof item.Code !== 'string' ||
+          (typeof item.Name !== 'undefined' && typeof item.Name !== 'string') ||
+          typeof item.IsSold !== 'boolean' ||
+          typeof item.IsPurchased !== 'boolean' ||
+          typeof item.IsTrackedAsInventory !== 'boolean' ||
+          (item.SalesDetails !== null &&
+            typeof item.SalesDetails !== 'undefined' &&
+            !isRecord(item.SalesDetails))
+        ) {
+          throw new Error('Xero returned an invalid Item contract response.')
+        }
       }
     }
   }

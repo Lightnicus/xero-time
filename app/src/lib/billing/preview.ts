@@ -163,6 +163,7 @@ export function buildBillingPreview(input: {
       LineItems: lines.map((line) => ({
         AccountCode: line.accountCode,
         Description: line.lineDescription,
+        ItemCode: line.itemCode,
         Quantity: scaledDecimal(line.quantityScaled),
         TaxType: line.taxType,
         Tracking: line.tracking.map((item) => ({ Name: item.name, Option: item.option })),
@@ -205,6 +206,9 @@ export function buildBillingPreview(input: {
     customerReferenceSequence: entry.customerReferenceSequence,
     customerReferenceStartNumber: entry.customerReferenceStartNumber,
     entryID: entry.entryID,
+    itemCode: entry.itemCode,
+    itemID: entry.itemID,
+    itemName: entry.itemName,
     taxType: entry.taxType,
     tracking: entry.tracking,
     updatedAt: entry.updatedAt,

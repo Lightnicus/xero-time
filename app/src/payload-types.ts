@@ -722,6 +722,18 @@ export interface Project {
    */
   lineDescriptionPrefix?: string | null;
   /**
+   * Protected ItemID mapping set from Projects, rates and Xero items in the application.
+   */
+  xeroItemId?: string | null;
+  /**
+   * Last confirmed provider code; exact case is preserved.
+   */
+  xeroItemCodeSnapshot?: string | null;
+  /**
+   * Display snapshot only; ItemID remains the durable mapping.
+   */
+  xeroItemNameSnapshot?: string | null;
+  /**
    * Optional override; otherwise customer then Billing Settings.
    */
   revenueAccountCode?: string | null;
@@ -742,7 +754,7 @@ export interface Project {
     | boolean
     | null;
   /**
-   * Required for a rate/currency/account/tax/tracking change when unbilled entries exist. Existing snapshots remain unchanged.
+   * Required for an item/rate/currency/account/tax/tracking change when unbilled entries exist. Future previews may use the change; reserved/exported snapshots remain unchanged.
    */
   confirmUnbilledImpact?: boolean | null;
   /**
@@ -1548,7 +1560,14 @@ export interface XeroOauthState {
 export interface XeroReferenceDatum {
   id: string;
   resourceType:
-    'account' | 'tax-rate' | 'currency' | 'organisation-action' | 'organisation' | 'tracking-category' | 'contact';
+    | 'account'
+    | 'tax-rate'
+    | 'currency'
+    | 'organisation-action'
+    | 'organisation'
+    | 'tracking-category'
+    | 'item'
+    | 'contact';
   xeroId?: string | null;
   code?: string | null;
   name: string;
@@ -1581,6 +1600,9 @@ export interface InvoiceExportEntry {
   user: string | User;
   lineOrdinal: number;
   xeroLineItemId?: string | null;
+  xeroItemId?: string | null;
+  itemCode?: string | null;
+  itemName?: string | null;
   workDate: string;
   timezone: string;
   projectCode: string;
@@ -2102,6 +2124,9 @@ export interface ProjectsSelect<T extends boolean = true> {
   hourlyRateDisplay?: T;
   billableByDefault?: T;
   lineDescriptionPrefix?: T;
+  xeroItemId?: T;
+  xeroItemCodeSnapshot?: T;
+  xeroItemNameSnapshot?: T;
   revenueAccountCode?: T;
   taxType?: T;
   trackingCategories?: T;
@@ -2315,6 +2340,9 @@ export interface InvoiceExportEntriesSelect<T extends boolean = true> {
   user?: T;
   lineOrdinal?: T;
   xeroLineItemId?: T;
+  xeroItemId?: T;
+  itemCode?: T;
+  itemName?: T;
   workDate?: T;
   timezone?: T;
   projectCode?: T;

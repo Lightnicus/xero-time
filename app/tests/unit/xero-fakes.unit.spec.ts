@@ -33,6 +33,35 @@ describe('controllable fake Xero accounting server', () => {
     })
   })
 
+  it('serves configurable Xero items without inventing archive state', async () => {
+    const server = new FakeXeroAccountingServer()
+    server.setItems([
+      {
+        Code: 'CONSULTING',
+        IsPurchased: false,
+        IsSold: false,
+        IsTrackedAsInventory: false,
+        ItemID: '00000000-0000-4000-8000-000000000005',
+        Name: 'Consulting',
+        SalesDetails: null,
+      },
+    ])
+
+    await expect(
+      server.client().accountingGet('fake-access', 'fake-tenant', 'Items'),
+    ).resolves.toMatchObject({
+      data: {
+        Items: [
+          {
+            Code: 'CONSULTING',
+            IsSold: false,
+            ItemID: '00000000-0000-4000-8000-000000000005',
+          },
+        ],
+      },
+    })
+  })
+
   it('creates and reconciles an invoice after an ambiguous lost response', async () => {
     const server = new FakeXeroAccountingServer()
     const client = server.client()
