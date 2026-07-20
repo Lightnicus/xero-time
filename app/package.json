@@ -7,6 +7,7 @@
   "type": "module",
   "scripts": {
     "build": "cross-env NODE_OPTIONS=\"--no-deprecation --max-old-space-size=8000\" next build",
+    "build:vercel": "cross-env NODE_OPTIONS=--no-deprecation tsx scripts/vercel-build.ts",
     "check": "pnpm lint && pnpm typecheck && pnpm format:check",
     "check:compat": "cross-env NODE_OPTIONS=--no-deprecation tsx scripts/compatibility-smoke.ts",
     "db:start": "node scripts/mongodb.mjs start",
@@ -21,6 +22,7 @@
     "lint": "cross-env NODE_OPTIONS=--no-deprecation eslint .",
     "migrate": "cross-env NODE_OPTIONS=--no-deprecation payload migrate",
     "migrate:create": "cross-env NODE_OPTIONS=--no-deprecation payload migrate:create",
+    "migrate:deploy": "cross-env NODE_OPTIONS=--no-deprecation tsx scripts/deploy-migrations.ts",
     "migrate:status": "cross-env NODE_OPTIONS=--no-deprecation payload migrate:status",
     "payload": "cross-env NODE_OPTIONS=--no-deprecation payload",
     "seed:owner": "cross-env NODE_OPTIONS=--no-deprecation tsx scripts/seed-owner.ts",
