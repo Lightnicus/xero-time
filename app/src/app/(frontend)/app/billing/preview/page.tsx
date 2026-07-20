@@ -104,9 +104,12 @@ export default async function BillingPreviewPage({
           <small>{preview.summary.currencies.join(', ')}</small>
         </article>
         <article className="summary-card">
-          <span>Application batch</span>
-          <strong className="reference-copy">{preview.batchReference}</strong>
-          <small>Stable reconciliation references below</small>
+          <span>Xero references</span>
+          <strong>
+            {preview.invoices.length}{' '}
+            {preview.invoices.length === 1 ? 'customer sequence' : 'customer sequences'}
+          </strong>
+          <small>Shown on the draft invoices below</small>
         </article>
       </section>
 

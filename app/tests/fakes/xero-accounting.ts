@@ -82,6 +82,13 @@ export class FakeXeroAccountingServer {
     this.invoices.set(invoice.InvoiceID, structuredClone(invoice))
   }
 
+  setInvoiceSequence(sequence: number): void {
+    if (!Number.isSafeInteger(sequence) || sequence < 0) {
+      throw new Error('Choose a non-negative whole fake invoice sequence.')
+    }
+    this.invoiceSequence = sequence
+  }
+
   setOrganisationActions(actions: OrganisationAction[]): void {
     this.organisationActions = structuredClone(actions)
   }

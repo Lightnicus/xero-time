@@ -1,8 +1,11 @@
 import { config as loadEnvironment } from 'dotenv'
 
 import { APPLICATION_INDEXES } from '@/migrations/20260718_001700_application_indexes'
+import { CUSTOMER_INVOICE_REFERENCE_INDEXES } from '@/migrations/20260720_120000_customer_invoice_references'
 
 loadEnvironment({ quiet: true })
+
+const EXPECTED_INDEXES = [...APPLICATION_INDEXES, ...CUSTOMER_INVOICE_REFERENCE_INDEXES]
 
 const sameKey = (
   actual: Record<string, unknown> | undefined,
@@ -31,7 +34,7 @@ try {
   if (!database) throw new Error('MongoDB is unavailable for index verification.')
   const failures: string[] = []
 
-  for (const expected of APPLICATION_INDEXES) {
+  for (const expected of EXPECTED_INDEXES) {
     const indexes = await database.collection(expected.collection).indexes()
     const found = indexes.find((index) => index.name === expected.name)
     const valid =
@@ -48,7 +51,7 @@ try {
 
   if (failures.length > 0) throw new Error(`Missing or invalid indexes:\n${failures.join('\n')}`)
   payload.logger.info({
-    checked: APPLICATION_INDEXES.length,
+    checked: EXPECTED_INDEXES.length,
     event: 'database.index-verification-passed',
   })
 } catch (error) {

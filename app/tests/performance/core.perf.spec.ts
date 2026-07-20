@@ -61,6 +61,8 @@ describe('bounded core performance smoke', () => {
     const customer = {
       currency: 'NZD',
       id: 'customer-1',
+      invoiceReferenceCode: 'PERF',
+      invoiceReferenceStartNumber: 1,
       name: 'Performance Customer',
       status: 'active',
       xeroContactId: '11111111-1111-4111-8111-111111111111',

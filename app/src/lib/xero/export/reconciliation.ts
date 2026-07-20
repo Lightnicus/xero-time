@@ -3,7 +3,7 @@ import 'server-only'
 import { randomUUID } from 'node:crypto'
 
 import { recordAuditEvent } from '@/lib/audit/service'
-import { relationshipID } from '@/lib/domain/validation'
+import { isRecord, relationshipID } from '@/lib/domain/validation'
 import type { AppSession } from '@/lib/member-app/session'
 import { requireMongoModel } from '@/lib/payload/mongo'
 import type { XeroAccountingClient } from '@/lib/xero/accounting/client'
@@ -33,6 +33,27 @@ type QueueTask = (args: {
 const relation = (value: unknown): string | null => {
   const id = relationshipID(value)
   return id === null ? null : String(id)
+}
+
+const expectedInvoiceIdentity = (
+  document: InvoiceExport,
+): { contactID: string; currency: string } => {
+  const request = document.requestPayload
+  const contact = isRecord(request) && isRecord(request.Contact) ? request.Contact : null
+  const contactID = contact?.ContactID
+  const currency = isRecord(request) ? request.CurrencyCode : null
+  if (
+    typeof contactID !== 'string' ||
+    !contactID.trim() ||
+    typeof currency !== 'string' ||
+    currency !== document.currency
+  ) {
+    throw new AccountingIntegrationError(
+      'invalid-snapshot',
+      'The saved Xero request does not contain a valid contact and currency identity.',
+    )
+  }
+  return { contactID: contactID.trim(), currency }
 }
 
 const queue = async (
@@ -378,19 +399,26 @@ export async function reconcileInvoiceExport(
       : await client.accountingGet(token.accessToken, token.connection.tenantId, 'Invoices', {
           where: `Reference=="${document.applicationReference.replaceAll('"', '\\"')}"`,
         })
-    const invoices = parseRemoteInvoices(response.data).filter(
-      (invoice) =>
-        invoice.reference === document.applicationReference &&
-        invoice.currency === document.currency &&
-        (document.xeroInvoiceId ? invoice.invoiceID === document.xeroInvoiceId : true),
-    )
+    const remoteInvoices = parseRemoteInvoices(response.data)
+    let invoices
+    if (document.xeroInvoiceId) {
+      invoices = remoteInvoices.filter((invoice) => invoice.invoiceID === document.xeroInvoiceId)
+    } else {
+      const expectedIdentity = expectedInvoiceIdentity(document)
+      invoices = remoteInvoices.filter(
+        (invoice) =>
+          invoice.reference === document.applicationReference &&
+          invoice.contactID === expectedIdentity.contactID &&
+          invoice.currency === expectedIdentity.currency,
+      )
+    }
     if (invoices.length > 1) {
       await markManualReview(
         payload,
         req,
         document,
         'multiple-invoice-matches',
-        'Several Xero invoices match this export reference.',
+        'Several Xero invoices match this export reference, contact, and currency.',
       )
       return { state: 'manual-review' }
     }

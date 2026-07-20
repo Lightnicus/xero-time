@@ -20,9 +20,9 @@ import type {
 } from './contracts'
 import type { Where } from 'payload'
 
-const PAGE_SIZE = 500
 const MAX_QUEUE_ENTRIES = 20_000
 const CONTACT_FRESHNESS_MS = 30 * 24 * 60 * 60 * 1_000
+const CUSTOMER_REFERENCE_CODE = /^(?=.{1,30}$)[A-Z0-9]+(?:-[A-Z0-9]+)*$/
 
 const relation = (value: unknown): string | null => {
   const id = relationshipID(value)
@@ -98,26 +98,20 @@ const findEntries = async (
   filter: BillingFilter,
   entryIDs?: string[],
 ): Promise<Record<string, unknown>[]> => {
-  const docs: Record<string, unknown>[] = []
-  let page = 1
-  while (true) {
-    const result = await session.payload.find({
-      collection: 'time-entries',
-      depth: 0,
-      limit: PAGE_SIZE,
-      overrideAccess: true,
-      page,
-      req: session.req,
-      where: baseWhere(filter, entryIDs),
-    })
-    docs.push(...(result.docs as unknown as Record<string, unknown>[]))
-    if (docs.length > MAX_QUEUE_ENTRIES) {
-      throw new Error(
-        `The billing query exceeds ${MAX_QUEUE_ENTRIES.toLocaleString('en-NZ')} entries. Narrow the date or customer filter.`,
-      )
-    }
-    if (!result.hasNextPage) break
-    page += 1
+  const result = await session.payload.find({
+    collection: 'time-entries',
+    depth: 0,
+    limit: MAX_QUEUE_ENTRIES + 1,
+    overrideAccess: true,
+    pagination: false,
+    req: session.req,
+    where: baseWhere(filter, entryIDs),
+  })
+  const docs = result.docs as unknown as Record<string, unknown>[]
+  if (docs.length > MAX_QUEUE_ENTRIES) {
+    throw new Error(
+      `The billing query exceeds ${MAX_QUEUE_ENTRIES.toLocaleString('en-NZ')} entries. Narrow the date or customer filter.`,
+    )
   }
   return docs
 }
@@ -165,7 +159,6 @@ export function billingSettingsSnapshot(value: Record<string, unknown>): Billing
     invoiceLineDescriptionTemplate:
       stringValue(value.invoiceLineDescriptionTemplate, 1_000) ||
       '{{workDate}} · {{projectCode}} · {{description}}',
-    invoiceReferencePrefix: stringValue(value.invoiceReferencePrefix, 30) || 'TIME-',
     lineAmountType,
     paymentTerms: {
       basis:
@@ -290,6 +283,7 @@ export async function getBillingEligibility(
     depth: 0,
     limit: 1,
     overrideAccess: true,
+    pagination: false,
     req: session.req,
     where: { singletonKey: { equals: 'business-accounting' } },
   })
@@ -383,6 +377,42 @@ export async function getBillingEligibility(
       reasons.push(blocker('missing-project', 'The source project no longer exists.'))
     if (!customerID || !customer)
       reasons.push(blocker('missing-customer', 'The source customer no longer exists.'))
+
+    const customerReferenceCode = stringValue(customer?.invoiceReferenceCode, 30)
+    const rawReferenceStartNumber = customer?.invoiceReferenceStartNumber
+    const customerReferenceStartNumber =
+      rawReferenceStartNumber == null ? 1 : Number(rawReferenceStartNumber)
+    const rawLastReferenceSequence = customer?.lastInvoiceReferenceSequence
+    const customerReferenceLastSequence =
+      rawLastReferenceSequence == null ? null : Number(rawLastReferenceSequence)
+    const referenceSequenceStateIsValid =
+      Number.isSafeInteger(customerReferenceStartNumber) &&
+      customerReferenceStartNumber >= 1 &&
+      (customerReferenceLastSequence === null ||
+        (Number.isSafeInteger(customerReferenceLastSequence) &&
+          customerReferenceLastSequence >= 1 &&
+          customerReferenceLastSequence >= customerReferenceStartNumber &&
+          customerReferenceLastSequence < Number.MAX_SAFE_INTEGER))
+    const customerReferenceSequence = referenceSequenceStateIsValid
+      ? Math.max(
+          customerReferenceStartNumber,
+          customerReferenceLastSequence === null ? 1 : customerReferenceLastSequence + 1,
+        )
+      : 0
+    if (
+      customer &&
+      (!CUSTOMER_REFERENCE_CODE.test(customerReferenceCode) ||
+        !referenceSequenceStateIsValid ||
+        !Number.isSafeInteger(customerReferenceSequence))
+    ) {
+      reasons.push(
+        blocker(
+          'missing-customer-reference',
+          'Set a valid invoice reference code and starting number for this customer.',
+          `/app/settings/customers#customer-reference-${encodeURIComponent(customerID)}`,
+        ),
+      )
+    }
     if (
       project &&
       customer &&
@@ -526,6 +556,10 @@ export async function getBillingEligibility(
         contactID,
         contactName: stringValue(customer?.xeroContactNameSnapshot, 255) || base.customerName,
         currency,
+        customerReferenceCode,
+        customerReferenceLastSequence,
+        customerReferenceSequence,
+        customerReferenceStartNumber,
         taxRatePercent:
           settings.lineAmountType === 'NoTax' ? 0 : taxPercent(references.taxes.get(taxType)),
         taxType: settings.lineAmountType === 'NoTax' ? taxType || 'NONE' : taxType,

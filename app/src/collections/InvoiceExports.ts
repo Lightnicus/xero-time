@@ -1,9 +1,13 @@
 import { hasActiveRole, isActiveOwnerOrAdmin } from '@/access/roles'
 
-import type { Access, CollectionConfig } from 'payload'
+import type { Access, CollectionConfig, Validate } from 'payload'
 
 const denyAll = () => false
 const readBilling: Access = ({ req }) => hasActiveRole(req.user, ['owner', 'admin', 'biller'])
+const validatePositiveInteger: Validate<number> = (value) =>
+  value === null || typeof value === 'undefined' || (Number.isInteger(value) && value >= 1)
+    ? true
+    : 'Reference sequence must be a positive integer.'
 
 export const INVOICE_EXPORT_STATES = [
   'preparing',
@@ -65,6 +69,30 @@ export const InvoiceExports: CollectionConfig = {
       required: true,
       unique: true,
       index: true,
+    },
+    {
+      type: 'row',
+      fields: [
+        {
+          name: 'customerReferenceCode',
+          type: 'text',
+          maxLength: 30,
+          admin: {
+            description: 'Immutable customer-code snapshot used in the Xero reference.',
+            readOnly: true,
+          },
+        },
+        {
+          name: 'customerReferenceSequence',
+          type: 'number',
+          min: 1,
+          validate: validatePositiveInteger,
+          admin: {
+            description: 'Immutable per-customer sequence used in the Xero reference.',
+            readOnly: true,
+          },
+        },
+      ],
     },
     {
       type: 'row',

@@ -8,6 +8,7 @@ export const BILLING_BLOCKER_CODES = [
   'currency-conflict',
   'missing-project',
   'missing-customer',
+  'missing-customer-reference',
   'stale-source-data',
   'unmapped-contact',
   'archived-contact',
@@ -71,6 +72,10 @@ export type EligibleBillingEntry = BillingEntryBase & {
   contactID: string
   contactName: string
   currency: string
+  customerReferenceCode: string
+  customerReferenceLastSequence: number | null
+  customerReferenceSequence: number
+  customerReferenceStartNumber: number
   taxRatePercent: number
   taxType: string
   tracking: BillingTrackingItem[]
@@ -108,7 +113,6 @@ export type BillingSettingsSnapshot = {
   defaultRevenueAccountCode: string
   defaultTaxType: string
   invoiceLineDescriptionTemplate: string
-  invoiceReferencePrefix: string
   lineAmountType: 'Exclusive' | 'Inclusive' | 'NoTax'
   paymentTerms: {
     basis: 'day-of-following-month' | 'days-after-invoice'
@@ -128,6 +132,11 @@ export type InvoicePreview = {
   contactID: string
   contactName: string
   currency: string
+  customerID: string
+  customerReferenceCode: string
+  customerReferenceLastSequence: number | null
+  customerReferenceSequence: number
+  customerReferenceStartNumber: number
   dueDate: string
   durationSeconds: number
   entryCount: number

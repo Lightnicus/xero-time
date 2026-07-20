@@ -10,8 +10,8 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { TIME_ENTRY_BILLING_MUTATION_CONTEXT } from '@/collections/TimeEntries'
-import { cancelInvoiceExport } from '@/lib/billing/export-actions'
-import { releaseInvoiceExport } from '@/lib/billing/export-actions'
+import { getBillingEligibility } from '@/lib/billing/eligibility'
+import { cancelInvoiceExport, releaseInvoiceExport } from '@/lib/billing/export-actions'
 import { createBillingPreview, confirmBillingPreview } from '@/lib/billing/reservation'
 import { normalizeBillingFilter } from '@/lib/billing/selection'
 import type { AppSession } from '@/lib/member-app/session'
@@ -21,6 +21,8 @@ const PASSWORD = 'billing-integration-password!'
 let payload: Payload
 let ownerSession: AppSession
 let billerSession: AppSession
+let customerID: string
+let remainingEntryID: string
 const entryIDs: string[] = []
 
 const clear = async () => {
@@ -187,6 +189,8 @@ describe.sequential('billing reservation saga', () => {
       collection: 'customers',
       data: {
         currency: 'NZD',
+        invoiceReferenceCode: 'MAPPED',
+        invoiceReferenceStartNumber: 1,
         name: 'Mapped Billing Customer',
         status: 'active',
         xeroContactId: '33333333-3333-4333-8333-333333333333',
@@ -199,6 +203,7 @@ describe.sequential('billing reservation saga', () => {
       overrideAccess: true,
       req: ownerReq,
     })
+    customerID = String(customer.id)
     const project = await payload.create({
       collection: 'projects',
       data: {
@@ -243,6 +248,41 @@ describe.sequential('billing reservation saga', () => {
     await payload.destroy()
   })
 
+  it('blocks billing until the customer has a valid invoice-reference code', async () => {
+    await payload.update({
+      collection: 'customers',
+      data: { invoiceReferenceCode: null },
+      id: customerID,
+      overrideAccess: true,
+      req: ownerSession.req,
+    })
+
+    const eligibility = await getBillingEligibility(
+      billerSession,
+      { timezone: 'Pacific/Auckland' },
+      { entryIDs },
+    )
+    expect(eligibility.eligible).toHaveLength(0)
+    expect(
+      eligibility.blocked.every((entry) =>
+        entry.blockers.some(
+          (item) =>
+            item.code === 'missing-customer-reference' &&
+            item.remediationHref ===
+              `/app/settings/customers#customer-reference-${encodeURIComponent(customerID)}`,
+        ),
+      ),
+    ).toBe(true)
+
+    await payload.update({
+      collection: 'customers',
+      data: { invoiceReferenceCode: 'MAPPED', invoiceReferenceStartNumber: 1 },
+      id: customerID,
+      overrideAccess: true,
+      req: ownerSession.req,
+    })
+  })
+
   it('atomically saves immutable one-entry/one-line snapshots before job dispatch', async () => {
     const selection = {
       excludedEntryIDs: [],
@@ -257,6 +297,7 @@ describe.sequential('billing reservation saga', () => {
     })
     expect(preview.invoices).toHaveLength(1)
     expect(preview.invoices[0]?.lines).toHaveLength(2)
+    expect(preview.invoices[0]?.applicationReference).toBe('MAPPED-0001')
     const result = await confirmBillingPreview(billerSession, {
       batchReference: preview.batchReference,
       checksum: preview.checksum,
@@ -266,6 +307,12 @@ describe.sequential('billing reservation saga', () => {
     })
     expect(result.exportIDs).toHaveLength(1)
     const exportID = result.exportIDs[0] as string
+    const invoiceExport = await payload.findByID({
+      collection: 'invoice-exports',
+      depth: 0,
+      id: exportID,
+      overrideAccess: true,
+    })
     const entries = await payload.find({
       collection: 'time-entries',
       depth: 0,
@@ -295,6 +342,11 @@ describe.sequential('billing reservation saga', () => {
       where: { taskSlug: { equals: 'create-xero-invoice' } },
     })
     expect(entries.docs.every((entry) => entry.billingStatus === 'reserved')).toBe(true)
+    expect(invoiceExport).toMatchObject({
+      applicationReference: 'MAPPED-0001',
+      customerReferenceCode: 'MAPPED',
+      customerReferenceSequence: 1,
+    })
     expect(entries.docs.every((entry) => String(entry.currentExport) === exportID)).toBe(true)
     expect(allocations.docs).toHaveLength(2)
     expect(new Set(allocations.docs.map((line) => String(line.timeEntry)))).toEqual(
@@ -324,57 +376,85 @@ describe.sequential('billing reservation saga', () => {
       where: { id: { in: entryIDs } },
     })
     expect(released.docs.every((entry) => entry.billingStatus === 'unbilled')).toBe(true)
+    await expect(
+      payload.update({
+        collection: 'customers',
+        data: { invoiceReferenceCode: 'RENAMED' },
+        id: customerID,
+        overrideAccess: true,
+        req: ownerSession.req,
+      }),
+    ).rejects.toMatchObject({ status: 400 })
   })
 
-  it('allows only one concurrent confirmation to reserve the same entry', async () => {
-    const selected = [entryIDs[0] as string]
-    const selection = {
+  it('allows only one concurrent same-customer preview to claim the next number', async () => {
+    const leftSelection = {
       excludedEntryIDs: [],
-      explicitEntryIDs: selected,
+      explicitEntryIDs: [entryIDs[0] as string],
       filter: normalizeBillingFilter({ timezone: 'Pacific/Auckland' }),
       type: 'explicit' as const,
     }
-    const [left, right] = await Promise.all([
-      createBillingPreview(billerSession, {
-        batchReference: '11111111-1111-4111-8111-111111111111',
-        invoiceDate: '2026-07-19',
-        selection,
-      }),
-      createBillingPreview(billerSession, {
-        batchReference: '22222222-2222-4222-8222-222222222222',
-        invoiceDate: '2026-07-19',
-        selection,
-      }),
-    ])
-    const settled = await Promise.allSettled([
+    const rightSelection = {
+      ...leftSelection,
+      explicitEntryIDs: [entryIDs[1] as string],
+    }
+    const left = await createBillingPreview(billerSession, {
+      batchReference: '11111111-1111-4111-8111-111111111111',
+      invoiceDate: '2026-07-19',
+      selection: leftSelection,
+    })
+    const right = await createBillingPreview(billerSession, {
+      batchReference: '22222222-2222-4222-8222-222222222222',
+      invoiceDate: '2026-07-19',
+      selection: rightSelection,
+    })
+    const confirmations = await Promise.allSettled([
       confirmBillingPreview(billerSession, {
         batchReference: left.batchReference,
         checksum: left.checksum,
         invoiceDate: '2026-07-19',
         requestedMode: 'background',
-        selection,
+        selection: leftSelection,
       }),
       confirmBillingPreview(billerSession, {
         batchReference: right.batchReference,
         checksum: right.checksum,
         invoiceDate: '2026-07-19',
         requestedMode: 'background',
-        selection,
+        selection: rightSelection,
       }),
     ])
-    expect(settled.filter((item) => item.status === 'fulfilled')).toHaveLength(1)
-    expect(settled.filter((item) => item.status === 'rejected')).toHaveLength(1)
-    const entry = await payload.findByID({
-      collection: 'time-entries',
-      id: selected[0] as string,
+    expect(confirmations.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    const rejected = confirmations.filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    )
+    expect(rejected).toHaveLength(1)
+    expect(String(rejected[0]?.reason)).toMatch(/billing data changed after preview/i)
+    const claimedCustomer = await payload.findByID({
+      collection: 'customers',
       depth: 0,
+      id: customerID,
       overrideAccess: true,
     })
-    expect(entry.billingStatus).toBe('reserved')
+    expect(claimedCustomer.lastInvoiceReferenceSequence).toBe(2)
+    expect(left.invoices[0]?.applicationReference).toBe('MAPPED-0002')
+    expect(right.invoices[0]?.applicationReference).toBe('MAPPED-0002')
+    const entries = await payload.find({
+      collection: 'time-entries',
+      depth: 0,
+      limit: 2,
+      overrideAccess: true,
+      where: { id: { in: entryIDs } },
+    })
+    const statusByID = new Map(entries.docs.map((entry) => [String(entry.id), entry.billingStatus]))
+    expect([...statusByID.values()].filter((status) => status === 'reserved')).toHaveLength(1)
+    expect([...statusByID.values()].filter((status) => status === 'unbilled')).toHaveLength(1)
+    remainingEntryID = [...statusByID].find(([, status]) => status === 'unbilled')?.[0] ?? ''
+    expect(remainingEntryID).not.toBe('')
   })
 
   it('releases a verified voided invoice once and preserves rebill lineage', async () => {
-    const selected = [entryIDs[1] as string]
+    const selected = [remainingEntryID]
     const selection = {
       excludedEntryIDs: [],
       explicitEntryIDs: selected,
@@ -386,6 +466,7 @@ describe.sequential('billing reservation saga', () => {
       invoiceDate: '2026-07-20',
       selection,
     })
+    expect(preview.invoices[0]?.applicationReference).toBe('MAPPED-0003')
     const reservation = await confirmBillingPreview(billerSession, {
       batchReference: preview.batchReference,
       checksum: preview.checksum,
@@ -465,6 +546,7 @@ describe.sequential('billing reservation saga', () => {
       invoiceDate: '2026-07-21',
       selection,
     })
+    expect(rebillPreview.invoices[0]?.applicationReference).toBe('MAPPED-0004')
     const rebill = await confirmBillingPreview(billerSession, {
       batchReference: rebillPreview.batchReference,
       checksum: rebillPreview.checksum,

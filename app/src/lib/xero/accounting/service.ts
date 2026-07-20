@@ -132,6 +132,7 @@ const findConnection = async (session: AppSession): Promise<XeroConnection | nul
     depth: 0,
     limit: 1,
     overrideAccess: true,
+    pagination: false,
     req: session.req,
     showHiddenFields: true,
     where: { singletonKey: { equals: CONNECTION_SINGLETON_KEY } },

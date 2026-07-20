@@ -488,6 +488,18 @@ export interface Customer {
    */
   taxType?: string | null;
   /**
+   * Stable customer code used in Xero references, for example CUSTOMER-0001. It cannot change after the first reference is reserved.
+   */
+  invoiceReferenceCode?: string | null;
+  /**
+   * First number allocated for this customer. It cannot change after the first reference is reserved.
+   */
+  invoiceReferenceStartNumber?: number | null;
+  /**
+   * Last customer invoice-reference sequence allocated by the export transaction.
+   */
+  lastInvoiceReferenceSequence?: number | null;
+  /**
    * Set only by the protected “Select from Xero” or “Create in Xero” workflow; never matched by name.
    */
   xeroContactId?: string | null;
@@ -1249,6 +1261,14 @@ export interface InvoiceExport {
   customer: string | Customer;
   requestedBy: string | User;
   applicationReference: string;
+  /**
+   * Immutable customer-code snapshot used in the Xero reference.
+   */
+  customerReferenceCode?: string | null;
+  /**
+   * Immutable per-customer sequence used in the Xero reference.
+   */
+  customerReferenceSequence?: number | null;
   state:
     | 'preparing'
     | 'queued'
@@ -2052,6 +2072,9 @@ export interface CustomersSelect<T extends boolean = true> {
   notes?: T;
   revenueAccountCode?: T;
   taxType?: T;
+  invoiceReferenceCode?: T;
+  invoiceReferenceStartNumber?: T;
+  lastInvoiceReferenceSequence?: T;
   xeroContactId?: T;
   xeroMappingStatus?: T;
   xeroContactNameSnapshot?: T;
@@ -2235,6 +2258,8 @@ export interface InvoiceExportsSelect<T extends boolean = true> {
   customer?: T;
   requestedBy?: T;
   applicationReference?: T;
+  customerReferenceCode?: T;
+  customerReferenceSequence?: T;
   state?: T;
   dispatchState?: T;
   requestedMode?: T;
@@ -3194,7 +3219,7 @@ export interface BillingSetting {
     value: number;
   };
   /**
-   * Prefix for the stable application reference used in reconciliation.
+   * Legacy setting retained for compatibility. New exports use each customer’s invoice reference code and sequence.
    */
   invoiceReferencePrefix: string;
   /**

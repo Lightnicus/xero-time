@@ -176,6 +176,7 @@ const findFlow = async (payload: Payload, state: string): Promise<XeroOauthState
     depth: 0,
     limit: 1,
     overrideAccess: true,
+    pagination: false,
     showHiddenFields: true,
     where: { stateHash: { equals: hashOpaqueValue(state) } },
   })
@@ -348,6 +349,7 @@ const findIdentityByClaims = async (
     depth: 0,
     limit: 1,
     overrideAccess: true,
+    pagination: false,
     req,
     showHiddenFields: true,
     where: {
@@ -371,6 +373,7 @@ const findUserIdentity = async (
     depth: 0,
     limit: 1,
     overrideAccess: true,
+    pagination: false,
     req,
     showHiddenFields: true,
     where: { and: [{ user: { equals: userID } }, { provider: { equals: 'xero' } }] },
@@ -618,6 +621,7 @@ const completeInvitation = async (
         depth: 0,
         limit: 1,
         overrideAccess: true,
+        pagination: false,
         req,
         where: { email: { equals: invitation.email } },
       })
@@ -955,6 +959,7 @@ export async function revokeCurrentExternalSession(
     depth: 0,
     limit: 1,
     overrideAccess: true,
+    pagination: false,
     showHiddenFields: true,
     where: { tokenHash: { equals: hashOpaqueValue(rawToken) } },
   })
@@ -1028,6 +1033,7 @@ export async function unlinkIdentity(
       depth: 0,
       limit: 1_000,
       overrideAccess: true,
+      pagination: false,
       req,
       where: { and: [{ identity: { equals: identity.id } }, { status: { equals: 'active' } }] },
     })
@@ -1176,6 +1182,7 @@ export async function revokeAllExternalSessionsForUser(
     depth: 0,
     limit: 1_000,
     overrideAccess: true,
+    pagination: false,
     req,
     where: { and: [{ user: { equals: userID } }, { status: { equals: 'active' } }] },
   })
@@ -1195,6 +1202,7 @@ export async function revokeExternalIdentityForUser(
     depth: 0,
     limit: 10,
     overrideAccess: true,
+    pagination: false,
     req,
     where: { and: [{ user: { equals: userID } }, { status: { equals: 'active' } }] },
   })

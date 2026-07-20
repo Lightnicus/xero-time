@@ -77,6 +77,11 @@ export async function withPayloadTransaction<T>(
 
   try {
     const result = await session.withTransaction(async () => {
+      // The MongoDB driver may retry this callback after Payload has removed
+      // its request-to-session registration while unwinding the prior attempt.
+      // Re-register the same live ClientSession before each driver attempt.
+      payload.db.sessions[transactionID] = session
+      req.transactionID = transactionID
       callbackAttempts += 1
       if (callbackAttempts > MAX_TRANSACTION_ATTEMPTS) {
         throw new Error('The MongoDB transaction retry limit was exhausted.')

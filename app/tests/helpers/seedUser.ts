@@ -177,6 +177,8 @@ export async function seedBillingAppFixture(): Promise<void> {
     collection: 'customers',
     data: {
       currency: 'NZD',
+      invoiceReferenceCode: 'E2E-CUSTOMER',
+      invoiceReferenceStartNumber: 1,
       name: 'Billable E2E Customer',
       status: 'active',
       xeroContactId: '11111111-1111-4111-8111-111111111111',

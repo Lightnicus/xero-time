@@ -15,6 +15,7 @@ import {
   normalizeCurrencyCode,
   validateCurrencyCode,
   validateOptionalXeroID,
+  validateWholeNumber,
 } from '@/lib/domain/validation'
 import { attributeChange, attributionFields } from '@/lib/payload/attribution'
 
@@ -27,6 +28,9 @@ import type {
 
 const USERS_SLUG = 'users' as CollectionSlug
 const PROJECTS_SLUG = 'projects' as CollectionSlug
+const INVOICE_EXPORTS_SLUG = 'invoice-exports' as CollectionSlug
+
+const invoiceReferenceCodePattern = /^(?=.{1,30}$)[A-Z0-9]+(?:-[A-Z0-9]+)*$/
 
 type CustomerHookDocument = Record<string, unknown> & { id: number | string }
 
@@ -36,6 +40,88 @@ const customerValidationError = (path: string, message: string, req: PayloadRequ
     errors: [{ message, path }],
     req,
   })
+}
+
+export const normalizeInvoiceReferenceCode = (value: unknown): null | string => {
+  if (typeof value !== 'string') return null
+
+  const normalized = value.trim().toUpperCase().replace(/\s+/g, '-')
+  return normalized || null
+}
+
+export const validateInvoiceReferenceCode = (value: unknown): string | true => {
+  if (value === null || typeof value === 'undefined' || value === '') return true
+
+  const normalized = normalizeInvoiceReferenceCode(value)
+  return (
+    (normalized !== null && invoiceReferenceCodePattern.test(normalized)) ||
+    'Use 1–30 uppercase letters and numbers, with single hyphens between them.'
+  )
+}
+
+/** A claimed sequence makes the customer-facing reference identity immutable. */
+export const customerHasInvoiceReferenceSequence = async (
+  req: PayloadRequest,
+  customerID: number | string,
+): Promise<boolean> => {
+  const exports = await req.payload.find({
+    collection: INVOICE_EXPORTS_SLUG,
+    depth: 0,
+    limit: 1,
+    overrideAccess: true,
+    pagination: false,
+    req,
+    where: {
+      and: [{ customer: { equals: customerID } }, { customerReferenceSequence: { exists: true } }],
+    },
+  })
+
+  return exports.docs.length > 0
+}
+
+/** Keep references stable once an export has claimed the customer's sequence. */
+export const protectInvoiceReferenceIdentity: CollectionBeforeChangeHook<
+  CustomerHookDocument
+> = async ({ data, operation, originalDoc, req }) => {
+  if (operation === 'create') return data
+
+  const previousCode = normalizeInvoiceReferenceCode(originalDoc?.invoiceReferenceCode)
+  const nextCode = normalizeInvoiceReferenceCode(
+    Object.hasOwn(data, 'invoiceReferenceCode')
+      ? data.invoiceReferenceCode
+      : originalDoc?.invoiceReferenceCode,
+  )
+  const previousStart =
+    typeof originalDoc?.invoiceReferenceStartNumber === 'number'
+      ? originalDoc.invoiceReferenceStartNumber
+      : 1
+  const nextStart = Object.hasOwn(data, 'invoiceReferenceStartNumber')
+    ? data.invoiceReferenceStartNumber
+    : previousStart
+
+  if (previousCode === nextCode && previousStart === nextStart) return data
+
+  const customerID = originalDoc?.id
+  if (typeof customerID !== 'string' && typeof customerID !== 'number') {
+    return customerValidationError(
+      'invoiceReferenceCode',
+      'The existing customer could not be identified.',
+      req,
+    )
+  }
+
+  if (
+    typeof originalDoc?.lastInvoiceReferenceSequence === 'number' ||
+    (await customerHasInvoiceReferenceSequence(req, customerID))
+  ) {
+    return customerValidationError(
+      'invoiceReferenceCode',
+      'Invoice reference code and starting number cannot change after this customer has reserved its first invoice reference.',
+      req,
+    )
+  }
+
+  return data
 }
 
 /** Existing projects form a currency boundary; use a new customer to change currencies. */
@@ -99,7 +185,14 @@ export const Customers: CollectionConfig = {
     update: ownerOrAdmin,
   },
   admin: {
-    defaultColumns: ['name', 'status', 'currency', 'xeroMappingStatus', 'updatedAt'],
+    defaultColumns: [
+      'name',
+      'invoiceReferenceCode',
+      'status',
+      'currency',
+      'xeroMappingStatus',
+      'updatedAt',
+    ],
     description:
       'Local customers may be used for projects and time before they are explicitly mapped to a Xero contact.',
     group: 'Customers',
@@ -229,6 +322,74 @@ export const Customers: CollectionConfig = {
                   },
                 },
               ],
+            },
+            {
+              type: 'row',
+              fields: [
+                {
+                  name: 'invoiceReferenceCode',
+                  type: 'text',
+                  maxLength: 30,
+                  validate: validateInvoiceReferenceCode,
+                  access: {
+                    create: systemFieldWrite,
+                    read: financialField,
+                    update: systemFieldWrite,
+                  },
+                  admin: {
+                    description:
+                      'Stable customer code used in Xero references, for example CUSTOMER-0001. It cannot change after the first reference is reserved.',
+                    placeholder: 'CUSTOMER',
+                    readOnly: true,
+                    width: '50%',
+                  },
+                  hooks: {
+                    beforeValidate: [({ value }) => normalizeInvoiceReferenceCode(value)],
+                  },
+                },
+                {
+                  name: 'invoiceReferenceStartNumber',
+                  type: 'number',
+                  defaultValue: 1,
+                  min: 1,
+                  validate: (value: unknown) =>
+                    value === null || typeof value === 'undefined'
+                      ? true
+                      : validateWholeNumber(value, { max: Number.MAX_SAFE_INTEGER, min: 1 }),
+                  access: {
+                    create: systemFieldWrite,
+                    read: financialField,
+                    update: systemFieldWrite,
+                  },
+                  admin: {
+                    description:
+                      'First number allocated for this customer. It cannot change after the first reference is reserved.',
+                    readOnly: true,
+                    step: 1,
+                    width: '50%',
+                  },
+                },
+              ],
+            },
+            {
+              name: 'lastInvoiceReferenceSequence',
+              type: 'number',
+              min: 1,
+              validate: (value: unknown) =>
+                value === null || typeof value === 'undefined'
+                  ? true
+                  : validateWholeNumber(value, { max: Number.MAX_SAFE_INTEGER, min: 1 }),
+              access: {
+                create: systemFieldWrite,
+                read: ownerAdminField,
+                update: systemFieldWrite,
+              },
+              admin: {
+                description:
+                  'Last customer invoice-reference sequence allocated by the export transaction.',
+                hidden: true,
+                readOnly: true,
+              },
             },
           ],
         },
@@ -372,13 +533,20 @@ export const Customers: CollectionConfig = {
       auditCollectionChange('customer.changed', [
         'billingEmail',
         'currency',
+        'invoiceReferenceCode',
+        'invoiceReferenceStartNumber',
+        'lastInvoiceReferenceSequence',
         'name',
         'revenueAccountCode',
         'status',
         'taxType',
       ]),
     ],
-    beforeChange: [protectProjectCurrencyBoundary, attributeChange],
+    beforeChange: [
+      protectProjectCurrencyBoundary,
+      protectInvoiceReferenceIdentity,
+      attributeChange,
+    ],
   },
   indexes: [{ fields: ['status', 'name'] }, { fields: ['currency', 'status'] }],
   timestamps: true,

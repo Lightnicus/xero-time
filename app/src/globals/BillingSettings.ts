@@ -210,7 +210,9 @@ export const BillingSettings: GlobalConfig = {
               defaultValue: 'TIME-',
               maxLength: 30,
               admin: {
-                description: 'Prefix for the stable application reference used in reconciliation.',
+                description:
+                  'Legacy setting retained for compatibility. New exports use each customer’s invoice reference code and sequence.',
+                hidden: true,
               },
               hooks: {
                 beforeValidate: [

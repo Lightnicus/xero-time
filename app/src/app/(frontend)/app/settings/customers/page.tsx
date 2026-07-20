@@ -11,13 +11,31 @@ import {
   importContactAction,
   linkContactAction,
   refreshContactAction,
+  updateCustomerInvoiceReferenceAction,
 } from './actions'
 
 import type { Metadata } from 'next'
 
-export const metadata: Metadata = { title: 'Customer Xero mappings | Project Time' }
+export const metadata: Metadata = { title: 'Customer settings | Project Time' }
 
-type Params = { page?: string | string[]; query?: string | string[]; status?: string | string[] }
+type Params = {
+  customer?: string | string[]
+  page?: string | string[]
+  query?: string | string[]
+  reference?: string | string[]
+  status?: string | string[]
+}
+
+type CustomerReferenceFields = {
+  invoiceReferenceCode?: null | string
+  invoiceReferenceStartNumber?: null | number
+  lastInvoiceReferenceSequence?: null | number
+}
+
+const customerReferenceFields = (customer: unknown): CustomerReferenceFields =>
+  customer as CustomerReferenceFields
+
+const referenceNumber = (value: number): string => String(value).padStart(4, '0')
 
 export default async function CustomerMappingPage({
   searchParams,
@@ -51,21 +69,38 @@ export default async function CustomerMappingPage({
   }
   const unmapped = customers.docs.filter((customer) => !customer.xeroContactId)
   const mapped = customers.docs.filter((customer) => customer.xeroContactId)
+  const referenceStatus = typeof params.reference === 'string' ? params.reference : null
+  const referenceCustomerID = typeof params.customer === 'string' ? params.customer : null
+  const referenceCustomer = customers.docs.find(
+    (customer) => String(customer.id) === referenceCustomerID,
+  )
+  const referenceStatusMessage =
+    referenceStatus === 'saved'
+      ? `Invoice reference settings saved${referenceCustomer ? ` for ${referenceCustomer.name}` : ''}.`
+      : referenceStatus === 'invalid'
+        ? 'Enter a code of up to 30 letters and numbers, with single hyphens between them, and a starting number of at least 1.'
+        : referenceStatus === 'locked'
+          ? 'These invoice reference settings are permanent because this customer has already reserved an invoice reference.'
+          : referenceStatus === 'duplicate'
+            ? 'Another customer already uses that invoice reference code. Choose a unique code.'
+            : referenceStatus === 'failed'
+              ? 'The invoice reference settings could not be saved. Review the values and try again.'
+              : null
 
   return (
     <div className="wide-page page-stack">
       <div className="breadcrumb">
         <Link href="/app">My time</Link>
         <span aria-hidden="true">/</span>
-        <span>Customer mappings</span>
+        <span>Customers</span>
       </div>
       <section className="page-heading compact">
         <div>
-          <p className="eyebrow">Xero contacts</p>
-          <h1>Customer mappings</h1>
+          <p className="eyebrow">Customers</p>
+          <h1>Customer billing settings</h1>
           <p>
-            Search and select contacts by ContactID. Names are display snapshots and are never used
-            to remap a customer automatically.
+            Configure readable invoice references and map each customer to a Xero contact. Contact
+            names are display snapshots and are never used to remap automatically.
           </p>
         </div>
         <Link className="button button-secondary" href="/admin/collections/customers">
@@ -83,6 +118,102 @@ export default async function CustomerMappingPage({
             : 'Customer mapping updated.'}
         </div>
       )}
+
+      {referenceStatusMessage && (
+        <div
+          className={
+            referenceStatus === 'saved' ? 'notice notice-success' : 'notice notice-warning'
+          }
+          role={referenceStatus === 'saved' ? 'status' : 'alert'}
+        >
+          {referenceStatusMessage}
+        </div>
+      )}
+
+      <section className="panel page-stack">
+        <div>
+          <h2>Customer invoice references</h2>
+          <p>
+            Give each customer a unique, stable code. Draft invoices then count upward for that
+            customer—such as CUSTOMER-0001, CUSTOMER-0002—even when an invoice contains several
+            projects.
+          </p>
+          <p className="muted-copy">
+            Spaces are saved as hyphens. The code and starting number become permanent as soon as
+            the first invoice reference is reserved.
+          </p>
+        </div>
+        <div className="mapping-list">
+          {customers.docs.map((customer) => {
+            const reference = customerReferenceFields(customer)
+            const code = reference.invoiceReferenceCode ?? ''
+            const startNumber = reference.invoiceReferenceStartNumber ?? 1
+            const lastSequence = reference.lastInvoiceReferenceSequence
+            const locked = typeof lastSequence === 'number'
+            const nextSequence = locked ? lastSequence + 1 : startNumber
+            const exampleCode = code || 'CUSTOMER'
+
+            return (
+              <article
+                className="mapping-row"
+                id={`customer-reference-${customer.id}`}
+                key={customer.id}
+              >
+                <div>
+                  <strong>{customer.name}</strong>
+                  <p>
+                    Next reference: {exampleCode}-{referenceNumber(nextSequence)}
+                  </p>
+                  <small>
+                    {locked
+                      ? 'Reference numbering has started; these values can no longer change.'
+                      : code
+                        ? `The first reserved reference will use sequence ${referenceNumber(startNumber)}.`
+                        : 'Set a code before this customer can be included in an export.'}
+                  </small>
+                </div>
+                <form action={updateCustomerInvoiceReferenceAction} className="compact-form">
+                  <input name="customerID" type="hidden" value={customer.id} />
+                  <label className="field">
+                    <span>Customer reference code</span>
+                    <input
+                      autoCapitalize="characters"
+                      defaultValue={code}
+                      disabled={locked}
+                      maxLength={30}
+                      name="invoiceReferenceCode"
+                      placeholder="CUSTOMER"
+                      required
+                    />
+                    <small>
+                      Unique across customers; use letters and numbers with single hyphens between
+                      them.
+                    </small>
+                  </label>
+                  <label className="field">
+                    <span>Starting number</span>
+                    <input
+                      defaultValue={startNumber}
+                      disabled={locked}
+                      min={1}
+                      name="invoiceReferenceStartNumber"
+                      required
+                      step={1}
+                      type="number"
+                    />
+                    <small>
+                      Start above any references already used for this customer in Xero.
+                    </small>
+                  </label>
+                  <button className="button button-secondary" disabled={locked} type="submit">
+                    {locked ? 'Reference numbering started' : 'Save invoice reference'}
+                  </button>
+                </form>
+              </article>
+            )
+          })}
+        </div>
+      </section>
 
       <section className="panel page-stack">
         <div>

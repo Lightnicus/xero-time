@@ -17,10 +17,13 @@ const reserveCurrentPreview = async (page: import('@playwright/test').Page): Pro
   await expect(page.getByRole('status')).toContainText('created')
 }
 
-const openAndCancelOnlyExport = async (page: import('@playwright/test').Page): Promise<void> => {
+const openAndCancelOnlyExport = async (
+  page: import('@playwright/test').Page,
+  expectedReference: string,
+): Promise<void> => {
   const exportRow = page.locator('tbody tr').first()
   await exportRow.getByRole('link').first().click()
-  await expect(page.getByRole('heading', { name: /^E2E-/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: expectedReference, exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Mapped invoice lines' })).toBeVisible()
   await page.getByLabel('Reason').fill('Cancelled safely by the billing browser test.')
   await page.getByRole('button', { name: 'Cancel export' }).click()
@@ -53,6 +56,22 @@ test.describe.serial('Billing application', () => {
 
     await expect(page).toHaveURL(/\/app\/settings\/billing\?saved=1$/)
     await expect(page.getByRole('status')).toContainText('Invoice defaults saved.')
+  })
+
+  test('shows the customer reference code and next sequence in the frontend', async ({ page }) => {
+    await signIn(page)
+    await page.goto('/app/settings/customers')
+
+    const customerReference = page
+      .locator('[id^="customer-reference-"]')
+      .filter({ hasText: 'Billable E2E Customer' })
+    await expect(customerReference.getByLabel('Customer reference code')).toHaveValue(
+      'E2E-CUSTOMER',
+    )
+    await expect(customerReference).toContainText('Next reference: E2E-CUSTOMER-0001')
+    await customerReference.getByRole('button', { name: 'Save invoice reference' }).click()
+    await expect(page).toHaveURL(/reference=saved/)
+    await expect(page.getByRole('status')).toContainText('Invoice reference settings saved')
   })
 
   test('previews and confirms a reasoned recalculation of unbilled project rates', async ({
@@ -100,9 +119,10 @@ test.describe.serial('Billing application', () => {
     await expect(page.getByText('2026-07-18 · E2E-BILL · Billing discovery workshop')).toBeVisible()
     await expect(page.getByText('Billing implementation review')).toHaveCount(0)
     await expect(page.getByRole('region', { name: 'Preview summary' })).toContainText('1h 15m')
+    await expect(page.getByText('E2E-CUSTOMER-0001', { exact: true })).toBeVisible()
 
     await reserveCurrentPreview(page)
-    await openAndCancelOnlyExport(page)
+    await openAndCancelOnlyExport(page, 'E2E-CUSTOMER-0001')
 
     await page.goto('/app/billing')
     await expect(page.getByRole('checkbox', { name: /^Select Billing/ })).toHaveCount(2)
@@ -114,9 +134,10 @@ test.describe.serial('Billing application', () => {
     await expect(
       page.getByText('2026-07-18 · E2E-BILL · Billing implementation review'),
     ).toBeVisible()
+    await expect(page.getByText('E2E-CUSTOMER-0002', { exact: true })).toBeVisible()
 
     await reserveCurrentPreview(page)
-    await openAndCancelOnlyExport(page)
+    await openAndCancelOnlyExport(page, 'E2E-CUSTOMER-0002')
 
     await page.goto('/app/billing')
     await expect(page.getByRole('checkbox', { name: /^Select Billing/ })).toHaveCount(2)

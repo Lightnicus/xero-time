@@ -1,6 +1,6 @@
 import type { MigrateDownArgs, MigrateUpArgs } from '@payloadcms/db-mongodb'
 
-type ApplicationIndex = {
+export type ApplicationIndex = {
   collection: string
   expireAfterSeconds?: number
   key: Record<string, -1 | 1>

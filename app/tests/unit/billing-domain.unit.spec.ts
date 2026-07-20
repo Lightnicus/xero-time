@@ -19,6 +19,10 @@ const entry = (overrides: Partial<EligibleBillingEntry> = {}): EligibleBillingEn
   currency: 'NZD',
   customerID: 'customer-1',
   customerName: 'Example Customer',
+  customerReferenceCode: 'EXAMPLE',
+  customerReferenceLastSequence: null,
+  customerReferenceSequence: 1,
+  customerReferenceStartNumber: 1,
   description: 'Complete implementation detail',
   durationSeconds: 60,
   entryID: 'entry-1',
@@ -41,7 +45,6 @@ const settings = {
   defaultRevenueAccountCode: '200',
   defaultTaxType: 'OUTPUT2',
   invoiceLineDescriptionTemplate: '{{workDate}} · {{projectCode}} · {{description}}',
-  invoiceReferencePrefix: 'TIME-',
   lineAmountType: 'Exclusive' as const,
   paymentTerms: { basis: 'days-after-invoice' as const, value: 14 },
 }
@@ -120,17 +123,23 @@ describe('billing selection semantics', () => {
 })
 
 describe('invoice preview construction', () => {
-  it('groups only by Xero contact/currency and keeps one full line per entry', () => {
+  it('groups by local customer/currency, combines projects, and keeps one line per entry', () => {
     const preview = buildBillingPreview({
       batchReference: 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE',
       entries: [
         entry(),
-        entry({ description: 'Second complete description', entryID: 'entry-2' }),
         entry({
-          contactID: '22222222-2222-4222-8222-222222222222',
+          description: 'Second complete description',
+          entryID: 'entry-2',
+          projectCode: 'APP',
+          projectID: 'project-2',
+          projectName: 'Application',
+        }),
+        entry({
           contactName: 'Second Customer',
           customerID: 'customer-2',
           customerName: 'Second Customer',
+          customerReferenceCode: 'SECOND',
           entryID: 'entry-3',
         }),
       ],
@@ -144,7 +153,42 @@ describe('invoice preview construction', () => {
     expect(preview.invoices[0]?.lines[0]?.lineDescription).toContain(
       'Complete implementation detail',
     )
+    expect(preview.invoices.map((invoice) => invoice.applicationReference)).toEqual([
+      'EXAMPLE-0001',
+      'SECOND-0001',
+    ])
     expect(preview.invoices[0]?.payload).toMatchObject({ Status: 'DRAFT', Type: 'ACCREC' })
+  })
+
+  it('uses the configured starting number and pads only sequences shorter than four digits', () => {
+    const starting = buildBillingPreview({
+      batchReference: 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE',
+      entries: [
+        entry({
+          customerReferenceCode: 'CUSTOMER',
+          customerReferenceSequence: 42,
+          customerReferenceStartNumber: 42,
+        }),
+      ],
+      invoiceDate: '2026-07-18',
+      settings,
+    })
+    const large = buildBillingPreview({
+      batchReference: 'FFFFFFFF-BBBB-4CCC-8DDD-EEEEEEEEEEEE',
+      entries: [
+        entry({
+          customerReferenceCode: 'CUSTOMER',
+          customerReferenceLastSequence: 9_999,
+          customerReferenceSequence: 10_000,
+        }),
+      ],
+      invoiceDate: '2026-07-18',
+      settings,
+    })
+
+    expect(starting.invoices[0]?.applicationReference).toBe('CUSTOMER-0042')
+    expect(starting.invoices[0]?.payload).toMatchObject({ Reference: 'CUSTOMER-0042' })
+    expect(large.invoices[0]?.applicationReference).toBe('CUSTOMER-10000')
   })
 
   it('does not silently truncate a line description', () => {

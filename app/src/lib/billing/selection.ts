@@ -96,7 +96,7 @@ export function summarizeSelection(
   entries: readonly EligibleBillingEntry[],
 ): BillingSelectionSummary {
   const dates = entries.map((entry) => entry.workDate).sort()
-  const groups = new Set(entries.map((entry) => `${entry.contactID}\u0000${entry.currency}`))
+  const groups = new Set(entries.map((entry) => `${entry.customerID}\u0000${entry.currency}`))
   return {
     amountScaled: entries.reduce((total, entry) => total + entry.amountScaled, 0),
     currencies: [...new Set(entries.map((entry) => entry.currency))].sort(),

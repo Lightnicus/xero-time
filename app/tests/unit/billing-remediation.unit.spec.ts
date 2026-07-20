@@ -108,5 +108,6 @@ describe('billing blocker remediation', () => {
     for (const code of BILLING_BLOCKER_CODES) expect(billingBlockerLabel(code)).not.toBe(code)
     expect(billingBlockerActionLabel('unmapped-contact')).toBe('Map customer')
     expect(billingBlockerActionLabel('invalid-duration')).toBe('Edit time entry')
+    expect(billingBlockerActionLabel('missing-customer-reference')).toBe('Set invoice reference')
   })
 })

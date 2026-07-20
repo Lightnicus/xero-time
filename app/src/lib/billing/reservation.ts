@@ -6,6 +6,7 @@ import { hasActiveRole } from '@/access/roles'
 import { TIME_ENTRY_BILLING_MUTATION_CONTEXT } from '@/collections/TimeEntries'
 import { recordAuditEvent } from '@/lib/audit/service'
 import type { AppSession } from '@/lib/member-app/session'
+import { requireMongoModel } from '@/lib/payload/mongo'
 import { withPayloadTransaction } from '@/lib/payload/withTransaction'
 
 import { dispatchInvoiceExport, runExportJobWithTimeout } from './dispatch'
@@ -14,7 +15,9 @@ import { buildBillingPreview } from './preview'
 import { normalizeBillingSelection, selectEligibleEntries } from './selection'
 import { stableHash } from './stable'
 
-import type { BillingPreview, BillingSelection } from './contracts'
+import type { BillingPreview, BillingSelection, InvoicePreview } from './contracts'
+
+type BillingMongoSession = AppSession['payload']['db']['sessions'][string]
 
 export type ConfirmBillingInput = {
   batchReference: string
@@ -33,6 +36,27 @@ export type BillingReservationResult = {
 }
 
 const batchReference = (): string => randomUUID().toUpperCase()
+
+const stalePreviewError = (): Error =>
+  new Error('The billing data changed after preview. Refresh and review the updated invoices.')
+
+const claimCustomerReference = async (
+  session: AppSession,
+  invoice: InvoicePreview,
+  mongoSession: BillingMongoSession,
+): Promise<void> => {
+  const claimed = await requireMongoModel(session.payload, 'customers').findOneAndUpdate(
+    {
+      _id: invoice.customerID,
+      invoiceReferenceCode: invoice.customerReferenceCode,
+      invoiceReferenceStartNumber: invoice.customerReferenceStartNumber,
+      lastInvoiceReferenceSequence: invoice.customerReferenceLastSequence,
+    },
+    { $set: { lastInvoiceReferenceSequence: invoice.customerReferenceSequence } },
+    { new: true, session: mongoSession },
+  )
+  if (!claimed) throw stalePreviewError()
+}
 
 export async function createBillingPreview(
   session: AppSession,
@@ -106,6 +130,11 @@ export async function confirmBillingPreview(
   const transactionResult = await withPayloadTransaction(
     session.payload,
     async (req) => {
+      const transactionID = await req.transactionID
+      const mongoSession = transactionID ? session.payload.db.sessions[transactionID] : undefined
+      if (!mongoSession) {
+        throw new Error('A transaction is required to reserve an invoice reference.')
+      }
       const transactionSession: AppSession = { ...session, req }
       const eligibility = await getBillingEligibility(
         transactionSession,
@@ -123,11 +152,12 @@ export async function confirmBillingPreview(
         settings: eligibility.settings,
       })
       if (preview.checksum !== input.checksum) {
-        throw new Error(
-          'The billing data changed after preview. Refresh and review the updated invoices.',
-        )
+        throw stalePreviewError()
       }
       const mode = executionMode(transactionSession, input, eligibility.settingsDocument, preview)
+      for (const invoice of preview.invoices) {
+        await claimCustomerReference(transactionSession, invoice, mongoSession)
+      }
       const now = new Date().toISOString()
       const totalAmountScaled = preview.invoices.reduce(
         (sum, invoice) => sum + invoice.totalScaled,
@@ -169,6 +199,7 @@ export async function confirmBillingPreview(
           depth: 0,
           limit: invoice.lines.length,
           overrideAccess: true,
+          pagination: false,
           req,
           sort: '-releasedAt',
           where: {
@@ -188,6 +219,8 @@ export async function confirmBillingPreview(
             applicationReference: invoice.applicationReference,
             batch: batch.id,
             currency: invoice.currency,
+            customerReferenceCode: invoice.customerReferenceCode,
+            customerReferenceSequence: invoice.customerReferenceSequence,
             currentAttemptNumber: 1,
             customer: firstLine.customerID,
             dispatchState: 'pending',

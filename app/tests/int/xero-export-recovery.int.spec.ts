@@ -233,6 +233,8 @@ describe.sequential('Xero export and webhook recovery', () => {
       collection: 'customers',
       data: {
         currency: 'NZD',
+        invoiceReferenceCode: 'RECOVERY',
+        invoiceReferenceStartNumber: 1,
         name: 'Recovery Customer',
         status: 'active',
         xeroContactId: CONTACT_ID,
@@ -358,6 +360,68 @@ describe.sequential('Xero export and webhook recovery', () => {
     ])
     expect(exportDocument.state).toBe('reconciling')
     expect(attempts.docs[0]).toMatchObject({ requestMayHaveBeenSent: true, result: 'ambiguous' })
+  })
+
+  it('narrows same-reference reconciliation matches by contact and currency', async () => {
+    const reserved = await reserveOneEntry(
+      'Reference collision recovery',
+      'ABABABAB-ABAB-4BAB-8BAB-ABABABABABAB',
+    )
+    const fake = new FakeXeroAccountingServer()
+    fake.setInvoiceSequence(200)
+    fake.enqueue('post', 'ambiguous-create')
+
+    await expect(
+      processInvoiceExport(ownerSession.req, reserved.exportID, {
+        client: fake.client(),
+        token: token(),
+      }),
+    ).resolves.toEqual({ state: 'reconciling' })
+    const exportDocument = await payload.findByID({
+      collection: 'invoice-exports',
+      depth: 0,
+      id: reserved.exportID,
+      overrideAccess: true,
+    })
+    fake.setInvoice({
+      Contact: { ContactID: '44444444-4444-4444-8444-444444444444' },
+      CurrencyCode: 'NZD',
+      InvoiceID: '55555555-5555-4555-8555-555555555555',
+      LineItems: [],
+      Reference: exportDocument.applicationReference,
+      Status: 'DRAFT',
+    })
+    fake.setInvoice({
+      Contact: { ContactID: CONTACT_ID },
+      CurrencyCode: 'AUD',
+      InvoiceID: '66666666-6666-4666-8666-666666666666',
+      LineItems: [],
+      Reference: exportDocument.applicationReference,
+      Status: 'DRAFT',
+    })
+
+    const reconciliation = await reconcileInvoiceExport(ownerSession.req, reserved.exportID, {
+      client: fake.client(),
+      token: token(),
+    })
+    const reconciled = await payload.findByID({
+      collection: 'invoice-exports',
+      depth: 0,
+      id: reserved.exportID,
+      overrideAccess: true,
+    })
+    expect({
+      lastErrorCode: reconciled.lastErrorCode,
+      lastErrorMessage: reconciled.lastErrorMessage,
+      result: reconciliation,
+      state: reconciled.state,
+    }).toEqual({
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      result: { state: 'succeeded' },
+      state: 'succeeded',
+    })
+    expect(fake.invoiceCount()).toBe(3)
   })
 
   it('releases a definite validation failure but keeps its immutable history', async () => {
