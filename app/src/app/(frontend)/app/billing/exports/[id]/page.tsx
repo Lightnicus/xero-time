@@ -13,6 +13,7 @@ import {
   acceptExistingInvoiceAction,
   authorizeReplacementAction,
   cancelExportAction,
+  deleteDraftAndReleaseExportAction,
   reconcileExportAction,
   refreshExportAction,
   releaseExportAction,
@@ -53,6 +54,7 @@ export default async function InvoiceExportDetailPage({
     notFound()
   }
   const query = await searchParams
+  const commandStatus = Array.isArray(query.status) ? query.status[0] : query.status
   const allocations = await session.payload.find({
     collection: 'invoice-export-entries',
     depth: 0,
@@ -96,18 +98,20 @@ export default async function InvoiceExportDetailPage({
         </div>
         <span className={`status-pill status-export-${document.state}`}>{document.state}</span>
       </section>
-      {query.status && (
+      {commandStatus && (
         <div
           className={
-            String(query.status).includes('failed')
-              ? 'notice notice-warning'
-              : 'notice notice-success'
+            commandStatus.includes('failed') ? 'notice notice-warning' : 'notice notice-success'
           }
           role="status"
         >
-          {String(query.status).includes('failed')
-            ? 'The command was blocked or failed safely. Review the current state and guidance before retrying.'
-            : `Export ${query.status}.`}
+          {commandStatus === 'draft-deleted-and-released'
+            ? 'The Xero draft was deleted and all mapped time entries were returned to unbilled.'
+            : commandStatus === 'draft-delete-release-failed'
+              ? 'The delete-and-release command did not complete. Time remains locked unless Xero deletion and the local release were both verified; refresh from Xero and retry safely.'
+              : commandStatus.includes('failed')
+                ? 'The command was blocked or failed safely. Review the current state and guidance before retrying.'
+                : `Export ${commandStatus}.`}
         </div>
       )}
       {document.lastErrorMessage && (
@@ -289,6 +293,35 @@ export default async function InvoiceExportDetailPage({
           </form>
         </section>
       )}
+
+      {isOwnerAdmin &&
+        document.xeroInvoiceId &&
+        document.state === 'succeeded' &&
+        document.remoteStatus === 'DRAFT' && (
+          <section className="panel page-stack">
+            <h2>Delete Xero draft and release time</h2>
+            <p>
+              This permanently changes the saved Xero draft to DELETED, verifies that exact
+              InvoiceID in Xero, and then returns all {document.entryCount} mapped time entries to
+              unbilled in one local transaction. It never voids an authorised invoice, and the
+              original export history remains intact.
+            </p>
+            <form action={deleteDraftAndReleaseExportAction} className="entry-form">
+              <input name="exportID" type="hidden" value={id} />
+              <label className="field">
+                <span>Reason</span>
+                <textarea maxLength={1_000} minLength={10} name="reason" required />
+              </label>
+              <label className="field">
+                <span>Type {document.applicationReference}</span>
+                <input name="confirmation" required />
+              </label>
+              <button className="button button-danger" type="submit">
+                Delete Xero draft and release time
+              </button>
+            </form>
+          </section>
+        )}
 
       {isOwnerAdmin &&
         ['action-required', 'manual-review', 'reconciling'].includes(document.state) && (

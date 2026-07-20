@@ -13,10 +13,10 @@ The read-only Demo Company contract is intentionally outside routine CI. Against
 ## Xero Demo Company pre-release
 
 1. Verify separate identity/accounting client IDs, exact HTTPS callbacks, and identity scope `openid profile email` only.
-2. Connect/select the intended Demo Company; verify tenant ID/name, CreateDraftInvoice action, sales items, accounts, taxes, currencies, tracking, and contacts.
+2. Connect/select the intended Demo Company; verify tenant ID/name, CreateDraftInvoice and DeleteDraftInvoice actions, sales items, accounts, taxes, currencies, tracking, and contacts.
 3. Test customer search/import/link/create and explicit remap warning.
 4. Export a one-minute line and representative mixed-minute/rate lines; compare quantity, unit rate, tax, total, full description, ContactID, account, tracking, reference, and one-to-one LineItemID mapping.
 5. Exercise background and wait fallback, 400, 401, 429, 5xx, lost response, reconciliation, duplicate cron, and stale-worker recovery through the fake suite plus controlled Demo operations.
-6. Delete/void a draft, refresh status, verify no automatic release, then release/rebill through the protected flow.
+6. Use the protected delete-draft-and-release command, verify Xero reports DELETED, then preview the released entries for rebilling. Also verify the manual Xero deletion → refresh → release fallback.
 7. Test webhook intent/signature/duplicate/wrong-tenant handling, email invitation/reset, Xero invite/link/login/unlink, and identity/accounting separation.
 8. Complete backup restore, alert, accessibility/keyboard/responsive, and rollback drills; record operator and evidence.

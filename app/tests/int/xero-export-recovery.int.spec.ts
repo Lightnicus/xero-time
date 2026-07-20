@@ -9,6 +9,7 @@ import {
 } from 'payload'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
+import { deleteDraftInvoiceAndRelease } from '@/lib/billing/export-actions'
 import { confirmBillingPreview, createBillingPreview } from '@/lib/billing/reservation'
 import { normalizeBillingFilter } from '@/lib/billing/selection'
 import type { AppSession } from '@/lib/member-app/session'
@@ -105,6 +106,36 @@ const reserveOneEntry = async (
 }
 
 const token = () => ({ accessToken: 'fake-accounting-access', connection })
+
+const createSucceededDraft = async (
+  description: string,
+  batchReference: string,
+  invoiceSequence: number,
+) => {
+  const reserved = await reserveOneEntry(description, batchReference)
+  const fake = new FakeXeroAccountingServer()
+  fake.setInvoiceSequence(invoiceSequence)
+  await expect(
+    processInvoiceExport(ownerSession.req, reserved.exportID, {
+      client: fake.client(),
+      token: token(),
+    }),
+  ).resolves.toEqual({ state: 'succeeded' })
+  const exportDocument = await payload.findByID({
+    collection: 'invoice-exports',
+    depth: 0,
+    id: reserved.exportID,
+    overrideAccess: true,
+  })
+  if (!exportDocument.xeroInvoiceId) throw new Error('The fake Xero draft was not created.')
+  return {
+    ...reserved,
+    applicationReference: exportDocument.applicationReference,
+    exportDocument,
+    fake,
+    invoiceID: exportDocument.xeroInvoiceId,
+  }
+}
 
 const eventBody = (invoiceID: string, eventAt: string, tenantID = TENANT_ID): string =>
   JSON.stringify({
@@ -216,6 +247,13 @@ describe.sequential('Xero export and webhook recovery', () => {
         resourceType: 'organisation-action',
         status: 'active',
         xeroId: 'CreateDraftInvoice',
+      },
+      {
+        code: 'DeleteDraftInvoice',
+        name: 'DeleteDraftInvoice',
+        resourceType: 'organisation-action',
+        status: 'active',
+        xeroId: 'DeleteDraftInvoice',
       },
     ] as const) {
       await payload.create({
@@ -336,6 +374,250 @@ describe.sequential('Xero export and webhook recovery', () => {
     expect(fake.requests.filter((request) => request.operation === 'post')).toHaveLength(1)
     succeededExportID = reserved.exportID
     succeededInvoiceID = exportDocument.xeroInvoiceId as string
+  })
+
+  it('deletes a verified Xero draft and atomically releases its time entry', async () => {
+    const draft = await createSucceededDraft(
+      'Delete and release a verified draft',
+      '10101010-1010-4010-8010-101010101010',
+      400,
+    )
+
+    const result = await deleteDraftInvoiceAndRelease(
+      ownerSession,
+      {
+        confirmation: draft.applicationReference,
+        exportID: draft.exportID,
+        reason: 'Delete the verified integration draft and release its time.',
+      },
+      { client: draft.fake.client(), token: token() },
+    )
+
+    const [entry, exportDocument, allocations, releases] = await Promise.all([
+      payload.findByID({
+        collection: 'time-entries',
+        depth: 0,
+        id: draft.entryID,
+        overrideAccess: true,
+      }),
+      payload.findByID({
+        collection: 'invoice-exports',
+        depth: 0,
+        id: draft.exportID,
+        overrideAccess: true,
+      }),
+      payload.find({
+        collection: 'invoice-export-entries',
+        depth: 0,
+        overrideAccess: true,
+        where: { invoiceExport: { equals: draft.exportID } },
+      }),
+      payload.find({
+        collection: 'release-actions',
+        depth: 0,
+        overrideAccess: true,
+        where: { sourceExport: { equals: draft.exportID } },
+      }),
+    ])
+    expect(result.entryIDs).toEqual([draft.entryID])
+    expect(draft.fake.invoice(draft.invoiceID)?.Status).toBe('DELETED')
+    expect(entry).toMatchObject({
+      billingStatus: 'unbilled',
+      currentExport: null,
+      exportedAt: null,
+      reservedAt: null,
+    })
+    expect(exportDocument).toMatchObject({ remoteStatus: 'DELETED', state: 'released' })
+    expect(allocations.docs).toHaveLength(1)
+    expect(allocations.docs[0]?.releasedAt).toBeTruthy()
+    expect(releases.docs).toHaveLength(1)
+    expect(releases.docs[0]).toMatchObject({ remoteStatus: 'DELETED' })
+    expect(
+      draft.fake.requests.filter(
+        (request) => request.operation === 'post' && request.path === `Invoices/${draft.invoiceID}`,
+      ),
+    ).toHaveLength(1)
+  })
+
+  it('refuses to delete a non-draft invoice and leaves its time exported', async () => {
+    const draft = await createSucceededDraft(
+      'Do not delete an authorised invoice',
+      '20202020-2020-4020-8020-202020202020',
+      410,
+    )
+    const invoice = draft.fake.invoice(draft.invoiceID)
+    if (!invoice) throw new Error('The fake Xero draft was not found.')
+    draft.fake.setInvoice({ ...invoice, Status: 'AUTHORISED' })
+
+    await expect(
+      deleteDraftInvoiceAndRelease(
+        ownerSession,
+        {
+          confirmation: draft.applicationReference,
+          exportID: draft.exportID,
+          reason: 'This authorised invoice must remain untouched in Xero.',
+        },
+        { client: draft.fake.client(), token: token() },
+      ),
+    ).rejects.toThrow(/DRAFT/)
+    const entry = await payload.findByID({
+      collection: 'time-entries',
+      depth: 0,
+      id: draft.entryID,
+      overrideAccess: true,
+    })
+    expect(entry).toMatchObject({ billingStatus: 'exported', currentExport: draft.exportID })
+    expect(draft.fake.invoice(draft.invoiceID)?.Status).toBe('AUTHORISED')
+    expect(
+      draft.fake.requests.filter(
+        (request) => request.operation === 'post' && request.path === `Invoices/${draft.invoiceID}`,
+      ),
+    ).toHaveLength(0)
+  })
+
+  it('confirms a response-lost draft deletion by GET before releasing time', async () => {
+    const draft = await createSucceededDraft(
+      'Recover a response-lost draft deletion',
+      '30303030-3030-4030-8030-303030303030',
+      420,
+    )
+    draft.fake.enqueue('post', 'ambiguous-create')
+
+    await expect(
+      deleteDraftInvoiceAndRelease(
+        ownerSession,
+        {
+          confirmation: draft.applicationReference,
+          exportID: draft.exportID,
+          reason: 'Confirm the lost Xero response before releasing this time.',
+        },
+        { client: draft.fake.client(), token: token() },
+      ),
+    ).resolves.toMatchObject({ entryIDs: [draft.entryID] })
+    const entry = await payload.findByID({
+      collection: 'time-entries',
+      depth: 0,
+      id: draft.entryID,
+      overrideAccess: true,
+    })
+    expect(draft.fake.invoice(draft.invoiceID)?.Status).toBe('DELETED')
+    expect(entry).toMatchObject({ billingStatus: 'unbilled', currentExport: null })
+    expect(
+      draft.fake.requests.filter(
+        (request) => request.operation === 'get' && request.path === `Invoices/${draft.invoiceID}`,
+      ).length,
+    ).toBeGreaterThanOrEqual(2)
+  })
+
+  it('keeps time exported when a failed deletion is still a Xero draft', async () => {
+    const draft = await createSucceededDraft(
+      'Keep exported time after failed deletion',
+      '40404040-4040-4040-8040-404040404040',
+      430,
+    )
+    draft.fake.enqueue('post', 'server-error')
+
+    await expect(
+      deleteDraftInvoiceAndRelease(
+        ownerSession,
+        {
+          confirmation: draft.applicationReference,
+          exportID: draft.exportID,
+          reason: 'Do not release this time unless Xero confirms deletion.',
+        },
+        { client: draft.fake.client(), token: token() },
+      ),
+    ).rejects.toThrow()
+    const [entry, releases] = await Promise.all([
+      payload.findByID({
+        collection: 'time-entries',
+        depth: 0,
+        id: draft.entryID,
+        overrideAccess: true,
+      }),
+      payload.find({
+        collection: 'release-actions',
+        depth: 0,
+        overrideAccess: true,
+        where: { sourceExport: { equals: draft.exportID } },
+      }),
+    ])
+    expect(draft.fake.invoice(draft.invoiceID)?.Status).toBe('DRAFT')
+    expect(entry).toMatchObject({ billingStatus: 'exported', currentExport: draft.exportID })
+    expect(releases.docs).toHaveLength(0)
+  })
+
+  it('safely completes a local release when the same draft is already deleted', async () => {
+    const draft = await createSucceededDraft(
+      'Resume release after confirmed remote deletion',
+      '50505050-5050-4050-8050-505050505050',
+      440,
+    )
+    const invoice = draft.fake.invoice(draft.invoiceID)
+    if (!invoice) throw new Error('The fake Xero draft was not found.')
+    draft.fake.setInvoice({ ...invoice, Status: 'DELETED' })
+
+    await expect(
+      deleteDraftInvoiceAndRelease(
+        ownerSession,
+        {
+          confirmation: draft.applicationReference,
+          exportID: draft.exportID,
+          reason: 'Complete the local release after verified Xero deletion.',
+        },
+        { client: draft.fake.client(), token: token() },
+      ),
+    ).resolves.toMatchObject({ entryIDs: [draft.entryID] })
+    const entry = await payload.findByID({
+      collection: 'time-entries',
+      depth: 0,
+      id: draft.entryID,
+      overrideAccess: true,
+    })
+    expect(entry).toMatchObject({ billingStatus: 'unbilled', currentExport: null })
+    expect(
+      draft.fake.requests.filter(
+        (request) => request.operation === 'post' && request.path === `Invoices/${draft.invoiceID}`,
+      ),
+    ).toHaveLength(0)
+  })
+
+  it('allows only one concurrent delete-and-release command to commit', async () => {
+    const draft = await createSucceededDraft(
+      'Concurrent draft deletion and release',
+      '60606060-6060-4060-8060-606060606060',
+      450,
+    )
+    const secondSession: AppSession = {
+      ...ownerSession,
+      req: await createLocalReq({ user: ownerSession.user }, payload),
+    }
+    const input = {
+      confirmation: draft.applicationReference,
+      exportID: draft.exportID,
+      reason: 'Only one concurrent draft release may commit locally.',
+    }
+
+    const results = await Promise.allSettled([
+      deleteDraftInvoiceAndRelease(ownerSession, input, {
+        client: draft.fake.client(),
+        token: token(),
+      }),
+      deleteDraftInvoiceAndRelease(secondSession, input, {
+        client: draft.fake.client(),
+        token: token(),
+      }),
+    ])
+    const releases = await payload.find({
+      collection: 'release-actions',
+      depth: 0,
+      overrideAccess: true,
+      where: { sourceExport: { equals: draft.exportID } },
+    })
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1)
+    expect(releases.docs).toHaveLength(1)
+    expect(draft.fake.invoice(draft.invoiceID)?.Status).toBe('DELETED')
   })
 
   it('requires the remote ItemCode to match the immutable line snapshot', async () => {

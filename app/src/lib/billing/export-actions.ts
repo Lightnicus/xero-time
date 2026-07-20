@@ -8,8 +8,10 @@ import { recordAuditEvent } from '@/lib/audit/service'
 import { stableHash } from '@/lib/billing/stable'
 import { relationshipID } from '@/lib/domain/validation'
 import type { AppSession } from '@/lib/member-app/session'
+import { requireMongoModel } from '@/lib/payload/mongo'
 import { withPayloadTransaction } from '@/lib/payload/withTransaction'
 import type { XeroAccountingClient } from '@/lib/xero/accounting/client'
+import { AccountingIntegrationError } from '@/lib/xero/accounting/contracts'
 import {
   getValidAccountingAccessToken,
   resolveAccountingRuntime,
@@ -51,6 +53,74 @@ const history = (
 const assertOwnerAdmin = (session: AppSession): void => {
   if (!hasActiveRole(session.user, ['owner', 'admin'])) {
     throw new Error('Only an owner or administrator can perform this action.')
+  }
+}
+
+const loadExportAllocations = async (session: AppSession, exportID: string) =>
+  (
+    await session.payload.find({
+      collection: 'invoice-export-entries',
+      depth: 0,
+      limit: 1_000,
+      overrideAccess: true,
+      pagination: false,
+      req: session.req,
+      sort: 'lineOrdinal',
+      where: { invoiceExport: { equals: exportID } },
+    })
+  ).docs
+
+const assertLocallyReleasable = async (
+  session: AppSession,
+  document: InvoiceExport,
+  allocations: Awaited<ReturnType<typeof loadExportAllocations>>,
+): Promise<void> => {
+  if (document.state === 'released' || document.releaseAction) {
+    throw new Error('This export was already released.')
+  }
+  if (allocations.length !== document.entryCount) {
+    throw new Error('The saved export allocation count is inconsistent; release remains blocked.')
+  }
+  for (const allocation of allocations) {
+    const entryID = relation(allocation.timeEntry)
+    if (!entryID) throw new Error('An export allocation is invalid.')
+    const entry = await session.payload.findByID({
+      collection: 'time-entries',
+      depth: 0,
+      id: entryID,
+      overrideAccess: true,
+      req: session.req,
+    })
+    if (entry.billingStatus !== 'exported' || relation(entry.currentExport) !== document.id) {
+      throw new Error('Every entry must still be exported by this exact invoice before release.')
+    }
+  }
+}
+
+const assertDeleteDraftCapability = async (
+  session: AppSession,
+  tenantID: string,
+): Promise<void> => {
+  const references = await session.payload.find({
+    collection: 'xero-reference-data',
+    depth: 0,
+    limit: 2,
+    overrideAccess: true,
+    pagination: false,
+    req: session.req,
+    where: {
+      and: [
+        { sourceTenantId: { equals: tenantID } },
+        { resourceType: { equals: 'organisation-action' } },
+        { code: { equals: 'DeleteDraftInvoice' } },
+        { status: { equals: 'active' } },
+      ],
+    },
+  })
+  if (references.docs.length !== 1) {
+    throw new Error(
+      'Deletion is blocked because cached Xero data has not confirmed draft-invoice deletion capability. Refresh Xero data and try again.',
+    )
   }
 }
 
@@ -219,6 +289,192 @@ export async function releaseInvoiceExport(
       return { entryIDs: entryIDs as string[], releaseID: String(release.id) }
     },
     { user: session.user },
+  )
+}
+
+export async function deleteDraftInvoiceAndRelease(
+  session: AppSession,
+  input: { confirmation: string; exportID: string; reason: string },
+  overrides: {
+    client?: XeroAccountingClient
+    token?: Awaited<ReturnType<typeof getValidAccountingAccessToken>>
+  } = {},
+): Promise<{ entryIDs: string[]; releaseID: string }> {
+  assertOwnerAdmin(session)
+  const deletionReason = reason(input.reason)
+  const document = await session.payload.findByID({
+    collection: 'invoice-exports',
+    depth: 0,
+    id: input.exportID,
+    overrideAccess: true,
+    req: session.req,
+    showHiddenFields: true,
+  })
+  if (input.confirmation !== document.applicationReference) {
+    throw new Error('Type the exact application reference to confirm deletion and release.')
+  }
+
+  const allocations = await loadExportAllocations(session, input.exportID)
+  await assertLocallyReleasable(session, document, allocations)
+
+  const runtime = overrides.client ? null : await resolveAccountingRuntime(session)
+  const client = overrides.client ?? runtime?.client
+  if (!client) throw new Error('Xero accounting is not configured.')
+  let token =
+    overrides.token ??
+    (await getValidAccountingAccessToken(
+      session,
+      runtime ?? {
+        client,
+      },
+    ))
+  const tenantID = token.connection.tenantId
+  if (!tenantID) throw new Error('The Xero tenant is unavailable.')
+
+  const preflight = await fetchRemoteInvoiceForExport(session, document, client, token)
+  let verified = preflight
+  let deletionRequested = false
+  let ambiguousRequest = false
+  const operationID = `xdel-${stableHash({
+    exportID: document.id,
+    invoiceID: preflight.remote.invoiceID,
+    operation: 'delete-draft-invoice',
+    payloadHash: document.payloadHash,
+  }).slice(0, 80)}`
+  let postCorrelationID: string | undefined
+
+  if (preflight.remote.status !== 'DELETED') {
+    if (preflight.remote.status !== 'DRAFT') {
+      throw new Error(
+        `Xero currently reports ${preflight.remote.status}. Only a DRAFT invoice can be deleted and released by this action.`,
+      )
+    }
+    if (stableHash(document.requestPayload) !== document.payloadHash) {
+      throw new Error(
+        'The immutable export payload no longer matches its saved hash. Deletion and release remain blocked.',
+      )
+    }
+    if (!materiallyMatches(document, preflight.remote, allocations)) {
+      throw new Error(
+        'The Xero draft no longer exactly matches the immutable export snapshot. Deletion and release remain blocked.',
+      )
+    }
+    await assertDeleteDraftCapability(session, tenantID)
+    deletionRequested = true
+    try {
+      const postDelete = () =>
+        client.accountingPost(
+          token.accessToken,
+          tenantID,
+          `Invoices/${preflight.remote.invoiceID}`,
+          {
+            Invoices: [
+              {
+                InvoiceID: preflight.remote.invoiceID,
+                Status: 'DELETED',
+              },
+            ],
+          },
+          operationID,
+        )
+      let response
+      try {
+        response = await postDelete()
+      } catch (error) {
+        if (
+          overrides.token ||
+          !(error instanceof AccountingIntegrationError) ||
+          error.status !== 401
+        ) {
+          throw error
+        }
+        await requireMongoModel(session.payload, 'xero-connections').updateOne(
+          { _id: token.connection.id, status: 'connected' },
+          { $set: { accessTokenExpiresAt: new Date(0) } },
+        )
+        token = await getValidAccountingAccessToken(session, { client })
+        if (token.connection.tenantId !== tenantID) {
+          throw new AccountingIntegrationError(
+            'wrong-tenant',
+            'The refreshed Xero token does not match the pinned organisation.',
+          )
+        }
+        response = await postDelete()
+      }
+      postCorrelationID = response.correlationID
+    } catch (error) {
+      if (!(error instanceof AccountingIntegrationError) || !error.requestMayHaveBeenSent) {
+        throw error
+      }
+      ambiguousRequest = true
+      postCorrelationID = error.correlationID
+    }
+
+    try {
+      verified = await fetchRemoteInvoiceForExport(session, document, client, token)
+    } catch (error) {
+      throw new AccountingIntegrationError(
+        'draft-delete-unverified',
+        'Xero draft deletion could not be verified. The timesheets remain exported.',
+        {
+          cause: error,
+          correlationID: postCorrelationID,
+          requestMayHaveBeenSent: true,
+          retryable: true,
+        },
+      )
+    }
+    if (verified.remote.status !== 'DELETED') {
+      throw new AccountingIntegrationError(
+        'draft-delete-not-confirmed',
+        `Xero did not confirm deletion and currently reports ${verified.remote.status}. The timesheets remain exported.`,
+        {
+          correlationID: postCorrelationID ?? verified.response.correlationID,
+          requestMayHaveBeenSent: true,
+          retryable: true,
+        },
+      )
+    }
+  }
+
+  const verifiedFetch: typeof fetchRemoteInvoiceForExport = async (_session, currentDocument) => {
+    if (
+      currentDocument.id !== document.id ||
+      currentDocument.xeroInvoiceId !== verified.remote.invoiceID
+    ) {
+      throw new Error('The verified Xero invoice no longer matches this export.')
+    }
+    return verified
+  }
+
+  await recordAuditEvent(
+    session.payload,
+    {
+      actor: session.user.id,
+      correlationId:
+        postCorrelationID ?? verified.response.correlationID ?? preflight.response.correlationID,
+      eventType: 'export.reconciled',
+      exportId: document.id,
+      metadata: {
+        action: 'xero-draft-delete-verified',
+        ambiguousRequest,
+        deletionRequested,
+        operationId: operationID,
+        preflightStatus: preflight.remote.status,
+        verifiedStatus: verified.remote.status,
+      },
+      reason: deletionReason,
+      targetCollection: 'invoice-exports',
+      targetId: document.id,
+      xeroInvoiceId: verified.remote.invoiceID,
+    },
+    session.req,
+  )
+
+  return releaseInvoiceExport(
+    session,
+    { ...input, reason: deletionReason },
+    { client, fetchRemote: verifiedFetch },
   )
 }
 

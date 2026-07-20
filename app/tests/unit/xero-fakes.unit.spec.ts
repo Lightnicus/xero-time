@@ -101,6 +101,95 @@ describe('controllable fake Xero accounting server', () => {
     expect(server.invoiceCount()).toBe(1)
   })
 
+  it("marks a draft invoice deleted using Xero's wrapped update payload", async () => {
+    const server = new FakeXeroAccountingServer()
+    const client = server.client()
+    const create = await client.accountingPost(
+      'fake-access',
+      'fake-tenant',
+      'Invoices',
+      {
+        Invoices: [
+          {
+            Contact: { ContactID: '00000000-0000-4000-8000-000000000010' },
+            CurrencyCode: 'NZD',
+            LineItems: [{ Description: 'Redacted work', Quantity: 1, UnitAmount: 100 }],
+            Reference: 'TIME-DELETE-1',
+            Status: 'DRAFT',
+          },
+        ],
+      },
+      'fake-create-key',
+    )
+    const invoice = (create.data as { Invoices: Array<{ InvoiceID: string }> }).Invoices[0]
+    if (!invoice) throw new Error('The fake invoice was not created.')
+    const body = { Invoices: [{ InvoiceID: invoice.InvoiceID, Status: 'DELETED' }] }
+
+    await expect(
+      client.accountingPost(
+        'fake-access',
+        'fake-tenant',
+        `Invoices/${invoice.InvoiceID}`,
+        body,
+        'fake-delete-key',
+      ),
+    ).resolves.toMatchObject({
+      data: { Invoices: [{ InvoiceID: invoice.InvoiceID, Status: 'DELETED' }] },
+    })
+    await expect(
+      client.accountingPost(
+        'fake-access',
+        'fake-tenant',
+        `Invoices/${invoice.InvoiceID}`,
+        body,
+        'fake-delete-key',
+      ),
+    ).resolves.toMatchObject({
+      data: { Invoices: [{ InvoiceID: invoice.InvoiceID, Status: 'DELETED' }] },
+    })
+    expect(server.invoiceCount()).toBe(1)
+  })
+
+  it('applies a draft deletion before simulating a lost POST response', async () => {
+    const server = new FakeXeroAccountingServer()
+    const client = server.client()
+    const create = await client.accountingPost(
+      'fake-access',
+      'fake-tenant',
+      'Invoices',
+      {
+        Invoices: [
+          {
+            Contact: { ContactID: '00000000-0000-4000-8000-000000000010' },
+            CurrencyCode: 'NZD',
+            LineItems: [],
+            Reference: 'TIME-DELETE-LOST',
+            Status: 'DRAFT',
+          },
+        ],
+      },
+      'fake-create-lost-key',
+    )
+    const invoice = (create.data as { Invoices: Array<{ InvoiceID: string }> }).Invoices[0]
+    if (!invoice) throw new Error('The fake invoice was not created.')
+    server.enqueue('post', 'ambiguous-create')
+
+    await expect(
+      client.accountingPost(
+        'fake-access',
+        'fake-tenant',
+        `Invoices/${invoice.InvoiceID}`,
+        { Invoices: [{ InvoiceID: invoice.InvoiceID, Status: 'DELETED' }] },
+        'fake-delete-lost-key',
+      ),
+    ).rejects.toMatchObject({ requestMayHaveBeenSent: true, retryable: true })
+    await expect(
+      client.accountingGet('fake-access', 'fake-tenant', `Invoices/${invoice.InvoiceID}`),
+    ).resolves.toMatchObject({
+      data: { Invoices: [{ InvoiceID: invoice.InvoiceID, Status: 'DELETED' }] },
+    })
+  })
+
   it.each([
     ['validation', 400, false],
     ['unauthorized', 401, false],

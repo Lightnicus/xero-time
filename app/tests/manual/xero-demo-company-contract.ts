@@ -71,8 +71,17 @@ try {
           (action) =>
             isRecord(action) && action.Name === 'CreateDraftInvoice' && action.Status === 'ALLOWED',
         )
+      const canDeleteDraftInvoice =
+        Array.isArray(actions) &&
+        actions.some(
+          (action) =>
+            isRecord(action) && action.Name === 'DeleteDraftInvoice' && action.Status === 'ALLOWED',
+        )
       if (!canCreateDraftInvoice) {
         throw new Error('The connected Xero user cannot create draft invoices in this tenant.')
+      }
+      if (!canDeleteDraftInvoice) {
+        throw new Error('The connected Xero user cannot delete draft invoices in this tenant.')
       }
     }
     if (path === 'Items') {

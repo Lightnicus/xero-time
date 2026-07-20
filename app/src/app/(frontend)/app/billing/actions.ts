@@ -10,6 +10,7 @@ import {
   acceptExistingInvoice,
   authorizeReplacementAttempt,
   cancelInvoiceExport,
+  deleteDraftInvoiceAndRelease,
   refreshExportForUser,
   releaseInvoiceExport,
   requestInvoiceReconciliation,
@@ -188,6 +189,25 @@ export async function releaseExportAction(formData: FormData): Promise<void> {
   }
   revalidatePath('/app/billing')
   redirect(`/app/billing/exports/${encodeURIComponent(exportID)}?status=released`)
+}
+
+export async function deleteDraftAndReleaseExportAction(formData: FormData): Promise<void> {
+  const session = await commandSession(['owner', 'admin'])
+  const exportID = value(formData, 'exportID')
+  try {
+    await deleteDraftInvoiceAndRelease(session, {
+      confirmation: value(formData, 'confirmation'),
+      exportID,
+      reason: value(formData, 'reason'),
+    })
+  } catch {
+    redirect(
+      `/app/billing/exports/${encodeURIComponent(exportID)}?status=draft-delete-release-failed`,
+    )
+  }
+  revalidatePath('/app/billing')
+  revalidatePath('/app/billing/exports')
+  redirect(`/app/billing/exports/${encodeURIComponent(exportID)}?status=draft-deleted-and-released`)
 }
 
 export async function authorizeReplacementAction(formData: FormData): Promise<void> {

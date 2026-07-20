@@ -90,6 +90,7 @@ export class FakeXeroAccountingServer {
   ]
   private organisationActions: OrganisationAction[] = [
     { Name: 'CreateDraftInvoice', Status: 'ALLOWED' },
+    { Name: 'DeleteDraftInvoice', Status: 'ALLOWED' },
   ]
   private tokenSequence = 0
 
@@ -194,6 +195,35 @@ export class FakeXeroAccountingServer {
     return structuredClone(invoice)
   }
 
+  private updateInvoice(path: string, body: unknown): StoredInvoice {
+    const invoiceID = path.slice('Invoices/'.length)
+    const envelope = asRecord(body)
+    const invoices = Array.isArray(envelope.Invoices) ? envelope.Invoices : []
+    const update = asRecord(invoices[0])
+    if (
+      invoices.length !== 1 ||
+      String(update.InvoiceID ?? '') !== invoiceID ||
+      update.Status !== 'DELETED'
+    ) {
+      throw new AccountingIntegrationError(
+        'accounting-post-validation',
+        'The fake invoice update must use the wrapped Xero delete payload.',
+        { requestMayHaveBeenSent: false, status: 400 },
+      )
+    }
+    const invoice = this.invoices.get(invoiceID)
+    if (!invoice) {
+      throw new AccountingIntegrationError(
+        'accounting-post-not-found',
+        'The fake Xero invoice was not found.',
+        { requestMayHaveBeenSent: false, status: 404 },
+      )
+    }
+    const deleted = { ...invoice, Status: 'DELETED' }
+    this.invoices.set(invoiceID, deleted)
+    return structuredClone(deleted)
+  }
+
   client(): XeroAccountingClient {
     return {
       accountingGet: async (_accessToken, _tenantID, path, parameters = {}) => {
@@ -229,12 +259,23 @@ export class FakeXeroAccountingServer {
         const failure = await this.applyFailure('post', true)
         this.requests[this.requests.length - 1] = { operation: 'post', path }
         const invoice =
-          this.invoicesByIdempotencyKey.get(idempotencyKey) ?? this.createInvoice(body)
+          this.invoicesByIdempotencyKey.get(idempotencyKey) ??
+          (path.startsWith('Invoices/')
+            ? this.updateInvoice(path, body)
+            : path === 'Invoices'
+              ? this.createInvoice(body)
+              : (() => {
+                  throw new AccountingIntegrationError(
+                    'accounting-post-invalid-path',
+                    'The fake accounting POST path is unsupported.',
+                    { requestMayHaveBeenSent: false, status: 400 },
+                  )
+                })())
         this.invoicesByIdempotencyKey.set(idempotencyKey, invoice)
         if (failure === 'ambiguous-create') {
           throw new AccountingIntegrationError(
             'accounting-post-response-lost',
-            'The fake server created the invoice but lost the response.',
+            'The fake server accepted the accounting mutation but lost the response.',
             { requestMayHaveBeenSent: true, retryable: true },
           )
         }
