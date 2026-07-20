@@ -972,6 +972,7 @@ export async function completeAccountingCallback(
           'No Xero organisation was authorized.',
         )
       }
+      await verifyAccountingGrantCapability(client, tokenSet.accessToken, candidate)
       await persistConnectionAndCompleteState(session, state, candidate, grant, config)
       return { status: 'connected' }
     }
@@ -1065,7 +1066,7 @@ export async function getAccountingTenantSelection(
 export async function selectAccountingTenant(
   session: AppSession,
   input: { browserBinding: string; flowID: string; tenantID: string },
-  overrides: Pick<ServiceDependencies, 'config'> = {},
+  overrides: Pick<ServiceDependencies, 'client' | 'config'> = {},
 ): Promise<void> {
   assertAccountingAdministrator(session)
   const found = await getSelectionState(session, input.flowID, input.browserBinding)
@@ -1081,9 +1082,10 @@ export async function selectAccountingTenant(
     )
   }
 
-  const config = await configuredEnvironment(session, overrides.config)
   try {
+    const { client, config } = await dependencies(session, overrides)
     const grant = parsePendingGrant(found.pendingGrantEnvelope, config)
+    await verifyAccountingGrantCapability(client, grant.tokenSet.accessToken, candidate)
     await persistConnectionAndCompleteState(session, state, candidate, grant, config)
   } catch (error) {
     const code = error instanceof AccountingIntegrationError ? error.code : 'selection-failed'

@@ -22,6 +22,11 @@ export const memberAppUser = {
   timezone: 'Pacific/Auckland' as const,
 }
 
+export const adminRateProject = {
+  code: 'E2E-RATE',
+  name: 'Admin Rate Project',
+}
+
 const assertIsolatedE2EDatabase = (): void => {
   let mongoURI: URL
 
@@ -91,23 +96,6 @@ export async function seedBillingAppFixture(): Promise<void> {
   })
   const ownerReq = await createLocalReq({ user: owner }, payload)
 
-  await payload.updateGlobal({
-    slug: 'billing-settings',
-    data: {
-      acceptingNewExports: true,
-      defaultRevenueAccountCode: '200',
-      defaultTaxType: 'OUTPUT2',
-      invoiceLineDescriptionTemplate: '{{workDate}} · {{projectCode}} · {{description}}',
-      invoiceReferencePrefix: 'E2E-',
-      lineAmountType: 'Exclusive',
-      processingEnabled: false,
-      waitForResultEnabled: false,
-      xeroExportMode: 'background',
-    },
-    overrideAccess: true,
-    req: ownerReq,
-  })
-
   const tenantID = 'e2e-demo-tenant'
   const fetchedAt = new Date().toISOString()
   await payload.create({
@@ -143,7 +131,7 @@ export async function seedBillingAppFixture(): Promise<void> {
     },
     {
       code: 'OUTPUT2',
-      metadata: { effectiveRate: 15 },
+      metadata: { canApplyToRevenue: true, effectiveRate: 15 },
       name: 'GST on Income',
       resourceType: 'tax-rate' as const,
     },
@@ -167,6 +155,23 @@ export async function seedBillingAppFixture(): Promise<void> {
       req: ownerReq,
     })
   }
+
+  await payload.updateGlobal({
+    slug: 'billing-settings',
+    data: {
+      acceptingNewExports: true,
+      defaultRevenueAccountCode: '200',
+      defaultTaxType: 'OUTPUT2',
+      invoiceLineDescriptionTemplate: '{{workDate}} · {{projectCode}} · {{description}}',
+      invoiceReferencePrefix: 'E2E-',
+      lineAmountType: 'Exclusive',
+      processingEnabled: false,
+      waitForResultEnabled: false,
+      xeroExportMode: 'background',
+    },
+    overrideAccess: true,
+    req: ownerReq,
+  })
 
   const customer = await payload.create({
     collection: 'customers',
@@ -241,11 +246,38 @@ export async function seedTestUser(): Promise<void> {
   // The entire database is test-only, so a prior interrupted run is safe to clean directly.
   await cleanE2EDatabase(payload)
 
-  await payload.create({
+  const owner = await payload.create({
     collection: 'users',
     data: testUser,
     disableVerificationEmail: true,
     overrideAccess: true,
+  })
+  const ownerReq = await createLocalReq({ user: owner }, payload)
+  const customer = await payload.create({
+    collection: 'customers',
+    data: {
+      currency: 'NZD',
+      name: 'Admin Rate Customer',
+      status: 'active',
+      xeroMappingStatus: 'unmapped',
+    },
+    overrideAccess: false,
+    req: ownerReq,
+  })
+
+  await payload.create({
+    collection: 'projects',
+    data: {
+      billableByDefault: true,
+      code: adminRateProject.code,
+      currency: 'NZD',
+      customer: customer.id,
+      hourlyRateScaled: 1_500_000,
+      name: adminRateProject.name,
+      status: 'active',
+    },
+    overrideAccess: false,
+    req: ownerReq,
   })
 }
 

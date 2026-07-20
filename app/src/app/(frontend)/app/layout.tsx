@@ -32,6 +32,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             {showNewTime && <Link href="/app/time/new">Add time</Link>}
             <Link href="/app/profile">Profile</Link>
             {showBilling && <Link href="/app/billing">Billing</Link>}
+            {showAdmin && <Link href="/app/settings/billing">Invoice defaults</Link>}
             {showAdmin && <Link href="/app/settings/users">People</Link>}
             {showAdmin && <Link href="/app/settings/customers">Customers</Link>}
             {showAdmin && <Link href="/app/settings/projects">Projects</Link>}

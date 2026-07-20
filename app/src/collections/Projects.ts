@@ -6,7 +6,6 @@ import { auditCollectionChange } from '@/lib/audit/change-hooks'
 import { formatScaledAmount } from '@/lib/domain/money'
 import {
   DEFAULT_CURRENCY,
-  RATE_SCALE,
   currencyOptions,
   isRecord,
   normalizeCurrencyCode,
@@ -34,7 +33,10 @@ const validateProjectCode: Validate<string> = (value) =>
     ? true
     : 'Use 1–40 uppercase letters, numbers, underscores, or hyphens.'
 
-const validateHourlyRate: Validate<number> = (value) => validateScaledInteger(value)
+const validateHourlyRate: Validate<number> = (value) =>
+  validateScaledInteger(value) === true
+    ? true
+    : 'Enter a non-negative hourly rate with no more than four decimal places.'
 
 const activeOrCurrentCustomer: FilterOptions = async ({ id, req }) => {
   const activeCustomer = { status: { equals: 'active' } }
@@ -309,6 +311,7 @@ export const Projects: CollectionConfig = {
                 },
                 {
                   name: 'hourlyRateScaled',
+                  label: 'Hourly rate',
                   type: 'number',
                   required: true,
                   min: 0,
@@ -318,9 +321,19 @@ export const Projects: CollectionConfig = {
                     read: financialField,
                   },
                   admin: {
-                    description: `${RATE_SCALE.toLocaleString('en-NZ')} units = 1 currency unit. Example: NZD 150.00 is 1500000.`,
-                    step: 1,
-                    width: '25%',
+                    components: {
+                      Cell: '/components/admin/ScaledCurrencyCell',
+                      Field: '/components/admin/ScaledCurrencyField',
+                    },
+                    description:
+                      'API and database value stored as an integer in ten-thousandths of a currency unit. The admin editor converts ordinary currency values automatically.',
+                    custom: {
+                      inputDescription:
+                        'Enter the hourly rate in the project currency, for example 150.00. Up to four decimal places are supported.',
+                    },
+                    disableGroupBy: true,
+                    disableListFilter: true,
+                    width: '50%',
                   },
                 },
                 {
@@ -328,7 +341,7 @@ export const Projects: CollectionConfig = {
                   type: 'text',
                   virtual: true,
                   access: { read: financialField },
-                  admin: { readOnly: true, width: '25%' },
+                  admin: { hidden: true },
                   hooks: {
                     afterRead: [
                       ({ siblingData }) =>

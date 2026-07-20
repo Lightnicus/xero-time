@@ -136,6 +136,7 @@ describe.sequential('billing reservation saga', () => {
         name: 'Sales',
         resourceType: 'account',
         status: 'active',
+        type: 'REVENUE',
         xeroId: 'account-200',
       },
       {

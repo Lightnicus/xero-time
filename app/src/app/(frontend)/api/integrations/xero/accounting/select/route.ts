@@ -2,8 +2,10 @@ import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
 import { getAppSession } from '@/lib/member-app/session'
+import { refreshXeroReferenceData } from '@/lib/xero/accounting/reference-data'
 import {
   clearAccountingFlowCookie,
+  connectedSettingsURL,
   guardAccountingCommand,
   hasTrustedOrigin,
   isAllowedAccountingAdministrator,
@@ -37,7 +39,15 @@ export async function POST(request: Request): Promise<NextResponse> {
       flowID: typeof flowID === 'string' ? flowID : '',
       tenantID: typeof tenantID === 'string' ? tenantID : '',
     })
-    const response = NextResponse.redirect(settingsURL({ connected: '1' }), 303)
+    let completionURL: URL
+    try {
+      completionURL = connectedSettingsURL(await refreshXeroReferenceData(session))
+    } catch {
+      // Tenant validation and connection persistence have completed. Preserve
+      // that grant, but make the incomplete reference-data setup explicit.
+      completionURL = connectedSettingsURL({ status: 'failed' })
+    }
+    const response = NextResponse.redirect(completionURL, 303)
     clearAccountingFlowCookie(response)
     return response
   } catch (error) {

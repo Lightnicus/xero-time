@@ -39,6 +39,22 @@ test.describe.serial('Billing application', () => {
     await cleanupTestUser()
   })
 
+  test('sets Xero invoice defaults in the frontend', async ({ page }) => {
+    await signIn(page)
+    await page.goto('/app/settings/billing')
+
+    await expect(page.getByRole('heading', { name: 'Invoice defaults' })).toBeVisible()
+    await expect(page.getByLabel('Revenue account')).toHaveValue('200')
+    await expect(page.getByLabel('Tax type')).toHaveValue('OUTPUT2')
+    await expect(page.getByRole('option', { name: '200 — Sales' })).toBeAttached()
+    await expect(page.getByRole('option', { name: 'GST on Income — OUTPUT2 (15%)' })).toBeAttached()
+
+    await page.getByRole('button', { name: 'Save invoice defaults' }).click()
+
+    await expect(page).toHaveURL(/\/app\/settings\/billing\?saved=1$/)
+    await expect(page.getByRole('status')).toContainText('Invoice defaults saved.')
+  })
+
   test('previews and confirms a reasoned recalculation of unbilled project rates', async ({
     page,
   }) => {

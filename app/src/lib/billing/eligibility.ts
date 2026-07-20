@@ -5,6 +5,7 @@ import { isRecord, isValidCurrencyCode, relationshipID } from '@/lib/domain/vali
 import type { AppSession } from '@/lib/member-app/session'
 
 import { durationToQuantityScaled, quantityRateAmountScaled } from './math'
+import { xeroConnectionBlockers } from './remediation'
 import { normalizeBillingFilter } from './selection'
 
 import type {
@@ -400,22 +401,7 @@ export async function getBillingEligibility(
       reasons.push(blocker('stale-source-data', 'The source user is unavailable.'))
 
     const contactID = stringValue(customer?.xeroContactId, 100)
-    if (!tenantID)
-      reasons.push(
-        blocker(
-          'xero-not-connected',
-          'Connect the Xero accounting organisation.',
-          '/app/settings/xero',
-        ),
-      )
-    if (!references.capabilityAvailable)
-      reasons.push(
-        blocker(
-          'missing-xero-capability',
-          'The connected organisation has not confirmed draft-invoice capability.',
-          '/app/settings/xero',
-        ),
-      )
+    reasons.push(...xeroConnectionBlockers(tenantID || null, references.capabilityAvailable))
     if (!contactID || customer?.xeroMappingStatus === 'unmapped') {
       reasons.push(
         blocker(
@@ -455,37 +441,44 @@ export async function getBillingEligibility(
       )
     }
 
+    const projectAccountCode = stringValue(project?.revenueAccountCode, 20)
+    const customerAccountCode = stringValue(customer?.revenueAccountCode, 20)
     const accountCode =
-      stringValue(project?.revenueAccountCode, 20) ||
-      stringValue(customer?.revenueAccountCode, 20) ||
-      settings.defaultRevenueAccountCode
-    const taxType =
-      stringValue(project?.taxType, 50) ||
-      stringValue(customer?.taxType, 50) ||
-      settings.defaultTaxType
+      projectAccountCode || customerAccountCode || settings.defaultRevenueAccountCode
+    const accountRemediationHref = projectAccountCode
+      ? `/admin/collections/projects/${projectID}`
+      : customerAccountCode
+        ? `/admin/collections/customers/${customerID}`
+        : '/app/settings/billing'
+    const projectTaxType = stringValue(project?.taxType, 50)
+    const customerTaxType = stringValue(customer?.taxType, 50)
+    const taxType = projectTaxType || customerTaxType || settings.defaultTaxType
+    const taxRemediationHref = projectTaxType
+      ? `/admin/collections/projects/${projectID}`
+      : customerTaxType
+        ? `/admin/collections/customers/${customerID}`
+        : '/app/settings/billing'
     if (!accountCode)
-      reasons.push(
-        blocker('missing-account', 'Choose a revenue account.', '/admin/globals/billing-settings'),
-      )
-    else if (!references.accounts.has(accountCode))
+      reasons.push(blocker('missing-account', 'Choose a revenue account.', '/app/settings/billing'))
+    else if (tenantID && !references.accounts.has(accountCode))
       reasons.push(
         blocker(
           'invalid-account',
           'The revenue account is not active in the connected Xero organisation.',
-          '/admin/globals/billing-settings',
+          accountRemediationHref,
         ),
       )
     if (!taxType && settings.lineAmountType !== 'NoTax')
-      reasons.push(blocker('missing-tax', 'Choose a tax type.', '/admin/globals/billing-settings'))
-    else if (settings.lineAmountType !== 'NoTax' && !references.taxes.has(taxType))
+      reasons.push(blocker('missing-tax', 'Choose a tax type.', '/app/settings/billing'))
+    else if (tenantID && settings.lineAmountType !== 'NoTax' && !references.taxes.has(taxType))
       reasons.push(
         blocker(
           'invalid-tax',
           'The tax type is not active in the connected Xero organisation.',
-          '/admin/globals/billing-settings',
+          taxRemediationHref,
         ),
       )
-    if (currency && !references.currencies.has(currency))
+    if (tenantID && currency && !references.currencies.has(currency))
       reasons.push(
         blocker(
           'unsupported-currency',

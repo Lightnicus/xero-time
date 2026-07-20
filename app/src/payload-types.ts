@@ -697,7 +697,7 @@ export interface Project {
     | 'ZWG'
     | 'ZWL';
   /**
-   * 10,000 units = 1 currency unit. Example: NZD 150.00 is 1500000.
+   * API and database value stored as an integer in ten-thousandths of a currency unit. The admin editor converts ordinary currency values automatically.
    */
   hourlyRateScaled: number;
   hourlyRateDisplay?: string | null;

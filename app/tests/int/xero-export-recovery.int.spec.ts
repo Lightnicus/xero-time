@@ -183,6 +183,7 @@ describe.sequential('Xero export and webhook recovery', () => {
         name: 'Sales',
         resourceType: 'account',
         status: 'active',
+        type: 'REVENUE',
         xeroId: 'account-200',
       },
       {

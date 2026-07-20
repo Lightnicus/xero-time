@@ -3,6 +3,7 @@
 import { createLocalReq, getPayload, registerFirstUserOperation, type Payload } from 'payload'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
+import { validateXeroBillingDefaults } from '@/lib/billing/default-validation'
 import type { AppSession } from '@/lib/member-app/session'
 import type { XeroAccountingClient } from '@/lib/xero/accounting/client'
 import {
@@ -13,10 +14,7 @@ import {
   searchXeroContacts,
 } from '@/lib/xero/accounting/contacts'
 import { AccountingIntegrationError } from '@/lib/xero/accounting/contracts'
-import {
-  refreshXeroReferenceData,
-  validateXeroBillingDefaults,
-} from '@/lib/xero/accounting/reference-data'
+import { refreshXeroReferenceData } from '@/lib/xero/accounting/reference-data'
 import type { XeroConnection } from '@/payload-types'
 import config from '@/payload.config'
 
@@ -340,10 +338,16 @@ describe.sequential('Xero contacts and reference data', () => {
       ]),
     )
     await expect(
-      validateXeroBillingDefaults(ownerSession.req, '200', 'OUTPUT2'),
+      validateXeroBillingDefaults(ownerSession.req, {
+        accountCode: '200',
+        taxType: 'OUTPUT2',
+      }),
     ).resolves.toBeUndefined()
     await expect(
-      validateXeroBillingDefaults(ownerSession.req, '999', 'OUTPUT2'),
+      validateXeroBillingDefaults(ownerSession.req, {
+        accountCode: '999',
+        taxType: 'OUTPUT2',
+      }),
     ).rejects.toMatchObject({ code: 'invalid-billing-defaults' })
   })
 

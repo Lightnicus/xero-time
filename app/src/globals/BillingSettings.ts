@@ -1,8 +1,9 @@
 import { ownerAdminOrBiller, ownerOrAdmin } from '@/access/roles'
 import { auditGlobalChange } from '@/lib/audit/change-hooks'
+import { validateXeroBillingDefaults } from '@/lib/billing/default-validation'
 import { isRecord, validateWholeNumber } from '@/lib/domain/validation'
 
-import type { GlobalConfig, Validate } from 'payload'
+import type { GlobalBeforeChangeHook, GlobalConfig, Validate } from 'payload'
 
 const allowedLineTemplateTokens = new Set([
   'description',
@@ -46,6 +47,43 @@ const validateMaxWaitInvoices: Validate<number> = (value) =>
 
 const validateMaxWaitLines: Validate<number> = (value) =>
   validateWholeNumber(value, { max: 1_000, min: 1 })
+
+const referenceCode = (value: unknown): string =>
+  typeof value === 'string' ? value.trim().toUpperCase() : ''
+
+/**
+ * Enforce the Xero reference boundary for every writer, including Payload Admin
+ * and direct API calls. Blank defaults remain valid while an organisation is
+ * being connected; billing eligibility reports them as incomplete.
+ */
+export const validateXeroBillingDefaultChange: GlobalBeforeChangeHook = async ({
+  data,
+  originalDoc,
+  req,
+}) => {
+  const previousAccountCode = referenceCode(originalDoc?.defaultRevenueAccountCode)
+  const previousTaxType = referenceCode(originalDoc?.defaultTaxType)
+  const accountCode = referenceCode(
+    Object.prototype.hasOwnProperty.call(data, 'defaultRevenueAccountCode')
+      ? data.defaultRevenueAccountCode
+      : originalDoc?.defaultRevenueAccountCode,
+  )
+  const taxType = referenceCode(
+    Object.prototype.hasOwnProperty.call(data, 'defaultTaxType')
+      ? data.defaultTaxType
+      : originalDoc?.defaultTaxType,
+  )
+  const values: { accountCode?: string; taxType?: string } = {}
+
+  // Payload expands partial global updates before this hook runs, so field
+  // presence cannot tell us what the caller submitted. Validate actual value
+  // changes; the frontend action separately validates every explicit save.
+  if (accountCode !== previousAccountCode) values.accountCode = accountCode
+  if (taxType !== previousTaxType) values.taxType = taxType
+
+  await validateXeroBillingDefaults(req, values)
+  return data
+}
 
 export const BillingSettings: GlobalConfig = {
   slug: 'billing-settings',
@@ -321,6 +359,7 @@ export const BillingSettings: GlobalConfig = {
     },
   ],
   hooks: {
+    beforeChange: [validateXeroBillingDefaultChange],
     afterChange: [
       auditGlobalChange('settings.billing-changed', [
         'acceptingNewExports',

@@ -5,12 +5,21 @@ import { hasActiveRole } from '@/access/roles'
 import { BillingSelectionToolbar } from '@/app/(frontend)/_components/BillingSelectionToolbar'
 import { BILLING_BLOCKER_CODES, type BillingFilter } from '@/lib/billing/contracts'
 import { getBillingEligibility } from '@/lib/billing/eligibility'
+import {
+  billingBlockerActionLabel,
+  billingBlockerLabel,
+  summarizeBillingRemediation,
+} from '@/lib/billing/remediation'
 import { summarizeSelection } from '@/lib/billing/selection'
 import { formatScaledAmount } from '@/lib/domain/money'
 import { formatCalendarDateInTimezone } from '@/lib/domain/validation'
 import { requireAppSession } from '@/lib/member-app/session'
 
-import { allUninvoicedPreviewAction, startBillingPreviewAction } from './actions'
+import {
+  allUninvoicedPreviewAction,
+  refreshBillingReferenceDataAction,
+  startBillingPreviewAction,
+} from './actions'
 
 import type { Metadata } from 'next'
 
@@ -24,6 +33,41 @@ const param = (params: Params, name: string): string =>
 const duration = (seconds: number): string => {
   const minutes = seconds / 60
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+}
+
+const statusNotice = (status: string): { message: string; tone: 'success' | 'warning' } | null => {
+  if (status === 'invalid-selection') {
+    return {
+      message: 'Select at least one eligible entry, or choose all matching.',
+      tone: 'warning',
+    }
+  }
+  if (status === 'references-refreshed') {
+    return {
+      message: 'Xero accounts, tax types, currencies, and invoice permissions were refreshed.',
+      tone: 'success',
+    }
+  }
+  if (status === 'xero-capability-missing') {
+    return {
+      message:
+        'Xero data was refreshed, but this organisation still did not report permission to create draft invoices.',
+      tone: 'warning',
+    }
+  }
+  if (status === 'reference-refresh-failed') {
+    return {
+      message: 'Xero data could not be refreshed. Check the connection and try again.',
+      tone: 'warning',
+    }
+  }
+  if (status) {
+    return {
+      message: 'The billing queue could not be loaded. Narrow the filters and retry.',
+      tone: 'warning',
+    }
+  }
+  return null
 }
 
 const hiddenFilter = (filter: BillingFilter) => (
@@ -58,6 +102,8 @@ export default async function BillingQueuePage({
     userID: param(params, 'userID'),
   }
   const eligibility = await getBillingEligibility(session, filter)
+  const canManageBillingSetup = hasActiveRole(session.user, ['owner', 'admin'])
+  const remediation = summarizeBillingRemediation(eligibility.blocked)
   const [customers, projects, users] = await Promise.all([
     session.payload.find({
       collection: 'customers',
@@ -111,6 +157,7 @@ export default async function BillingQueuePage({
     timezone: session.user.timezone,
     userID: filter.userID || undefined,
   } satisfies BillingFilter
+  const notice = statusNotice(param(params, 'status'))
 
   return (
     <div className="wide-page page-stack">
@@ -128,18 +175,75 @@ export default async function BillingQueuePage({
         </Link>
       </section>
 
-      {params.status && (
-        <div className="notice notice-warning" role="alert">
-          {params.status === 'invalid-selection'
-            ? 'Select at least one eligible entry, or choose all matching.'
-            : 'The billing queue could not be loaded. Narrow the filters and retry.'}
+      {notice && (
+        <div
+          className={`notice notice-${notice.tone}`}
+          role={notice.tone === 'success' ? 'status' : 'alert'}
+        >
+          {notice.message}
         </div>
       )}
       {eligibility.settingsDocument.acceptingNewExports !== true && (
         <div className="notice notice-warning">
-          New exports are paused by the owner. Preview remains available; confirmation will stay
-          disabled until the switch is enabled in Billing Settings.
+          New Xero exports are currently paused. Invoice previews remain available, but confirmation
+          is disabled.{' '}
+          {canManageBillingSetup ? (
+            <Link href="/admin/globals/billing-settings">Manage the export switch</Link>
+          ) : (
+            'Ask an owner or administrator to enable new exports.'
+          )}
         </div>
+      )}
+
+      {remediation.setupIssues.length > 0 && (
+        <section
+          aria-labelledby="billing-setup-heading"
+          className="panel page-stack billing-setup-panel"
+        >
+          <div>
+            <p className="eyebrow">Action required</p>
+            <h2 id="billing-setup-heading">Finish billing setup</h2>
+            <p>
+              These organisation-level settings block invoice previews. Resolve each item once; the
+              affected time entries do not need to be edited individually.
+            </p>
+          </div>
+          <ul className="billing-setup-list">
+            {remediation.setupIssues.map((issue) => (
+              <li className="billing-setup-item" key={issue.code}>
+                <div>
+                  <h3>{issue.title}</h3>
+                  <p>{issue.description}</p>
+                  <small>
+                    Blocking {issue.entryCount} {issue.entryCount === 1 ? 'entry' : 'entries'}
+                  </small>
+                </div>
+                {canManageBillingSetup && issue.action === 'refresh-xero' && (
+                  <form action={refreshBillingReferenceDataAction}>
+                    <button className="button button-secondary" type="submit">
+                      {issue.actionLabel}
+                    </button>
+                  </form>
+                )}
+                {canManageBillingSetup && issue.action === 'billing-settings' && (
+                  <Link className="button button-secondary" href="/app/settings/billing">
+                    {issue.actionLabel}
+                  </Link>
+                )}
+                {canManageBillingSetup && issue.action === 'xero-settings' && (
+                  <Link className="button button-secondary" href="/app/settings/xero">
+                    {issue.actionLabel}
+                  </Link>
+                )}
+              </li>
+            ))}
+          </ul>
+          {!canManageBillingSetup && (
+            <div className="notice notice-warning">
+              Ask an owner or administrator to complete these billing setup steps.
+            </div>
+          )}
+        </section>
       )}
 
       <section className="panel filter-panel" aria-label="Billing filters">
@@ -201,7 +305,7 @@ export default async function BillingQueuePage({
                 <option value="">All rows</option>
                 {BILLING_BLOCKER_CODES.map((code) => (
                   <option key={code} value={code}>
-                    {code}
+                    {billingBlockerLabel(code)}
                   </option>
                 ))}
               </select>
@@ -359,7 +463,11 @@ export default async function BillingQueuePage({
             <span>Invoice date</span>
             <input defaultValue={invoiceDate} name="invoiceDate" required type="date" />
           </label>
-          <button className="button button-secondary" type="submit">
+          <button
+            className="button button-secondary"
+            disabled={eligibility.eligible.length === 0}
+            type="submit"
+          >
             Preview all uninvoiced
           </button>
         </form>
@@ -367,15 +475,13 @@ export default async function BillingQueuePage({
 
       <section className="panel page-stack">
         <div>
-          <h2>Blocked entries</h2>
-          <p>
-            Blocked rows are retained with explicit remediation; they are never silently selected.
-          </p>
+          <h2>Entry-specific blockers</h2>
+          <p>These rows need individual attention; they are never silently selected.</p>
         </div>
-        {eligibility.blocked.length === 0 ? (
-          <p className="muted-copy">No blocked rows match these filters.</p>
+        {remediation.entrySpecific.length === 0 ? (
+          <p className="muted-copy">No entry-specific blockers match these filters.</p>
         ) : (
-          eligibility.blocked.slice(0, 500).map((entry) => (
+          remediation.entrySpecific.slice(0, 500).map((entry) => (
             <article className="billing-blocker-row" key={entry.entryID}>
               <div>
                 <strong>
@@ -384,10 +490,19 @@ export default async function BillingQueuePage({
                 <p>{entry.description}</p>
               </div>
               <ul>
-                {entry.blockers.map((item) => (
-                  <li key={item.code}>
-                    <strong>{item.code}:</strong> {item.message}{' '}
-                    {item.remediationHref && <Link href={item.remediationHref}>Resolve</Link>}
+                {entry.blockers.map((item, index) => (
+                  <li key={`${item.code}:${item.remediationHref ?? ''}:${index}`}>
+                    <strong>{billingBlockerLabel(item.code)}:</strong> {item.message}{' '}
+                    {item.remediationHref &&
+                      (canManageBillingSetup ||
+                      (!item.remediationHref.startsWith('/admin') &&
+                        !item.remediationHref.startsWith('/app/settings/')) ? (
+                        <Link href={item.remediationHref}>
+                          {billingBlockerActionLabel(item.code)}
+                        </Link>
+                      ) : (
+                        <span className="muted-copy">Ask an owner or administrator.</span>
+                      ))}
                   </li>
                 ))}
               </ul>

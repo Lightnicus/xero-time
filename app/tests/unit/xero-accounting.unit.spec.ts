@@ -15,6 +15,7 @@ import {
   hashOpaqueValue,
   opaqueHashMatches,
 } from '@/lib/xero/accounting/crypto'
+import { connectedSettingsURL } from '@/lib/xero/accounting/route-helpers'
 import { validateAccountingTokenClaims } from '@/lib/xero/accounting/token'
 
 import type { JWTPayload } from 'jose'
@@ -49,6 +50,29 @@ const connectionResponse = [
 const connectionFixture = connectionResponse[0]!
 
 describe('Xero accounting security primitives', () => {
+  it('distinguishes a ready connection from a committed connection whose references failed', () => {
+    const ready = connectedSettingsURL({ capabilityAvailable: true })
+    expect(ready.pathname).toBe('/app/settings/xero')
+    expect(Object.fromEntries(ready.searchParams)).toEqual({
+      capability: 'yes',
+      connected: '1',
+      references: '1',
+    })
+
+    const incapable = connectedSettingsURL({ capabilityAvailable: false })
+    expect(Object.fromEntries(incapable.searchParams)).toEqual({
+      capability: 'no',
+      connected: '1',
+      references: '1',
+    })
+
+    const incomplete = connectedSettingsURL({ status: 'failed' })
+    expect(Object.fromEntries(incomplete.searchParams)).toEqual({
+      connected: '1',
+      references: 'failed',
+    })
+  })
+
   it('derives deterministic, purpose-separated keys from the deployment root secret', () => {
     const configurationKey = deriveEncryptionKey(
       'deployment-root-secret-for-tests',

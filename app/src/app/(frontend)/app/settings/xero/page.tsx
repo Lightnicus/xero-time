@@ -40,9 +40,13 @@ const errorMessage = (code: string): string | null => {
       'The accounting app returned identity permissions. Check that the dedicated accounting client is configured.',
     'invalid-access-token': 'Xero returned an accounting token that could not be verified.',
     'invalid-callback': 'Xero returned an invalid callback. Start the connection again.',
+    'invalid-organisation-response':
+      'Xero did not return valid organisation capability data. Start the connection again.',
     'invalid-scopes': 'Xero did not grant exactly the required accounting permissions.',
     'invalid-state': 'The Xero connection attempt is invalid or expired. Start again.',
     'no-organisation': 'No Xero organisation was authorized.',
+    'missing-create-draft-capability':
+      "The selected Xero organisation did not allow this connection to create draft invoices. Check the authorizing user's invoice permissions in Xero, then reconnect.",
     'not-configured': 'The Xero accounting integration is not configured.',
     'not-connected': 'There is no active Xero accounting connection.',
     'operation-failed': 'The accounting operation could not be completed.',
@@ -104,9 +108,27 @@ export default async function XeroAccountingPage({
           {error}
         </div>
       )}
-      {params.connected === '1' && (
+      {params.connected === '1' && params.references === '1' && params.capability === 'yes' && (
+        <div aria-live="polite" className="notice notice-success" role="status">
+          Xero organisation connected and billing reference data is ready.
+        </div>
+      )}
+      {params.connected === '1' && !params.references && (
         <div aria-live="polite" className="notice notice-success" role="status">
           Xero organisation connected and pinned.
+        </div>
+      )}
+      {params.connected === '1' && params.references === 'failed' && (
+        <div aria-live="polite" className="notice notice-warning" role="alert">
+          Xero is connected, but its accounts, tax rates, currencies, and invoice capability could
+          not be loaded. <Link href="#reference-data">Refresh Xero reference data</Link> before
+          exporting invoices.
+        </div>
+      )}
+      {params.connected === '1' && params.references === '1' && params.capability !== 'yes' && (
+        <div aria-live="polite" className="notice notice-warning" role="alert">
+          Xero is connected, but the organisation did not report permission to create draft
+          invoices. Check the authorizing user&apos;s invoice permissions in Xero, then reconnect.
         </div>
       )}
       {params.configured === '1' && (
@@ -119,7 +141,7 @@ export default async function XeroAccountingPage({
           Xero connection checked.
         </div>
       )}
-      {params.references === '1' && (
+      {params.connected !== '1' && params.references === '1' && (
         <div
           aria-live="polite"
           className={
@@ -234,7 +256,11 @@ export default async function XeroAccountingPage({
                       Check connection
                     </button>
                   </form>
-                  <form action="/api/integrations/xero/accounting/reference-data" method="post">
+                  <form
+                    action="/api/integrations/xero/accounting/reference-data"
+                    id="reference-data"
+                    method="post"
+                  >
                     <button className="button button-secondary" type="submit">
                       Refresh reference data
                     </button>

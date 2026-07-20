@@ -17,6 +17,17 @@ export const settingsURL = (params: Record<string, string> = {}): URL => {
   return url
 }
 
+export const connectedSettingsURL = (
+  referenceData: { capabilityAvailable: boolean } | { status: 'failed' },
+): URL =>
+  'status' in referenceData
+    ? settingsURL({ connected: '1', references: referenceData.status })
+    : settingsURL({
+        capability: referenceData.capabilityAvailable ? 'yes' : 'no',
+        connected: '1',
+        references: '1',
+      })
+
 export const selectionURL = (flowID: string): URL => {
   const url = new URL('/app/settings/xero/select', environment.serverURL)
   url.searchParams.set('flow', flowID)

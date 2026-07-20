@@ -1391,6 +1391,41 @@ textarea:focus-visible {
   margin: 0;
 }
 
+.billing-setup-panel {
+  border-color: #e9d39f;
+}
+
+.billing-setup-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.billing-setup-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.billing-setup-item h3,
+.billing-setup-item p {
+  margin: 0;
+}
+
+.billing-setup-item p,
+.billing-setup-item small {
+  color: var(--ink-soft);
+}
+
+.billing-setup-item small {
+  display: block;
+  margin-top: 0.35rem;
+}
+
 .invoice-header-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1518,6 +1553,7 @@ textarea:focus-visible {
   }
 
   .billing-blocker-row,
+  .billing-setup-item,
   .invoice-header-grid,
   .selection-summary-grid {
     grid-template-columns: 1fr;

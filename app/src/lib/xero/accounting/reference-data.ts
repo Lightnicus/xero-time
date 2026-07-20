@@ -11,7 +11,6 @@ import { AccountingIntegrationError } from './contracts'
 import { getValidAccountingAccessToken, resolveAccountingRuntime } from './service'
 
 import type { XeroAccountingClient } from './client'
-import type { PayloadRequest } from 'payload'
 
 type ReferenceResource = {
   code?: string
@@ -308,65 +307,5 @@ const refreshWithClient = async (
       (item) => item.resourceType === 'organisation-action' && item.code === 'CreateDraftInvoice',
     ),
     resourceCount: resources.length,
-  }
-}
-
-export async function validateXeroBillingDefaults(
-  req: PayloadRequest,
-  accountCode: string,
-  taxType: string,
-): Promise<void> {
-  const connection = await req.payload.find({
-    collection: 'xero-connections',
-    depth: 0,
-    limit: 1,
-    overrideAccess: true,
-    req,
-    where: {
-      and: [
-        { singletonKey: { equals: 'business-accounting' } },
-        { status: { equals: 'connected' } },
-      ],
-    },
-  })
-  const tenantID = connection.docs[0]?.tenantId
-  if (!tenantID) return
-  const [account, tax] = await Promise.all([
-    req.payload.find({
-      collection: 'xero-reference-data',
-      depth: 0,
-      limit: 1,
-      overrideAccess: true,
-      req,
-      where: {
-        and: [
-          { sourceTenantId: { equals: tenantID } },
-          { resourceType: { equals: 'account' } },
-          { code: { equals: accountCode } },
-          { status: { equals: 'active' } },
-        ],
-      },
-    }),
-    req.payload.find({
-      collection: 'xero-reference-data',
-      depth: 0,
-      limit: 1,
-      overrideAccess: true,
-      req,
-      where: {
-        and: [
-          { sourceTenantId: { equals: tenantID } },
-          { resourceType: { equals: 'tax-rate' } },
-          { code: { equals: taxType } },
-          { status: { equals: 'active' } },
-        ],
-      },
-    }),
-  ])
-  if (!account.docs[0] || !tax.docs[0]) {
-    throw new AccountingIntegrationError(
-      'invalid-billing-defaults',
-      'Select an active revenue account and tax rate from the connected Xero organisation.',
-    )
   }
 }

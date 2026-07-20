@@ -1,7 +1,7 @@
 import { test, expect, Page } from '@playwright/test'
 
 import { login } from '../helpers/login'
-import { seedTestUser, cleanupTestUser, testUser } from '../helpers/seedUser'
+import { adminRateProject, seedTestUser, cleanupTestUser, testUser } from '../helpers/seedUser'
 
 test.describe('Admin Panel', () => {
   let page: Page
@@ -50,6 +50,40 @@ test.describe('Admin Panel', () => {
     await expect(page).toHaveURL(/\/admin\/collections\/users\/[a-zA-Z0-9-_]+/)
     const editViewArtifact = page.locator('input[name="email"]')
     await expect(editViewArtifact).toBeVisible()
+  })
+
+  test('edits and lists hourly rates as ordinary currency values', async () => {
+    await page.goto(`${serverURL}/admin/collections/projects`)
+    const projectRow = page.locator('tr', { hasText: adminRateProject.name })
+
+    await expect(projectRow).toContainText('NZD 150.00')
+    await expect(projectRow).not.toContainText('1500000')
+    await projectRow.getByRole('link', { name: adminRateProject.code }).click()
+    await expect(page).toHaveURL(/\/admin\/collections\/projects\/[^/]+$/)
+
+    const hourlyRate = page.getByLabel('Hourly rate')
+    await expect(hourlyRate).toHaveValue('150.00')
+    await expect(page.locator('body')).not.toContainText('Hourly Rate Scaled')
+    await expect(page.locator('body')).not.toContainText('10,000 units')
+
+    await hourlyRate.fill('175.12565')
+    await page.locator('#action-save').click()
+    await expect(
+      page.getByText('Enter a non-negative hourly rate with no more than four decimal places.'),
+    ).toBeVisible()
+
+    await hourlyRate.fill('175.1256')
+    const saveResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'PATCH' && /\/api\/projects\//.test(response.url()),
+    )
+    await page.locator('#action-save').click()
+    const storedProjectResponse = await saveResponse
+    expect(storedProjectResponse.ok()).toBe(true)
+    expect((await storedProjectResponse.json()).doc.hourlyRateScaled).toBe(1_751_256)
+
+    await page.reload()
+    await expect(page.getByLabel('Hourly rate')).toHaveValue('175.1256')
   })
 
   test('shows the private Xero accounting setup screen without exposing credentials', async () => {

@@ -7,6 +7,7 @@
 | Rates and financial snapshots        | No                    | Read in billing    | Manage                       | Manage                         | Resolve/snapshot           |
 | Customers/projects                   | Active directory only | Read               | Manage/archive/map           | Manage/archive/map             | Mapping refresh only       |
 | Billing queue/preview/export         | No                    | Yes                | Yes                          | Yes                            | Execute persisted jobs     |
+| Xero invoice defaults                | No                    | Read setup status  | Select and update            | Select and update              | No                         |
 | Release/rebill                       | No                    | No                 | Verified deleted/voided only | Verified deleted/voided only   | No autonomous release      |
 | Payload Admin                        | No                    | No                 | Yes                          | Yes                            | N/A                        |
 | Invitations/users                    | No                    | No                 | Non-owner roles              | All roles and owner transition | Cleanup only               |

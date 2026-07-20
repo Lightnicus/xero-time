@@ -20,6 +20,7 @@ import { createSelectionToken, readSelectionToken } from '@/lib/billing/selectio
 import { isValidCalendarDate } from '@/lib/domain/validation'
 import { requireAppSession } from '@/lib/member-app/session'
 import { enforceRateLimit, rateLimitKey } from '@/lib/security/rate-limit'
+import { refreshXeroReferenceData } from '@/lib/xero/accounting/reference-data'
 import { prepareXeroQueue } from '@/lib/xero/export/maintenance'
 
 const value = (formData: FormData, name: string): string => {
@@ -93,6 +94,21 @@ export async function allUninvoicedPreviewAction(formData: FormData): Promise<vo
     },
   })
   redirect(`/app/billing/preview?selection=${encodeURIComponent(token)}`)
+}
+
+export async function refreshBillingReferenceDataAction(): Promise<void> {
+  const session = await commandSession(['owner', 'admin'])
+  let status = 'reference-refresh-failed'
+  try {
+    const result = await refreshXeroReferenceData(session)
+    status = result.capabilityAvailable ? 'references-refreshed' : 'xero-capability-missing'
+  } catch {
+    // The status message on the billing page gives the user a safe retry path.
+  }
+  revalidatePath('/app/billing')
+  revalidatePath('/app/settings/billing')
+  revalidatePath('/app/settings/xero')
+  redirect(`/app/billing?status=${status}`)
 }
 
 export async function confirmBillingExportAction(formData: FormData): Promise<void> {

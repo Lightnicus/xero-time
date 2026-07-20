@@ -5,6 +5,7 @@ import { getAppSessionForOAuthCallback } from '@/lib/member-app/session'
 import { refreshXeroReferenceData } from '@/lib/xero/accounting/reference-data'
 import {
   clearAccountingFlowCookie,
+  connectedSettingsURL,
   isAllowedAccountingAdministrator,
   safeErrorCode,
   selectionURL,
@@ -50,13 +51,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       return NextResponse.redirect(selectionURL(result.flowID), 303)
     }
 
+    let completionURL: URL
     try {
-      await refreshXeroReferenceData(session)
+      completionURL = connectedSettingsURL(await refreshXeroReferenceData(session))
     } catch {
-      // The grant is already committed; the scheduled maintenance job safely retries reference data.
+      // The validated grant is already committed. Report the partial setup so an
+      // administrator can retry instead of presenting the connection as ready.
+      completionURL = connectedSettingsURL({ status: 'failed' })
     }
 
-    const response = NextResponse.redirect(settingsURL({ connected: '1' }), 303)
+    const response = NextResponse.redirect(completionURL, 303)
     clearAccountingFlowCookie(response)
     return response
   } catch (error) {
