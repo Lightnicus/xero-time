@@ -1,0 +1,4 @@
+interface:
+  display_name: "React useEffect Guide"
+  short_description: "Guide for correct and efficient React useEffect code"
+  default_prompt: "Review this useEffect code for correctness and efficiency"
