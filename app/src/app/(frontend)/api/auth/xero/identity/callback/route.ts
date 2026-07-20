@@ -3,7 +3,7 @@ import { after } from 'next/server'
 import { getPayload } from 'payload'
 
 import { environment } from '@/lib/env'
-import { getAppSession } from '@/lib/member-app/session'
+import { getAppSessionForOAuthCallback } from '@/lib/member-app/session'
 import { enforceRateLimit, rateLimitKey } from '@/lib/security/rate-limit'
 import { enqueueStaleAccountingHealthCheck } from '@/lib/xero/accounting/health-scheduling'
 import {
@@ -23,7 +23,7 @@ export const runtime = 'nodejs'
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const payload = await getPayload({ config })
-  const currentSession = await getAppSession()
+  const currentSession = await getAppSessionForOAuthCallback(request.headers)
   const incomingURL = new URL(request.url)
   const state = incomingURL.searchParams.get('state') ?? ''
   const providerError = incomingURL.searchParams.get('error')

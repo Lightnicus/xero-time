@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
 
 import { environment } from '@/lib/env'
-import { getAppSession } from '@/lib/member-app/session'
+import { getAppSessionForOAuthCallback } from '@/lib/member-app/session'
 import { refreshXeroReferenceData } from '@/lib/xero/accounting/reference-data'
 import {
   clearAccountingFlowCookie,
@@ -19,7 +19,7 @@ import {
 export const runtime = 'nodejs'
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const session = await getAppSession()
+  const session = await getAppSessionForOAuthCallback(request.headers)
   if (!isAllowedAccountingAdministrator(session)) {
     return NextResponse.redirect(
       new URL('/login?next=/app/settings/xero', environment.serverURL),

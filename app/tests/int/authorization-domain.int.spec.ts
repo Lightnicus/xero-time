@@ -3,6 +3,7 @@
 import {
   canAccessAdmin,
   createLocalReq,
+  generatePayloadCookie,
   getPayload,
   registerFirstUserOperation,
   type Payload,
@@ -19,7 +20,7 @@ import {
   issueInvitation,
   revokeInvitation,
 } from '@/lib/account-lifecycle/service'
-import type { AppSession } from '@/lib/member-app/session'
+import { getAppSessionForOAuthCallback, type AppSession } from '@/lib/member-app/session'
 import { requireMongoModel } from '@/lib/payload/mongo'
 import { withPayloadTransaction } from '@/lib/payload/withTransaction'
 import {
@@ -429,6 +430,45 @@ describe.sequential('Payload authorization and domain integration', () => {
       timezone: 'Pacific/Auckland',
     })
     expect(owner).not.toHaveProperty('bootstrapMarker')
+  })
+
+  it('authenticates a state-protected OAuth callback from a cross-site session cookie', async () => {
+    await expect(getAppSessionForOAuthCallback(new Headers())).resolves.toBeNull()
+    await expect(
+      getAppSessionForOAuthCallback(
+        new Headers({
+          Cookie: `${payload.config.cookiePrefix}-token=%00%0Dmalformed`,
+        }),
+      ),
+    ).resolves.toBeNull()
+
+    const login = await payload.login({
+      collection: 'users',
+      data: { email: OWNER_EMAIL, password: PASSWORD },
+    })
+    if (!login.token) throw new Error('Payload did not return an owner session token.')
+
+    const authConfig = payload.collections.users.config.auth
+    if (!authConfig) throw new Error('The users collection is not configured for authentication.')
+    const cookie = generatePayloadCookie({
+      collectionAuthConfig: authConfig,
+      cookiePrefix: payload.config.cookiePrefix,
+      returnCookieAsObject: true,
+      token: login.token,
+    })
+    const crossSiteHeaders = new Headers({
+      Cookie: `${cookie.name}=${cookie.value}`,
+      'Sec-Fetch-Site': 'cross-site',
+    })
+
+    await expect(payload.auth({ headers: crossSiteHeaders })).resolves.toMatchObject({ user: null })
+    const callbackHeaders = new Headers(crossSiteHeaders)
+    callbackHeaders.set('Authorization', 'JWT untrusted-caller-value')
+    callbackHeaders.set('Origin', 'https://untrusted.example')
+
+    await expect(getAppSessionForOAuthCallback(callbackHeaders)).resolves.toMatchObject({
+      user: { id: owner.id },
+    })
   })
 
   it('persists the hidden marker, atomic lock, and unique marker index', async () => {
