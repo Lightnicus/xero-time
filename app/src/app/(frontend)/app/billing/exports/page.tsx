@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { hasActiveRole } from '@/access/roles'
+import { exportStateLabel } from '@/lib/billing/export-presentation'
 import { formatScaledAmount } from '@/lib/domain/money'
 import { relationshipID } from '@/lib/domain/validation'
 import { requireAppSession } from '@/lib/member-app/session'
@@ -127,7 +128,7 @@ export default async function ExportHistoryPage({
                     <td>{customerName ?? `Customer ${customerID ?? 'unavailable'}`}</td>
                     <td>
                       <span className={`status-pill status-export-${item.state}`}>
-                        {item.state}
+                        {exportStateLabel(item.state)}
                       </span>
                       {item.lastErrorMessage && <small>{item.lastErrorMessage}</small>}
                     </td>

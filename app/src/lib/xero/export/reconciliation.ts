@@ -15,7 +15,13 @@ import {
 } from '@/lib/xero/accounting/service'
 import type { InvoiceExport, InvoiceExportEntry, XeroAttempt } from '@/payload-types'
 
-import { finalizeInvoiceSuccess, materiallyMatches, parseRemoteInvoices } from './processor'
+import {
+  finalizeInvoiceSuccess,
+  materiallyMatches,
+  parseRemoteInvoices,
+  remoteDerivedValuesHash,
+  remoteDerivedValuesMatchAttempt,
+} from './processor'
 
 import type { Payload, PayloadRequest } from 'payload'
 
@@ -206,6 +212,7 @@ export async function fetchRemoteInvoiceForExport(
     token.accessToken,
     token.connection.tenantId,
     `Invoices/${document.xeroInvoiceId}`,
+    { unitdp: '4' },
   )
   const invoices = parseRemoteInvoices(response.data)
   const remote = invoices.find((invoice) => invoice.invoiceID === document.xeroInvoiceId)
@@ -244,7 +251,43 @@ export async function refreshInvoiceExportStatus(
     overrides.token,
   )
   const allocations = await loadAllocations(payload, session.req, exportID)
-  const matches = materiallyMatches(document, remote, allocations)
+  const attemptID = relation(document.currentAttempt)
+  const attempt = attemptID
+    ? await payload.findByID({
+        collection: 'xero-attempts',
+        depth: 0,
+        id: attemptID,
+        overrideAccess: true,
+        req: session.req,
+        showHiddenFields: true,
+      })
+    : null
+  const inputValuesMatch = materiallyMatches(document, remote, allocations)
+  const derivedValuesMatch = remoteDerivedValuesMatchAttempt(attempt, remote)
+  const matches = inputValuesMatch && derivedValuesMatch
+  const currentDerivedValuesHash = remoteDerivedValuesHash(remote)
+  const attemptMetadata =
+    attempt && isRecord(attempt.safeResponseMetadata) ? attempt.safeResponseMetadata : {}
+  const derivedValuesBaselineCreated = Boolean(
+    matches &&
+    attempt?.result === 'succeeded' &&
+    currentDerivedValuesHash &&
+    typeof attemptMetadata.remoteDerivedValuesHash !== 'string',
+  )
+  if (derivedValuesBaselineCreated && attempt && currentDerivedValuesHash) {
+    await payload.update({
+      collection: 'xero-attempts',
+      data: {
+        safeResponseMetadata: {
+          ...attemptMetadata,
+          remoteDerivedValuesHash: currentDerivedValuesHash,
+        },
+      },
+      id: attempt.id,
+      overrideAccess: true,
+      req: session.req,
+    })
+  }
   const actionRequired = !matches || remote.status === 'DELETED' || remote.status === 'VOIDED'
   const nextState =
     document.state === 'released'
@@ -289,7 +332,14 @@ export async function refreshInvoiceExportStatus(
       eventType: 'export.reconciled',
       exportId: exportID,
       machineActor: 'xero-status-refresh',
-      metadata: { matches, remoteStatus: remote.status, state: nextState },
+      metadata: {
+        derivedValuesBaselineCreated,
+        derivedValuesMatch,
+        inputValuesMatch,
+        matches,
+        remoteStatus: remote.status,
+        state: nextState,
+      },
       targetCollection: 'invoice-exports',
       targetId: exportID,
       xeroInvoiceId: remote.invoiceID,
@@ -395,8 +445,10 @@ export async function reconcileInvoiceExport(
           token.accessToken,
           token.connection.tenantId,
           `Invoices/${document.xeroInvoiceId}`,
+          { unitdp: '4' },
         )
       : await client.accountingGet(token.accessToken, token.connection.tenantId, 'Invoices', {
+          unitdp: '4',
           where: `Reference=="${document.applicationReference.replaceAll('"', '\\"')}"`,
         })
     const remoteInvoices = parseRemoteInvoices(response.data)
@@ -424,7 +476,10 @@ export async function reconcileInvoiceExport(
     }
     const remote = invoices[0]
     if (remote) {
-      if (!materiallyMatches(document, remote, allocations)) {
+      if (
+        !materiallyMatches(document, remote, allocations) ||
+        !remoteDerivedValuesMatchAttempt(attempt, remote)
+      ) {
         await markManualReview(
           payload,
           req,

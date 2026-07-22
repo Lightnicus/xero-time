@@ -4,6 +4,7 @@ import { notFound, redirect } from 'next/navigation'
 import { hasActiveRole } from '@/access/roles'
 import { ExportStatusPoller } from '@/app/(frontend)/_components/ExportStatusPoller'
 import { exportDetailActionAvailability } from '@/lib/billing/export-detail'
+import { exportStateLabel, xeroInvoiceStatusLabel } from '@/lib/billing/export-presentation'
 import { normalizeBillingFilter } from '@/lib/billing/selection'
 import { createSelectionToken } from '@/lib/billing/selection-token'
 import { formatScaledAmount } from '@/lib/domain/money'
@@ -102,7 +103,9 @@ export default async function InvoiceExportDetailPage({
           <h1>{document.applicationReference}</h1>
           <p>Review what was sent to Xero, its current status, and any action needed.</p>
         </div>
-        <span className={`status-pill status-export-${document.state}`}>{document.state}</span>
+        <span className={`status-pill status-export-${document.state}`}>
+          {exportStateLabel(document.state)}
+        </span>
       </section>
       {commandStatus && (
         <div
@@ -135,8 +138,8 @@ export default async function InvoiceExportDetailPage({
 
       <section className="summary-grid">
         <article className="summary-card">
-          <span>Remote status</span>
-          <strong>{document.remoteStatus ?? 'Not yet known'}</strong>
+          <span>Xero status</span>
+          <strong>{xeroInvoiceStatusLabel(document.remoteStatus)}</strong>
           <small>
             {document.lastReconciledAt
               ? `Checked ${new Date(document.lastReconciledAt).toLocaleString('en-NZ')}`

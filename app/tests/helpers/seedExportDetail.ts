@@ -11,6 +11,7 @@ export type ExportDetailFixtureRecord = {
 }
 
 export type ExportDetailFixture = {
+  completed: ExportDetailFixtureRecord
   manualReview: ExportDetailFixtureRecord
   reconciling: ExportDetailFixtureRecord
   releaseable: ExportDetailFixtureRecord
@@ -22,7 +23,7 @@ type ExportDetailScenario = {
   lastErrorCode?: string
   lastErrorMessage?: string
   reference: string
-  remoteStatus?: 'DELETED' | 'DRAFT'
+  remoteStatus?: 'AUTHORISED' | 'DELETED' | 'DRAFT'
   state: 'action-required' | 'manual-review' | 'reconciling' | 'succeeded'
   xeroInvoiceId?: string
   xeroInvoiceNumber?: string
@@ -37,6 +38,13 @@ const fixtureScenarios = [
     state: 'succeeded',
     xeroInvoiceId: '11111111-aaaa-4111-8111-111111111111',
     xeroInvoiceNumber: 'E2E-DRAFT-001',
+  },
+  {
+    reference: 'E2E-DETAIL-COMPLETED',
+    remoteStatus: 'AUTHORISED',
+    state: 'succeeded',
+    xeroInvoiceId: '66666666-ffff-4666-8666-666666666666',
+    xeroInvoiceNumber: 'E2E-APPROVED-001',
   },
   {
     lastErrorCode: 'material-response-mismatch',
@@ -332,12 +340,13 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
   }
 
   const succeeded = await createExport(fixtureScenarios[0], timeEntries[0]!)
-  const manualReview = await createExport(fixtureScenarios[1], timeEntries[1]!)
-  const reconciling = await createExport(fixtureScenarios[2], timeEntries[2]!)
-  const releaseable = await createExport(fixtureScenarios[3], timeEntries[3]!)
-  const replacement = await createExport(fixtureScenarios[4], timeEntries[4]!)
+  const completed = await createExport(fixtureScenarios[1], timeEntries[1]!)
+  const manualReview = await createExport(fixtureScenarios[2], timeEntries[2]!)
+  const reconciling = await createExport(fixtureScenarios[3], timeEntries[3]!)
+  const releaseable = await createExport(fixtureScenarios[4], timeEntries[4]!)
+  const replacement = await createExport(fixtureScenarios[5], timeEntries[5]!)
 
-  return { manualReview, reconciling, releaseable, replacement, succeeded }
+  return { completed, manualReview, reconciling, releaseable, replacement, succeeded }
 }
 
 /** Removes the isolated export-detail fixture and any browser-test side effects. */

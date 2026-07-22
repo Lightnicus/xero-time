@@ -31,6 +31,7 @@ export type XeroAccountingClient = {
     path: string,
     body: unknown,
     idempotencyKey: string,
+    parameters?: Record<string, string>,
   ): Promise<XeroAPIResponse>
   deleteConnection(accessToken: string, connectionID: string): Promise<void>
   exchangeCode(code: string): Promise<XeroTokenSet>
@@ -144,7 +145,7 @@ export function createXeroAccountingClient(
       }
     },
 
-    async accountingPost(accessToken, tenantID, path, body, idempotencyKey) {
+    async accountingPost(accessToken, tenantID, path, body, idempotencyKey, parameters = {}) {
       if (
         !/^[A-Za-z][A-Za-z0-9/-]{0,100}$/.test(path) ||
         !/^[A-Za-z0-9._:-]{1,128}$/.test(idempotencyKey)
@@ -154,21 +155,23 @@ export function createXeroAccountingClient(
           'The Xero accounting request is invalid.',
         )
       }
-      const response = await request(
-        'accounting-post',
-        new URL(path, XERO_ACCOUNTING_API_URL).toString(),
-        {
-          body: JSON.stringify(body),
-          headers: {
-            Accept: 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-            'Idempotency-Key': idempotencyKey,
-            'xero-tenant-id': tenantID,
-          },
-          method: 'POST',
+      const url = new URL(path, XERO_ACCOUNTING_API_URL)
+      for (const [key, value] of Object.entries(parameters)) {
+        if (/^[A-Za-z][A-Za-z0-9]*$/.test(key) && value.length <= 1_000) {
+          url.searchParams.set(key, value)
+        }
+      }
+      const response = await request('accounting-post', url.toString(), {
+        body: JSON.stringify(body),
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+          'xero-tenant-id': tenantID,
         },
-      )
+        method: 'POST',
+      })
       const remaining = Number(response.headers.get('x-rate-limit-remaining'))
       return {
         correlationID: response.headers.get('xero-correlation-id') ?? undefined,

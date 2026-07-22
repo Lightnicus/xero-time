@@ -12,9 +12,14 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { deleteDraftInvoiceAndRelease, releaseInvoiceExport } from '@/lib/billing/export-actions'
 import { confirmBillingPreview, createBillingPreview } from '@/lib/billing/reservation'
 import { normalizeBillingFilter } from '@/lib/billing/selection'
+import { isRecord, relationshipID } from '@/lib/domain/validation'
 import type { AppSession } from '@/lib/member-app/session'
 import { prepareXeroQueue } from '@/lib/xero/export/maintenance'
-import { processInvoiceExport } from '@/lib/xero/export/processor'
+import {
+  parseRemoteInvoices,
+  processInvoiceExport,
+  remoteDerivedValuesHash,
+} from '@/lib/xero/export/processor'
 import {
   fetchRemoteInvoiceForExport,
   reconcileInvoiceExport,
@@ -378,6 +383,122 @@ describe.sequential('Xero export and webhook recovery', () => {
     expect(fake.requests.filter((request) => request.operation === 'post')).toHaveLength(1)
     succeededExportID = reserved.exportID
     succeededInvoiceID = exportDocument.xeroInvoiceId as string
+  })
+
+  it('keeps an authorised and sent invoice succeeded after refresh', async () => {
+    const draft = await createSucceededDraft(
+      'Refresh an authorised and sent invoice',
+      'EFEFEFEF-EFEF-4FEF-8FEF-EFEFEFEFEFEF',
+      390,
+    )
+    const invoice = draft.fake.invoice(draft.invoiceID)
+    if (!invoice) throw new Error('The fake Xero draft was not found.')
+    draft.fake.setInvoice({ ...invoice, SentToContact: true, Status: 'AUTHORISED' })
+
+    await expect(
+      refreshInvoiceExportStatus(ownerSession.req, draft.exportID, {
+        client: draft.fake.client(),
+        token: token(),
+      }),
+    ).resolves.toEqual({ remoteStatus: 'AUTHORISED', state: 'succeeded' })
+    await expect(
+      payload.findByID({
+        collection: 'invoice-exports',
+        depth: 0,
+        id: draft.exportID,
+        overrideAccess: true,
+      }),
+    ).resolves.toMatchObject({
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      remoteStatus: 'AUTHORISED',
+      state: 'succeeded',
+    })
+  })
+
+  it('detects a tax-only edit against the first verified Xero response', async () => {
+    const draft = await createSucceededDraft(
+      'Detect a changed Xero tax amount',
+      'ADADADAD-ADAD-4DAD-8DAD-ADADADADADAD',
+      395,
+    )
+    const invoice = draft.fake.invoice(draft.invoiceID)
+    if (!invoice) throw new Error('The fake Xero draft was not found.')
+    const verifiedInvoice = {
+      ...invoice,
+      LineItems: invoice.LineItems.map((line) => ({
+        ...line,
+        LineAmount: 150,
+        TaxAmount: 22.5,
+      })),
+      SubTotal: 150,
+      Total: 172.5,
+    }
+    draft.fake.setInvoice(verifiedInvoice)
+    const remote = parseRemoteInvoices({ Invoices: [verifiedInvoice] })[0]
+    const attemptID = relationshipID(draft.exportDocument.currentAttempt)
+    const derivedValuesHash = remote ? remoteDerivedValuesHash(remote) : null
+    if (!attemptID || !derivedValuesHash)
+      throw new Error('The verified Xero response is incomplete.')
+
+    await expect(
+      refreshInvoiceExportStatus(ownerSession.req, draft.exportID, {
+        client: draft.fake.client(),
+        token: token(),
+      }),
+    ).resolves.toEqual({ remoteStatus: 'DRAFT', state: 'succeeded' })
+    const backfilledAttempt = await payload.findByID({
+      collection: 'xero-attempts',
+      depth: 0,
+      id: attemptID,
+      overrideAccess: true,
+      showHiddenFields: true,
+    })
+    expect(
+      isRecord(backfilledAttempt.safeResponseMetadata)
+        ? backfilledAttempt.safeResponseMetadata.remoteDerivedValuesHash
+        : null,
+    ).toBe(derivedValuesHash)
+
+    draft.fake.setInvoice({
+      ...verifiedInvoice,
+      LineItems: verifiedInvoice.LineItems.map((line) => ({ ...line, TaxAmount: 22.49 })),
+      Total: 172.49,
+    })
+    await expect(
+      refreshInvoiceExportStatus(ownerSession.req, draft.exportID, {
+        client: draft.fake.client(),
+        token: token(),
+      }),
+    ).resolves.toEqual({ remoteStatus: 'DRAFT', state: 'action-required' })
+    await payload.update({
+      collection: 'invoice-exports',
+      data: {
+        processingLeaseExpiresAt: null,
+        processingLeaseId: null,
+        state: 'reconciling',
+      },
+      id: draft.exportID,
+      overrideAccess: true,
+    })
+    await expect(
+      reconcileInvoiceExport(ownerSession.req, draft.exportID, {
+        client: draft.fake.client(),
+        token: token(),
+      }),
+    ).resolves.toEqual({ state: 'manual-review' })
+    await expect(
+      payload.findByID({
+        collection: 'xero-attempts',
+        depth: 0,
+        id: attemptID,
+        overrideAccess: true,
+        showHiddenFields: true,
+      }),
+    ).resolves.toMatchObject({
+      result: 'succeeded',
+      safeResponseMetadata: { remoteDerivedValuesHash: derivedValuesHash },
+    })
   })
 
   it('deletes a verified Xero draft and atomically releases its time entry', async () => {

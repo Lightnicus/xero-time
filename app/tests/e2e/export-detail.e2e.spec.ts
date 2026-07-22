@@ -69,6 +69,25 @@ test.describe.serial('Invoice export detail recovery controls', () => {
     await expectNoManualConfirmationFields(draftRecovery)
   })
 
+  test('shows an approved Xero invoice as a completed export', async ({ page }) => {
+    await signIn(page, testUser)
+    await openExport(page, fixture.completed)
+
+    await expect(page.locator('.page-heading .status-pill')).toHaveText('Completed')
+    const xeroStatus = page.locator('.summary-card').filter({ hasText: 'Xero status' })
+    await expect(xeroStatus).toContainText('Approved · awaiting payment')
+    await expect(sectionWithHeading(page, 'Refresh invoice status')).toBeVisible()
+
+    for (const heading of [
+      'Delete Xero draft and release time',
+      'Check Xero and resume export',
+      'Create a replacement draft',
+      'Release all entries for rebilling',
+    ]) {
+      await expect(page.getByRole('heading', { name: heading, exact: true })).toHaveCount(0)
+    }
+  })
+
   test('guides an owner through manual review without accepting an entered InvoiceID', async ({
     page,
   }) => {

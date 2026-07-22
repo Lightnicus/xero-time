@@ -58,6 +58,25 @@ describe('export detail action availability', () => {
     })
   })
 
+  it.each(['SUBMITTED', 'AUTHORISED', 'PAID'] as const)(
+    'keeps a succeeded %s invoice complete without offering recovery controls',
+    (remoteStatus) => {
+      expect(
+        exportDetailActionAvailability(
+          exportDocument({ remoteStatus, state: 'succeeded', xeroInvoiceId: 'invoice-1' }),
+          'owner',
+        ),
+      ).toEqual({
+        canAuthorizeReplacement: false,
+        canDeleteDraft: false,
+        canRefresh: true,
+        canRequestRecovery: false,
+        recoveryInProgress: false,
+        showDraftRecovery: false,
+      })
+    },
+  )
+
   it('shows DRAFT recovery context but blocks deletion while manual review is unresolved', () => {
     expect(
       exportDetailActionAvailability(

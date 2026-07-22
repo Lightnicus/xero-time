@@ -5,7 +5,12 @@ import { createHmac } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 
 import { AccountingIntegrationError } from '@/lib/xero/accounting/contracts'
-import { classifyExportFailure, materiallyMatches } from '@/lib/xero/export/processor'
+import {
+  classifyExportFailure,
+  materiallyMatches,
+  remoteDerivedValuesHash,
+  remoteDerivedValuesMatchAttempt,
+} from '@/lib/xero/export/processor'
 import { parseXeroWebhookEvents, validXeroWebhookSignature } from '@/lib/xero/export/webhooks'
 import type { InvoiceExport, InvoiceExportEntry } from '@/payload-types'
 
@@ -127,8 +132,9 @@ describe('Xero export material comparison', () => {
           contactID: '11111111-1111-4111-8111-111111111111',
           currency: 'NZD',
           invoiceID: '22222222-2222-4222-8222-222222222222',
+          lineAmountType: 'Exclusive',
           lineItemIDs: ['33333333-3333-4333-8333-333333333333'],
-          lineItems: [legacyLine],
+          lineItems: [{ ...legacyLine, DiscountRate: 0 }],
           reference: 'LEGACY-0001',
           status: 'DRAFT',
           subtotal: 150,
@@ -137,5 +143,130 @@ describe('Xero export material comparison', () => {
         [{} as InvoiceExportEntry],
       ),
     ).toBe(true)
+  })
+
+  it('ignores derived Xero totals while matching each immutable line at four-decimal precision', () => {
+    const lines = [
+      {
+        AccountCode: '200',
+        Description: 'First seventeen minutes of professional time',
+        ItemCode: 'TIME',
+        Quantity: 0.2833,
+        TaxType: 'OUTPUT2',
+        Tracking: [
+          { Name: 'Region', Option: 'North' },
+          { Name: 'Team', Option: 'Delivery' },
+        ],
+        UnitAmount: 150,
+      },
+      {
+        AccountCode: '200',
+        Description: 'Second seventeen minutes of professional time',
+        ItemCode: 'TIME',
+        Quantity: 0.2833,
+        TaxType: 'OUTPUT2',
+        Tracking: [
+          { Name: 'Region', Option: 'North' },
+          { Name: 'Team', Option: 'Delivery' },
+        ],
+        UnitAmount: 150,
+      },
+    ]
+    const exportDocument = {
+      applicationReference: 'PRECISION-0001',
+      requestPayload: {
+        Contact: { ContactID: '11111111-1111-4111-8111-111111111111' },
+        CurrencyCode: 'NZD',
+        LineAmountTypes: 'Exclusive',
+        LineItems: lines,
+        Reference: 'PRECISION-0001',
+      },
+      subtotalScaled: 849_900,
+      totalScaled: 977_386,
+    } as unknown as InvoiceExport
+
+    const remote = {
+      contactID: '11111111-1111-4111-8111-111111111111',
+      currency: 'NZD',
+      invoiceID: '22222222-2222-4222-8222-222222222222',
+      lineAmountType: 'Exclusive',
+      lineItemIDs: ['33333333-3333-4333-8333-333333333333', '44444444-4444-4444-8444-444444444444'],
+      lineItems: [
+        { ...lines[0], Tracking: [...lines[0]!.Tracking].reverse() },
+        { ...lines[1], Tracking: [...lines[1]!.Tracking].reverse() },
+      ],
+      reference: 'PRECISION-0001',
+      status: 'AUTHORISED',
+      subtotal: 85,
+      total: 97.74,
+    }
+    const allocations = [{} as InvoiceExportEntry, {} as InvoiceExportEntry]
+
+    expect(materiallyMatches(exportDocument, remote, allocations)).toBe(true)
+    expect(
+      materiallyMatches(exportDocument, { ...remote, lineAmountType: 'Inclusive' }, allocations),
+    ).toBe(false)
+    expect(
+      materiallyMatches(exportDocument, { ...remote, lineAmountType: undefined }, allocations),
+    ).toBe(false)
+    expect(
+      materiallyMatches(
+        exportDocument,
+        {
+          ...remote,
+          lineItems: [lines[0]!, { ...lines[1]!, DiscountRate: 5 }],
+        },
+        allocations,
+      ),
+    ).toBe(false)
+    expect(
+      materiallyMatches(
+        exportDocument,
+        {
+          ...remote,
+          lineItems: [remote.lineItems[0]!, { ...remote.lineItems[1]!, DiscountAmount: 5 }],
+        },
+        allocations,
+      ),
+    ).toBe(false)
+    expect(
+      materiallyMatches(
+        exportDocument,
+        {
+          ...remote,
+          lineItemIDs: [...remote.lineItemIDs, 'extra'],
+          lineItems: [...remote.lineItems, {}],
+        },
+        [...allocations, {} as InvoiceExportEntry],
+      ),
+    ).toBe(false)
+  })
+
+  it('retains the first verified Xero-derived values for later tax override detection', () => {
+    const remote = {
+      contactID: '11111111-1111-4111-8111-111111111111',
+      currency: 'NZD',
+      invoiceID: '22222222-2222-4222-8222-222222222222',
+      lineAmountType: 'Exclusive',
+      lineItemIDs: ['33333333-3333-4333-8333-333333333333'],
+      lineItems: [{ LineAmount: 42.5, TaxAmount: 6.38 }],
+      reference: 'PRECISION-0002',
+      status: 'DRAFT',
+      subtotal: 42.5,
+      total: 48.88,
+    }
+    const hash = remoteDerivedValuesHash(remote)
+    expect(hash).toEqual(expect.any(String))
+    const attempt = { safeResponseMetadata: { remoteDerivedValuesHash: hash } }
+
+    expect(remoteDerivedValuesMatchAttempt(attempt, remote)).toBe(true)
+    expect(
+      remoteDerivedValuesMatchAttempt(attempt, {
+        ...remote,
+        lineItems: [{ LineAmount: 42.5, TaxAmount: 6.37 }],
+        total: 48.87,
+      }),
+    ).toBe(false)
+    expect(remoteDerivedValuesMatchAttempt({ safeResponseMetadata: {} }, remote)).toBe(true)
   })
 })

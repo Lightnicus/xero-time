@@ -20,6 +20,7 @@ import {
   finalizeInvoiceSuccess,
   materiallyMatches,
   parseRemoteInvoices,
+  remoteDerivedValuesMatchAttempt,
 } from '@/lib/xero/export/processor'
 import {
   fetchRemoteInvoiceForExport,
@@ -387,6 +388,22 @@ export async function deleteDraftInvoiceAndRelease(
     if (!materiallyMatches(document, preflight.remote, allocations)) {
       throw new Error(
         'The Xero draft no longer exactly matches the immutable export snapshot. Deletion and release remain blocked.',
+      )
+    }
+    const attemptID = relation(document.currentAttempt)
+    const attempt = attemptID
+      ? await session.payload.findByID({
+          collection: 'xero-attempts',
+          depth: 0,
+          id: attemptID,
+          overrideAccess: true,
+          req: session.req,
+          showHiddenFields: true,
+        })
+      : null
+    if (!remoteDerivedValuesMatchAttempt(attempt, preflight.remote)) {
+      throw new Error(
+        'The Xero draft totals no longer match the first verified response. Deletion and release remain blocked.',
       )
     }
     await assertDeleteDraftCapability(session, tenantID)
@@ -841,6 +858,7 @@ export async function acceptExistingInvoice(
     token.accessToken,
     token.connection.tenantId,
     `Invoices/${input.invoiceID}`,
+    { unitdp: '4' },
   )
   const invoices = parseRemoteInvoices(response.data)
   const remote = invoices.length === 1 ? invoices[0] : undefined

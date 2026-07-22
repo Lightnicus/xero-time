@@ -45,6 +45,7 @@ export type RemoteInvoice = {
   currency: string
   invoiceID: string
   invoiceNumber?: string
+  lineAmountType?: string
   lineItems: Record<string, unknown>[]
   lineItemIDs: (string | undefined)[]
   reference: string
@@ -118,6 +119,7 @@ export const parseRemoteInvoices = (value: unknown): RemoteInvoice[] => {
       currency,
       invoiceID,
       invoiceNumber: safeString(invoice.InvoiceNumber, 100),
+      lineAmountType: safeString(invoice.LineAmountTypes, 50),
       lineItemIDs: lineItems.map((item) => safeString(item.LineItemID, 100)),
       lineItems,
       reference,
@@ -126,6 +128,37 @@ export const parseRemoteInvoices = (value: unknown): RemoteInvoice[] => {
       total: typeof invoice.Total === 'number' ? invoice.Total : undefined,
     }
   })
+}
+
+export const remoteDerivedValuesHash = (remote: RemoteInvoice): string | null => {
+  if (
+    typeof remote.subtotal !== 'number' ||
+    !Number.isFinite(remote.subtotal) ||
+    typeof remote.total !== 'number' ||
+    !Number.isFinite(remote.total)
+  ) {
+    return null
+  }
+  const lineValues = remote.lineItems.map((line) => ({
+    lineAmount:
+      typeof line.LineAmount === 'number' && Number.isFinite(line.LineAmount)
+        ? line.LineAmount
+        : null,
+    taxAmount:
+      typeof line.TaxAmount === 'number' && Number.isFinite(line.TaxAmount) ? line.TaxAmount : null,
+  }))
+  if (lineValues.some((line) => line.lineAmount === null || line.taxAmount === null)) return null
+  return stableHash({ lineValues, subtotal: remote.subtotal, total: remote.total })
+}
+
+export const remoteDerivedValuesMatchAttempt = (
+  attempt: Pick<XeroAttempt, 'safeResponseMetadata'> | null | undefined,
+  remote: RemoteInvoice,
+): boolean => {
+  const metadata = attempt?.safeResponseMetadata
+  const expectedHash = isRecord(metadata) ? metadata.remoteDerivedValuesHash : undefined
+  if (typeof expectedHash !== 'string') return true
+  return remoteDerivedValuesHash(remote) === expectedHash
 }
 
 const parseRemoteInvoice = (value: unknown): RemoteInvoice => {
@@ -162,6 +195,12 @@ export const materiallyMatches = (
         ? Math.abs(expected - actual) < 0.000_05
         : expected === actual
     const optionalItemCode = (value: unknown): string => (typeof value === 'string' ? value : '')
+    const optionalDiscount = (value: unknown): unknown =>
+      value === undefined || value === null ? 0 : value
+    const normalizedTracking = (value: unknown): Record<string, unknown>[] =>
+      (Array.isArray(value) ? value : [])
+        .map((item) => (isRecord(item) ? { Name: item.Name, Option: item.Option } : {}))
+        .sort((left, right) => stableHash(left).localeCompare(stableHash(right)))
     return (
       line.Description === remoteLine.Description &&
       line.AccountCode === remoteLine.AccountCode &&
@@ -169,35 +208,34 @@ export const materiallyMatches = (
       line.TaxType === remoteLine.TaxType &&
       numberMatches(line.Quantity, remoteLine.Quantity) &&
       numberMatches(line.UnitAmount, remoteLine.UnitAmount) &&
-      stableHash(
-        Array.isArray(line.Tracking)
-          ? line.Tracking.map((item) =>
-              isRecord(item) ? { Name: item.Name, Option: item.Option } : {},
-            )
-          : [],
-      ) ===
-        stableHash(
-          Array.isArray(remoteLine.Tracking)
-            ? remoteLine.Tracking.map((item) =>
-                isRecord(item) ? { Name: item.Name, Option: item.Option } : {},
-              )
-            : [],
-        )
+      numberMatches(
+        optionalDiscount(line.DiscountRate),
+        optionalDiscount(remoteLine.DiscountRate),
+      ) &&
+      numberMatches(
+        optionalDiscount(line.DiscountAmount),
+        optionalDiscount(remoteLine.DiscountAmount),
+      ) &&
+      stableHash(normalizedTracking(line.Tracking)) ===
+        stableHash(normalizedTracking(remoteLine.Tracking))
     )
   })
-  const totalsMatch =
-    (remote.subtotal === undefined ||
-      Math.abs(remote.subtotal * 10_000 - exportDocument.subtotalScaled) < 1) &&
-    (remote.total === undefined || Math.abs(remote.total * 10_000 - exportDocument.totalScaled) < 1)
+  const hasExplicitLineAmountType = typeof payload.LineAmountTypes === 'string'
+  const requestedLineAmountType = hasExplicitLineAmountType ? payload.LineAmountTypes : 'Exclusive'
+  const lineAmountTypeMatches = hasExplicitLineAmountType
+    ? remote.lineAmountType === requestedLineAmountType
+    : remote.lineAmountType === undefined || remote.lineAmountType === 'Exclusive'
   return (
     isRecord(payload.Contact) &&
     payload.Contact.ContactID === remote.contactID &&
     payload.CurrencyCode === remote.currency &&
     payload.Reference === remote.reference &&
     remote.reference === exportDocument.applicationReference &&
+    requestLines.length === remote.lineItems.length &&
+    remote.lineItems.length === allocations.length &&
     remote.lineItemIDs.length === allocations.length &&
     lineValuesMatch &&
-    totalsMatch
+    lineAmountTypeMatches
   )
 }
 
@@ -373,14 +411,24 @@ export async function finalizeInvoiceSuccess(input: {
 }): Promise<'manual-review' | 'succeeded'> {
   const exportID = String(input.exportDocument.id)
   const allocations = await loadAllocations(input.payload, input.req, exportID)
-  if (!materiallyMatches(input.exportDocument, input.remote, allocations)) {
+  if (
+    !materiallyMatches(input.exportDocument, input.remote, allocations) ||
+    !remoteDerivedValuesMatchAttempt(input.attempt, input.remote)
+  ) {
+    const previousMetadata = isRecord(input.attempt.safeResponseMetadata)
+      ? input.attempt.safeResponseMetadata
+      : {}
     await input.payload.update({
       collection: 'xero-attempts',
       id: input.attempt.id,
       data: {
         completedAt: new Date().toISOString(),
         result: 'manual-review',
-        safeResponseMetadata: { invoiceID: input.remote.invoiceID, status: input.remote.status },
+        safeResponseMetadata: {
+          ...previousMetadata,
+          invoiceID: input.remote.invoiceID,
+          status: input.remote.status,
+        },
         xeroCorrelationId: input.correlationID,
       },
       overrideAccess: true,
@@ -405,6 +453,7 @@ export async function finalizeInvoiceSuccess(input: {
     })
     return 'manual-review'
   }
+  const derivedValuesHash = remoteDerivedValuesHash(input.remote)
 
   await withPayloadTransaction(input.payload, async (req) => {
     const current = await input.payload.findByID({
@@ -462,6 +511,7 @@ export async function finalizeInvoiceSuccess(input: {
         rateLimitRemaining: input.rateLimitRemaining,
         result: 'succeeded',
         safeResponseMetadata: {
+          ...(derivedValuesHash ? { remoteDerivedValuesHash: derivedValuesHash } : {}),
           invoiceID: input.remote.invoiceID,
           invoiceNumber: input.remote.invoiceNumber,
           lineCount: currentAllocations.length,
@@ -839,6 +889,7 @@ export async function processInvoiceExport(
         'Invoices',
         { Invoices: [savedPayload] },
         attempt.idempotencyKey,
+        { unitdp: '4' },
       )
     } catch (error) {
       if (error instanceof AccountingIntegrationError && error.status === 401) {
@@ -853,6 +904,7 @@ export async function processInvoiceExport(
           'Invoices',
           { Invoices: [savedPayload] },
           attempt.idempotencyKey,
+          { unitdp: '4' },
         )
       } else {
         throw error

@@ -206,6 +206,41 @@ describe('Xero accounting HTTP client', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('adds four-decimal precision to invoice GET and POST URLs', async () => {
+    const requests: Array<{ method: string; url: string }> = []
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      requests.push({ method: init?.method ?? 'GET', url: String(input) })
+      return new Response(JSON.stringify({ Invoices: [] }), { status: 200 })
+    })
+    const client = createXeroAccountingClient(clientConfig, fetchMock)
+
+    await client.accountingGet(
+      'access-token',
+      connectionFixture.tenantId,
+      'Invoices/11111111-1111-4111-8111-111111111111',
+      { unitdp: '4' },
+    )
+    await client.accountingPost(
+      'access-token',
+      connectionFixture.tenantId,
+      'Invoices',
+      { Invoices: [] },
+      'invoice-idempotency-key',
+      { unitdp: '4' },
+    )
+
+    expect(requests).toEqual([
+      {
+        method: 'GET',
+        url: 'https://api.xero.com/api.xro/2.0/Invoices/11111111-1111-4111-8111-111111111111?unitdp=4',
+      },
+      {
+        method: 'POST',
+        url: 'https://api.xero.com/api.xro/2.0/Invoices?unitdp=4',
+      },
+    ])
+  })
+
   it('uses the standard code exchange and filters connections by auth event', async () => {
     const requests: Array<{ body: string; headers: Headers; method: string; url: string }> = []
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
