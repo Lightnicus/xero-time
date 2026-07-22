@@ -82,7 +82,16 @@ const baseWhere = (filter: BillingFilter, entryIDs?: string[]): Where => {
     and.push({ id: { in: entryIDs } })
   } else {
     and.push({ billable: { equals: true } })
-    and.push({ billingStatus: { in: ['unbilled', 'reserved'] } })
+    and.push({
+      billingStatus: {
+        equals:
+          filter.blocker === 'active-reservation'
+            ? 'reserved'
+            : filter.blocker === 'not-unbilled'
+              ? 'exported'
+              : 'unbilled',
+      },
+    })
   }
   if (filter.customerID) and.push({ customer: { equals: filter.customerID } })
   if (filter.projectID) and.push({ project: { equals: filter.projectID } })
@@ -371,7 +380,7 @@ export async function getBillingEligibility(
       reasons.push(blocker('not-billable', 'This entry is not marked billable.'))
     if (entry.billingStatus !== 'unbilled') {
       reasons.push(
-        entry.billingStatus === 'reserved' || relation(entry.currentExport)
+        entry.billingStatus === 'reserved'
           ? blocker(
               'active-reservation',
               'This entry is already reserved by another export.',

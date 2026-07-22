@@ -2,12 +2,13 @@ import { isValidCalendarDate } from '@/lib/domain/validation'
 
 export type TimeView = 'all' | 'day' | 'week'
 export type TimeBillingStatus = 'exported' | 'reserved' | 'unbilled'
+export type TimeBillingStatusFilter = 'all' | TimeBillingStatus
 export type TimeBillableFilter = 'no' | 'yes'
 
 export type TimeEntryFilters = {
   anchorDate: string
   billable?: TimeBillableFilter
-  billingStatus?: TimeBillingStatus
+  billingStatus?: TimeBillingStatusFilter
   customer?: string
   project?: string
   view: TimeView
@@ -60,7 +61,10 @@ export function normalizeTimeEntryFilters(
     anchorDate: isValidCalendarDate(dateValue) ? dateValue : fallbackDate,
     billable: billableValue === 'yes' || billableValue === 'no' ? billableValue : undefined,
     billingStatus:
-      statusValue === 'unbilled' || statusValue === 'reserved' || statusValue === 'exported'
+      statusValue === 'all' ||
+      statusValue === 'unbilled' ||
+      statusValue === 'reserved' ||
+      statusValue === 'exported'
         ? statusValue
         : undefined,
     customer: customerValue.length > 0 && customerValue.length <= 100 ? customerValue : undefined,

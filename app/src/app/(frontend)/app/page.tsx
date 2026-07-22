@@ -113,7 +113,9 @@ export default async function TimeEntriesPage({
   const activeFilterCount = [
     filters.project,
     filters.customer,
-    filters.billingStatus,
+    filters.billingStatus && filters.billingStatus !== 'unbilled'
+      ? filters.billingStatus
+      : undefined,
     filters.billable,
   ].filter(Boolean).length
   const hasAnyEntries = projectOptions.length > 0
@@ -176,7 +178,12 @@ export default async function TimeEntriesPage({
           )}
         </div>
 
-        <form action="/app" className="time-filter-form" method="get">
+        <form
+          action="/app"
+          className="time-filter-form"
+          key={searchParamsForFilters(filters).toString()}
+          method="get"
+        >
           <div className="time-period-fields">
             <label className="field time-filter-field" htmlFor="view">
               <span>View</span>
@@ -223,12 +230,12 @@ export default async function TimeEntriesPage({
                 <label className="field" htmlFor="billingStatus">
                   <span>Billing status</span>
                   <select
-                    defaultValue={filters.billingStatus ?? ''}
+                    defaultValue={filters.billingStatus ?? 'unbilled'}
                     id="billingStatus"
                     name="billingStatus"
                   >
-                    <option value="">All statuses</option>
                     <option value="unbilled">Unbilled</option>
+                    <option value="all">All statuses</option>
                     <option value="reserved">Reserved</option>
                     <option value="exported">Exported</option>
                   </select>
@@ -284,7 +291,7 @@ export default async function TimeEntriesPage({
             {hasAnyEntries ? (
               <Link
                 className="button button-secondary"
-                href={appHref({ anchorDate: today, view: 'all' })}
+                href={appHref({ anchorDate: today, billingStatus: 'all', view: 'all' })}
               >
                 View all time
               </Link>

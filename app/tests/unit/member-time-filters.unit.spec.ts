@@ -25,6 +25,18 @@ describe('member time filters', () => {
     ).toBeNull()
   })
 
+  it('preserves an explicit all-status history view', () => {
+    const filters = normalizeTimeEntryFilters(
+      { billingStatus: 'all', date: '2026-07-18', view: 'all' },
+      '2026-07-01',
+    )
+
+    expect(filters.billingStatus).toBe('all')
+    expect(searchParamsForFilters(filters).toString()).toBe(
+      'date=2026-07-18&view=all&billingStatus=all',
+    )
+  })
+
   it('rejects unknown enum values and malformed dates', () => {
     expect(
       normalizeTimeEntryFilters(

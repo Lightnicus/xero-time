@@ -67,8 +67,9 @@ export async function listMyTimeEntries(
   }
   if (filters?.project) clauses.push({ project: { equals: filters.project } })
   if (filters?.customer) clauses.push({ customer: { equals: filters.customer } })
-  if (filters?.billingStatus) {
-    clauses.push({ billingStatus: { equals: filters.billingStatus } })
+  const billingStatus = filters?.billingStatus ?? 'unbilled'
+  if (billingStatus !== 'all') {
+    clauses.push({ billingStatus: { equals: billingStatus } })
   }
   if (filters?.billable) clauses.push({ billable: { equals: filters.billable === 'yes' } })
 

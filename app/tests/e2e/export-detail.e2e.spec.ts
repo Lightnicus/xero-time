@@ -54,6 +54,66 @@ test.describe.serial('Invoice export detail recovery controls', () => {
     await resetE2ERateLimits()
   })
 
+  test('hides locked time from default work queues while preserving history filters', async ({
+    page,
+  }) => {
+    await signIn(page, testUser)
+
+    const reserved = [
+      fixture.manualReview,
+      fixture.reconciling,
+      fixture.releaseable,
+      fixture.replacement,
+    ]
+    const exported = [fixture.succeeded, fixture.completed]
+    const allLocked = [...reserved, ...exported]
+
+    await page.goto('/app?view=day&date=2026-07-22')
+    await expect(page.getByLabel('Billing status')).toHaveValue('unbilled')
+    for (const record of allLocked) {
+      await expect(page.getByText(`${record.reference} source time`, { exact: true })).toHaveCount(
+        0,
+      )
+    }
+
+    await page.getByRole('link', { name: 'View all time' }).click()
+    await expect(page).toHaveURL(/view=all.*billingStatus=all/)
+    await expect(page.getByLabel('Billing status')).toHaveValue('all')
+    for (const record of allLocked) {
+      await expect(page.getByText(`${record.reference} source time`, { exact: true })).toBeVisible()
+    }
+
+    await page.goto('/app/billing')
+    await expect(page.getByText('Already reserved for export:', { exact: true })).toHaveCount(0)
+    for (const record of allLocked) {
+      await expect(page.getByText(`${record.reference} source time`, { exact: true })).toHaveCount(
+        0,
+      )
+    }
+
+    await page.goto('/app/billing?blocker=active-reservation')
+    for (const record of reserved) {
+      await expect(page.getByText(`${record.reference} source time`, { exact: true })).toBeVisible()
+    }
+    for (const record of exported) {
+      await expect(page.getByText(`${record.reference} source time`, { exact: true })).toHaveCount(
+        0,
+      )
+    }
+    await expect(page.getByRole('link', { name: 'View export' })).toHaveCount(reserved.length)
+
+    await page.goto('/app/billing?blocker=not-unbilled')
+    for (const record of exported) {
+      await expect(page.getByText(`${record.reference} source time`, { exact: true })).toBeVisible()
+    }
+    for (const record of reserved) {
+      await expect(page.getByText(`${record.reference} source time`, { exact: true })).toHaveCount(
+        0,
+      )
+    }
+    await expect(page.getByText('Already exported:', { exact: true })).toHaveCount(exported.length)
+  })
+
   test('lets an owner delete a verified succeeded Xero draft', async ({ page }) => {
     await signIn(page, testUser)
     await openExport(page, fixture.succeeded)
