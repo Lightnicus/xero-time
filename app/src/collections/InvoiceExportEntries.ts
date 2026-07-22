@@ -85,9 +85,54 @@ export const InvoiceExportEntries: CollectionConfig = {
       fields: [
         { name: 'durationSeconds', type: 'number', min: 60, required: true },
         { name: 'quantityScaled', type: 'number', min: 1, required: true },
-        { name: 'rateScaled', type: 'number', min: 0, required: true },
-        { name: 'amountScaled', type: 'number', min: 0, required: true },
-        { name: 'taxScaled', type: 'number', min: 0, required: true },
+        {
+          name: 'rateScaled',
+          label: 'Rate',
+          type: 'number',
+          min: 0,
+          required: true,
+          admin: {
+            disableGroupBy: true,
+            disableListFilter: true,
+            readOnly: true,
+            components: {
+              Cell: '/components/admin/ScaledCurrencyCell',
+              Field: '/components/admin/ScaledCurrencyField',
+            },
+          },
+        },
+        {
+          name: 'amountScaled',
+          label: 'Amount',
+          type: 'number',
+          min: 0,
+          required: true,
+          admin: {
+            disableGroupBy: true,
+            disableListFilter: true,
+            readOnly: true,
+            components: {
+              Cell: '/components/admin/ScaledCurrencyCell',
+              Field: '/components/admin/ScaledCurrencyField',
+            },
+          },
+        },
+        {
+          name: 'taxScaled',
+          label: 'Tax',
+          type: 'number',
+          min: 0,
+          required: true,
+          admin: {
+            disableGroupBy: true,
+            disableListFilter: true,
+            readOnly: true,
+            components: {
+              Cell: '/components/admin/ScaledCurrencyCell',
+              Field: '/components/admin/ScaledCurrencyField',
+            },
+          },
+        },
       ],
     },
     {

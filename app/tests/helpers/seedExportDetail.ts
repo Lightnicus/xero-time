@@ -185,8 +185,10 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
     )
   }
 
-  const subtotalScaled = 1_000_000
-  const taxScaled = 150_000
+  // Deliberately retain four-decimal source precision so the browser tests verify
+  // that every user-facing currency value is rounded to cents.
+  const subtotalScaled = 1_001_234
+  const taxScaled = 150_185
   const totalScaled = subtotalScaled + taxScaled
   const batch = await payload.create({
     collection: 'export-batches',
@@ -246,7 +248,7 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
               ItemCode: 'TIME',
               Quantity: 1,
               TaxType: 'OUTPUT2',
-              UnitAmount: 100,
+              UnitAmount: 100.1234,
             },
           ],
           Reference: scenario.reference,

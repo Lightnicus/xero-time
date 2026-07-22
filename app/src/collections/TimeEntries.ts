@@ -815,6 +815,7 @@ export const TimeEntries: CollectionConfig = {
                 },
                 {
                   name: 'rateSnapshotScaled',
+                  label: 'Rate snapshot',
                   type: 'number',
                   required: true,
                   min: 0,
@@ -824,8 +825,15 @@ export const TimeEntries: CollectionConfig = {
                     update: systemFieldWrite,
                   },
                   admin: {
+                    components: {
+                      Cell: '/components/admin/ScaledCurrencyCell',
+                      Field: '/components/admin/ScaledCurrencyField',
+                    },
+                    custom: { currencyField: 'currencySnapshot' },
                     description:
                       'Exact project hourly rate captured when the entry is created or reprojected.',
+                    disableGroupBy: true,
+                    disableListFilter: true,
                     readOnly: true,
                     step: 1,
                     width: '33%',

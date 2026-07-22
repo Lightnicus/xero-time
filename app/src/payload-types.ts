@@ -1384,6 +1384,9 @@ export interface ExportBatch {
   entryCount: number;
   invoiceCount: number;
   durationSeconds: number;
+  /**
+   * Internal aggregate only; a batch can contain more than one currency, so no user-facing total is shown.
+   */
   totalAmountScaled: number;
   schemaVersion: number;
   completedAt?: string | null;
@@ -1450,6 +1453,9 @@ export interface ReleaseAction {
     | null;
   entryCount: number;
   durationSeconds: number;
+  /**
+   * Internal audit amount; use the linked export for the currency-specific total.
+   */
   amountScaled: number;
   before:
     | {

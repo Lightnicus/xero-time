@@ -1,6 +1,8 @@
 import { RATE_SCALE } from './validation'
 
 const decimalAmountPattern = /^(?:(\d+)(?:\.(\d{0,4}))?|\.(\d{1,4}))$/
+const CURRENCY_MINOR_UNIT = 100n
+const SCALED_UNITS_PER_CENT = BigInt(RATE_SCALE) / CURRENCY_MINOR_UNIT
 
 const scaledAmountParts = (value: number): { fraction: string; whole: number } | null => {
   if (!Number.isSafeInteger(value) || value < 0) return null
@@ -11,6 +13,16 @@ const scaledAmountParts = (value: number): { fraction: string; whole: number } |
       .replace(/0+$/, '')
       .padEnd(2, '0'),
     whole: Math.floor(value / RATE_SCALE),
+  }
+}
+
+const scaledDisplayParts = (value: number): { fraction: string; whole: number } | null => {
+  if (!Number.isSafeInteger(value) || value < 0) return null
+
+  const roundedCents = (BigInt(value) + SCALED_UNITS_PER_CENT / 2n) / SCALED_UNITS_PER_CENT
+  return {
+    fraction: String(roundedCents % CURRENCY_MINOR_UNIT).padStart(2, '0'),
+    whole: Number(roundedCents / CURRENCY_MINOR_UNIT),
   }
 }
 
@@ -35,10 +47,16 @@ export function formatScaledDecimal(value: number): string | null {
   return parts ? `${parts.whole}.${parts.fraction}` : null
 }
 
-/** Formats a scaled integer without passing through binary floating-point arithmetic. */
+/** Formats a scaled monetary value for display, rounded to exactly two decimal places. */
+export function formatScaledDisplayDecimal(value: number): string | null {
+  const parts = scaledDisplayParts(value)
+  return parts ? `${parts.whole}.${parts.fraction}` : null
+}
+
+/** Formats a user-facing currency value with exactly two decimal places. */
 export function formatScaledAmount(value: number, currency: string): string {
-  const parts = scaledAmountParts(value)
-  if (!parts || !/^[A-Z]{3}$/.test(currency)) return 'Invalid rate'
+  const parts = scaledDisplayParts(value)
+  if (!parts || !/^[A-Z]{3}$/.test(currency)) return 'Invalid amount'
 
   return `${currency} ${parts.whole.toLocaleString('en-NZ')}.${parts.fraction}`
 }

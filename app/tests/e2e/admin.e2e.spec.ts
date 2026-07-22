@@ -84,6 +84,11 @@ test.describe('Admin Panel', () => {
 
     await page.reload()
     await expect(page.getByLabel('Hourly rate')).toHaveValue('175.1256')
+
+    await page.goto(`${serverURL}/admin/collections/projects`)
+    const updatedProjectRow = page.locator('tr', { hasText: adminRateProject.name })
+    await expect(updatedProjectRow).toContainText('NZD 175.13')
+    await expect(updatedProjectRow).not.toContainText('175.1256')
   })
 
   test('shows the private Xero accounting setup screen without exposing credentials', async () => {

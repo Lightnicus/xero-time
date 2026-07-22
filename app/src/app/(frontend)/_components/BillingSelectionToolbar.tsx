@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { formatScaledAmount } from '@/lib/domain/money'
+
 import type { ReactNode } from 'react'
 
 type VisibleEntry = {
@@ -30,15 +32,6 @@ type BillingScope = 'all-matching' | 'all-uninvoiced' | 'explicit'
 
 type ServerAction = (formData: FormData) => Promise<void>
 
-const scaledAmount = (value: number, currency: string): string => {
-  const whole = Math.floor(value / 10_000)
-  const fraction = String(value % 10_000)
-    .padStart(4, '0')
-    .replace(/0+$/, '')
-    .padEnd(2, '0')
-  return `${currency} ${whole.toLocaleString('en-NZ')}.${fraction}`
-}
-
 const duration = (seconds: number): string => {
   const minutes = Math.floor(seconds / 60)
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
@@ -49,7 +42,7 @@ const valueLabel = (currencyAmounts: Map<string, number>): string => {
   if (values.length === 0) return 'No value selected'
   if (values.length > 1) return `${values.length} currencies`
   const [currency, value] = values[0] as [string, number]
-  return scaledAmount(value, currency)
+  return formatScaledAmount(value, currency)
 }
 
 const summarizeVisibleEntries = (entries: VisibleEntry[]): SelectionSummary => {

@@ -74,6 +74,11 @@ test.describe.serial('Invoice export detail recovery controls', () => {
     await openExport(page, fixture.completed)
 
     await expect(page.locator('.page-heading .status-pill')).toHaveText('Completed')
+    await expect(page.getByText('NZD 115.14', { exact: true }).first()).toBeVisible()
+    await expect(
+      page.getByRole('cell', { name: 'NZD 100.12 Tax NZD 15.02', exact: true }),
+    ).toBeVisible()
+    await expect(page.getByText(/NZD [\d,]+\.\d{3,}/)).toHaveCount(0)
     const xeroStatus = page.locator('.summary-card').filter({ hasText: 'Xero status' })
     await expect(xeroStatus).toContainText('Approved · awaiting payment')
     await expect(sectionWithHeading(page, 'Refresh invoice status')).toBeVisible()

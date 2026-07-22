@@ -1,4 +1,4 @@
-import { formatScaledAmount, formatScaledDecimal } from '@/lib/domain/money'
+import { formatScaledAmount, formatScaledDisplayDecimal } from '@/lib/domain/money'
 
 import type { DefaultServerCellComponentProps, NumberFieldClient } from 'payload'
 
@@ -6,15 +6,15 @@ const ScaledCurrencyCell = ({
   cellData,
   rowData,
 }: DefaultServerCellComponentProps<NumberFieldClient, number>) => {
-  if (!Number.isSafeInteger(cellData) || cellData < 0) return <span>Invalid rate</span>
+  if (!Number.isSafeInteger(cellData) || cellData < 0) return <span>Invalid amount</span>
 
-  const currency = rowData.currency
+  const currency = rowData.currency ?? rowData.currencySnapshot
   const formatted =
     typeof currency === 'string' && /^[A-Z]{3}$/.test(currency)
       ? formatScaledAmount(cellData, currency)
-      : formatScaledDecimal(cellData)
+      : formatScaledDisplayDecimal(cellData)
 
-  return <span>{formatted ?? 'Invalid rate'}</span>
+  return <span>{formatted ?? 'Invalid amount'}</span>
 }
 
 export default ScaledCurrencyCell

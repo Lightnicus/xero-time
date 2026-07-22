@@ -7,6 +7,7 @@ import {
   RenderCustomComponent,
   fieldBaseClass,
   useField,
+  useFormFields,
 } from '@payloadcms/ui'
 import {
   useCallback,
@@ -18,7 +19,12 @@ import {
   type ChangeEvent,
 } from 'react'
 
-import { decimalAmountToScaled, formatScaledDecimal } from '@/lib/domain/money'
+import {
+  decimalAmountToScaled,
+  formatScaledAmount,
+  formatScaledDecimal,
+  formatScaledDisplayDecimal,
+} from '@/lib/domain/money'
 
 import type { NumberFieldClientComponent, Validate } from 'payload'
 
@@ -48,6 +54,9 @@ const ScaledCurrencyField: NumberFieldClientComponent = ({
   } = field
   const description =
     typeof custom?.inputDescription === 'string' ? custom.inputDescription : schemaDescription
+  const currencyField =
+    typeof custom?.currencyField === 'string' ? custom.currencyField : 'currency'
+  const currency = useFormFields(([fields]) => fields[currencyField]?.value)
   const notifyChange = onChangeFromProps as ((value: number | null) => void) | undefined
   const validateRate = useCallback<Validate>(
     (value) => {
@@ -79,8 +88,16 @@ const ScaledCurrencyField: NumberFieldClientComponent = ({
   const [draft, setDraft] = useState<string | null>(null)
   const previousValue = useRef(value)
   const lastInputValue = useRef<number | null | undefined>(undefined)
+  const isReadOnly = Boolean(readOnly || disabled)
   const valueToRender =
-    draft ?? (typeof value === 'number' ? (formatScaledDecimal(value) ?? '') : '')
+    draft ??
+    (typeof value === 'number'
+      ? ((isReadOnly
+          ? typeof currency === 'string' && /^[A-Z]{3}$/.test(currency)
+            ? formatScaledAmount(value, currency)
+            : formatScaledDisplayDecimal(value)
+          : formatScaledDecimal(value)) ?? '')
+      : '')
   const fieldStyle = useMemo(
     () =>
       ({
@@ -117,8 +134,6 @@ const ScaledCurrencyField: NumberFieldClientComponent = ({
       setDraft(null)
     }
   }, [draft, value])
-
-  const isReadOnly = readOnly || disabled
 
   return (
     <div

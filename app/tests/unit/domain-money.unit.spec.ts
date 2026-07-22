@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { decimalAmountToScaled, formatScaledAmount, formatScaledDecimal } from '@/lib/domain/money'
+import {
+  decimalAmountToScaled,
+  formatScaledAmount,
+  formatScaledDecimal,
+  formatScaledDisplayDecimal,
+} from '@/lib/domain/money'
 
 describe('domain money presentation', () => {
   it.each([
@@ -44,10 +49,34 @@ describe('domain money presentation', () => {
     expect(formatScaledDecimal(value)).toBe(expected)
   })
 
-  it('formats list values with currency while rejecting invalid storage', () => {
-    expect(formatScaledAmount(1_500_000, 'NZD')).toBe('NZD 150.00')
+  it.each([
+    [0, 'NZD 0.00'],
+    [1, 'NZD 0.00'],
+    [49, 'NZD 0.00'],
+    [50, 'NZD 0.01'],
+    [1_501_234, 'NZD 150.12'],
+    [1_501_250, 'NZD 150.13'],
+    [1_509_999, 'NZD 151.00'],
+    [123_456_789, 'NZD 12,345.68'],
+    [Number.MAX_SAFE_INTEGER, 'NZD 900,719,925,474.10'],
+  ])('formats stored currency value %d with exactly two decimals', (value, expected) => {
+    expect(formatScaledAmount(value, 'NZD')).toBe(expected)
+  })
+
+  it('formats a currency-free display value while preserving exact editable decimals', () => {
+    expect(formatScaledDisplayDecimal(1_501_234)).toBe('150.12')
+    expect(formatScaledDecimal(1_501_234)).toBe('150.1234')
+  })
+
+  it('uses two display decimals regardless of the currency code', () => {
+    expect(formatScaledAmount(1_501_234, 'JPY')).toBe('JPY 150.12')
+    expect(formatScaledAmount(1_501_234, 'KWD')).toBe('KWD 150.12')
+  })
+
+  it('rejects invalid display storage and currency codes', () => {
     expect(formatScaledDecimal(-1)).toBeNull()
     expect(formatScaledDecimal(1.5)).toBeNull()
-    expect(formatScaledAmount(1_500_000, 'nzd')).toBe('Invalid rate')
+    expect(formatScaledDisplayDecimal(-1)).toBeNull()
+    expect(formatScaledAmount(1_500_000, 'nzd')).toBe('Invalid amount')
   })
 })

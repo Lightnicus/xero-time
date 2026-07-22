@@ -51,7 +51,18 @@ export const ReleaseActions: CollectionConfig = {
       fields: [
         { name: 'entryCount', type: 'number', min: 1, required: true },
         { name: 'durationSeconds', type: 'number', min: 60, required: true },
-        { name: 'amountScaled', type: 'number', min: 0, required: true },
+        {
+          name: 'amountScaled',
+          label: 'Amount',
+          type: 'number',
+          min: 0,
+          required: true,
+          admin: {
+            description:
+              'Internal audit amount; use the linked export for the currency-specific total.',
+            hidden: true,
+          },
+        },
       ],
     },
     { name: 'before', type: 'json', required: true },

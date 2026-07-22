@@ -10,6 +10,24 @@ const signIn = async (page: import('@playwright/test').Page): Promise<void> => {
   await expect(page).toHaveURL(/\/app$/)
 }
 
+const expectSelectionSummary = async (
+  page: import('@playwright/test').Page,
+  expected: string,
+): Promise<void> => {
+  await expect(page.locator('.billing-scope-summary strong')).toHaveText(expected)
+}
+
+const expectPreviewValues = async (
+  page: import('@playwright/test').Page,
+  expected: readonly string[],
+): Promise<void> => {
+  const values = page.getByRole('region', { name: 'Preview values' })
+  for (const value of expected) {
+    await expect(values.getByText(value, { exact: true })).toBeVisible()
+  }
+  await expect(values.getByText(/NZD [\d,]+\.\d{3,}/)).toHaveCount(0)
+}
+
 const reserveCurrentPreview = async (page: import('@playwright/test').Page): Promise<void> => {
   await page.getByRole('checkbox', { name: /I reviewed every invoice header/ }).check()
   await page.getByRole('button', { name: 'Create draft invoices' }).click()
@@ -86,7 +104,7 @@ test.describe.serial('Billing application', () => {
     await page.goto('/app/settings/projects')
 
     const projectRow = page.getByRole('row').filter({ hasText: 'E2E-BILL' })
-    await expect(projectRow).toContainText('NZD 200.00')
+    await expect(projectRow.getByRole('cell', { name: 'NZD 200.01', exact: true })).toBeVisible()
     await projectRow.getByRole('link', { name: 'Preview recalculation' }).click()
     await expect(
       page.getByRole('heading', { name: 'E2E-BILL — Browser Billing Project' }),
@@ -131,7 +149,7 @@ test.describe.serial('Billing application', () => {
     await implementationRow.uncheck()
     await expect(implementationRow).not.toBeChecked()
     await page.getByRole('radio', { name: /^All matching filters/ }).check()
-    await expect(page.locator('.billing-scope-summary')).toContainText('1 entry · 1h 15m')
+    await expectSelectionSummary(page, '1 entry · 1h 15m · NZD 250.01 · 1 draft invoice')
   })
 
   test('previews, reserves, and safely cancels every unified billing scope', async ({
@@ -146,21 +164,27 @@ test.describe.serial('Billing application', () => {
     await expect(page.getByLabel('Invoice date')).toHaveCount(1)
     await expect(page.getByRole('button', { name: 'Review draft invoices' })).toHaveCount(1)
     const selectionSummary = page.locator('.billing-scope-summary')
-    await expect(selectionSummary).toContainText('2 entries · 2h 0m')
+    await expect(selectionSummary.locator('strong')).toHaveText(
+      '2 entries · 2h 0m · NZD 400.01 · 1 draft invoice',
+    )
     await page.getByRole('button', { name: 'Clear visible' }).click()
-    await expect(selectionSummary).toContainText('0 entries · 0h 0m')
+    await expect(selectionSummary.locator('strong')).toHaveText(
+      '0 entries · 0h 0m · No value selected · 0 draft invoices',
+    )
     await expect(page.getByText('Select at least one row to review.')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Review draft invoices' })).toBeDisabled()
     await page.getByRole('button', { name: 'Select visible' }).click()
     await page.getByRole('checkbox', { name: 'Select Billing implementation review' }).uncheck()
-    await expect(selectionSummary).toContainText('1 entry · 1h 15m')
+    await expect(selectionSummary.locator('strong')).toHaveText(
+      '1 entry · 1h 15m · NZD 250.01 · 1 draft invoice',
+    )
     await page.getByRole('button', { name: 'Review draft invoices' }).click()
 
     await expect(page.getByRole('heading', { name: 'Review 1 draft invoice' })).toBeVisible()
     await expect(page.getByText('2026-07-18 · E2E-BILL · Billing discovery workshop')).toBeVisible()
     await expect(page.getByText('Billing implementation review')).toHaveCount(0)
     await expect(page.getByRole('region', { name: 'Preview summary' })).toContainText('1h 15m')
-    await expect(page.getByRole('region', { name: 'Preview values' })).toContainText('NZD 250.00')
+    await expectPreviewValues(page, ['NZD 250.01', 'NZD 37.50', 'NZD 287.51'])
     await expect(page.getByText('E2E-CUSTOMER-0001', { exact: true })).toBeVisible()
     await expect(page.getByText('TIME — Professional services')).toBeVisible()
 
@@ -177,14 +201,18 @@ test.describe.serial('Billing application', () => {
     await page.goto('/app/billing')
     await expect(page.getByRole('checkbox', { name: /^Select Billing/ })).toHaveCount(2)
     await page.getByRole('radio', { name: /^All matching filters/ }).check()
-    await expect(selectionSummary).toContainText('2 entries · 2h 0m')
+    await expect(selectionSummary.locator('strong')).toHaveText(
+      '2 entries · 2h 0m · NZD 400.01 · 1 draft invoice',
+    )
     await page.getByRole('checkbox', { name: 'Select Billing implementation review' }).uncheck()
-    await expect(selectionSummary).toContainText('1 entry · 1h 15m')
+    await expect(selectionSummary.locator('strong')).toHaveText(
+      '1 entry · 1h 15m · NZD 250.01 · 1 draft invoice',
+    )
     await page.getByRole('button', { name: 'Review draft invoices' }).click()
 
     await expect(page.getByRole('heading', { name: 'Review 1 draft invoice' })).toBeVisible()
     await expect(page.getByRole('region', { name: 'Preview summary' })).toContainText('1h 15m')
-    await expect(page.getByRole('region', { name: 'Preview values' })).toContainText('NZD 250.00')
+    await expectPreviewValues(page, ['NZD 250.01', 'NZD 37.50', 'NZD 287.51'])
     await expect(page.getByText('2026-07-18 · E2E-BILL · Billing discovery workshop')).toBeVisible()
     await expect(page.getByText(/Billing implementation review/)).toHaveCount(0)
     await expect(page.getByText('E2E-CUSTOMER-0002', { exact: true })).toBeVisible()
@@ -198,13 +226,13 @@ test.describe.serial('Billing application', () => {
       '0 entries',
     )
     await page.getByRole('radio', { name: /^All uninvoiced/ }).check()
-    await expect(page.locator('.billing-scope-summary')).toContainText('2 entries · 2h 0m')
+    await expectSelectionSummary(page, '2 entries · 2h 0m · NZD 400.01 · 1 draft invoice')
     await expect(page.getByRole('button', { name: 'Review draft invoices' })).toBeEnabled()
     await page.getByRole('button', { name: 'Review draft invoices' }).click()
 
     await expect(page.getByRole('heading', { name: 'Review 1 draft invoice' })).toBeVisible()
     await expect(page.getByRole('region', { name: 'Preview summary' })).toContainText('2h 0m')
-    await expect(page.getByRole('region', { name: 'Preview values' })).toContainText('NZD 400.00')
+    await expectPreviewValues(page, ['NZD 400.01', 'NZD 60.00', 'NZD 460.01'])
     await expect(page.getByText('2026-07-18 · E2E-BILL · Billing discovery workshop')).toBeVisible()
     await expect(
       page.getByText('2026-07-18 · E2E-BILL · Billing implementation review'),

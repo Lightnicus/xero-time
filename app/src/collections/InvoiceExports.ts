@@ -159,9 +159,54 @@ export const InvoiceExports: CollectionConfig = {
       fields: [
         { name: 'entryCount', type: 'number', min: 1, required: true },
         { name: 'durationSeconds', type: 'number', min: 60, required: true },
-        { name: 'subtotalScaled', type: 'number', min: 0, required: true },
-        { name: 'taxScaled', type: 'number', min: 0, required: true },
-        { name: 'totalScaled', type: 'number', min: 0, required: true },
+        {
+          name: 'subtotalScaled',
+          label: 'Subtotal',
+          type: 'number',
+          min: 0,
+          required: true,
+          admin: {
+            disableGroupBy: true,
+            disableListFilter: true,
+            readOnly: true,
+            components: {
+              Cell: '/components/admin/ScaledCurrencyCell',
+              Field: '/components/admin/ScaledCurrencyField',
+            },
+          },
+        },
+        {
+          name: 'taxScaled',
+          label: 'Tax',
+          type: 'number',
+          min: 0,
+          required: true,
+          admin: {
+            disableGroupBy: true,
+            disableListFilter: true,
+            readOnly: true,
+            components: {
+              Cell: '/components/admin/ScaledCurrencyCell',
+              Field: '/components/admin/ScaledCurrencyField',
+            },
+          },
+        },
+        {
+          name: 'totalScaled',
+          label: 'Total',
+          type: 'number',
+          min: 0,
+          required: true,
+          admin: {
+            disableGroupBy: true,
+            disableListFilter: true,
+            readOnly: true,
+            components: {
+              Cell: '/components/admin/ScaledCurrencyCell',
+              Field: '/components/admin/ScaledCurrencyField',
+            },
+          },
+        },
       ],
     },
     {

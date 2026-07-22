@@ -87,7 +87,17 @@ export const ExportBatches: CollectionConfig = {
         { name: 'entryCount', type: 'number', min: 0, required: true },
         { name: 'invoiceCount', type: 'number', min: 0, required: true },
         { name: 'durationSeconds', type: 'number', min: 0, required: true },
-        { name: 'totalAmountScaled', type: 'number', min: 0, required: true },
+        {
+          name: 'totalAmountScaled',
+          type: 'number',
+          min: 0,
+          required: true,
+          admin: {
+            description:
+              'Internal aggregate only; a batch can contain more than one currency, so no user-facing total is shown.',
+            hidden: true,
+          },
+        },
       ],
     },
     { name: 'schemaVersion', type: 'number', defaultValue: 1, min: 1, required: true },

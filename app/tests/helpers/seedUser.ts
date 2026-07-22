@@ -260,7 +260,7 @@ export async function seedBillingAppFixture(): Promise<void> {
     data: {
       commercialChangeReason: 'Prepare a deterministic browser recalculation preview.',
       confirmUnbilledImpact: true,
-      hourlyRateScaled: 2_000_000,
+      hourlyRateScaled: 2_000_050,
     },
     overrideAccess: false,
     req: ownerReq,
