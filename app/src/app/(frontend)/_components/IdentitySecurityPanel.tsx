@@ -11,11 +11,18 @@ export function IdentitySecurityPanel({
   configured: boolean
   security: IdentitySecurityView
 }) {
+  if (!security.identity && security.sessions.length === 0 && !(configured && canLink)) {
+    return (
+      <p className="account-availability-note">
+        Xero identity sign-in is not currently available for this account.
+      </p>
+    )
+  }
+
   return (
     <section aria-labelledby="login-methods-heading" className="panel page-stack">
       <div>
-        <p className="eyebrow">Security</p>
-        <h2 id="login-methods-heading">Login methods and sessions</h2>
+        <h3 id="login-methods-heading">Login methods and sessions</h3>
         <p>
           Email and password remains available for recovery. Xero identity sign-in is separate from
           the business accounting connection.

@@ -8,7 +8,7 @@ function LogoutSubmitButton() {
   const { pending } = useFormStatus()
 
   return (
-    <button className="button button-quiet" disabled={pending} type="submit">
+    <button className="account-sign-out" disabled={pending} type="submit">
       {pending ? 'Signing out…' : 'Sign out'}
     </button>
   )
@@ -16,7 +16,7 @@ function LogoutSubmitButton() {
 
 export function LogoutButton() {
   return (
-    <form action={logoutAction}>
+    <form action={logoutAction} className="account-sign-out-form">
       <LogoutSubmitButton />
     </form>
   )

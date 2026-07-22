@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { hasActiveRole } from '@/access/roles'
+import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import { getBusinessSettings } from '@/lib/member-app/data'
 import { requireAppSession } from '@/lib/member-app/session'
 import { getAccountingConnectionView } from '@/lib/xero/accounting/service'
@@ -74,7 +75,13 @@ export default async function XeroAccountingPage({
     getAccountingConnectionView(session),
     getBusinessSettings(session),
   ])
-  const error = errorMessage(value(params.error))
+  const errorCode = value(params.error)
+  const error = errorMessage(errorCode)
+  const advancedControlsOpen = [
+    'handover-required',
+    'invalid-handover-reason',
+    'unsafe-export-state',
+  ].includes(errorCode)
   const dateTimeFormatter = new Intl.DateTimeFormat(settings.locale, {
     dateStyle: settings.dateDisplayStyle,
     timeStyle: 'short',
@@ -86,22 +93,11 @@ export default async function XeroAccountingPage({
 
   return (
     <div className="narrow-page page-stack">
-      <div className="breadcrumb">
-        <Link href="/app">My time</Link>
-        <span aria-hidden="true">/</span>
-        <span>Xero accounting</span>
-      </div>
-
-      <section className="page-heading compact">
-        <div>
-          <p className="eyebrow">Business integration</p>
-          <h1>Xero accounting</h1>
-          <p>
-            Connect the one Xero organisation used for customer mapping and draft invoice exports.
-            This is separate from optional user sign-in with Xero.
-          </p>
-        </div>
-      </section>
+      <PageHeader
+        breadcrumb={{ current: 'Xero accounting', href: '/app/settings', label: 'Settings' }}
+        description="Connect the one Xero organisation used for customer mapping and draft invoice exports. This is separate from optional user sign-in with Xero."
+        title="Xero accounting"
+      />
 
       {error && (
         <div aria-live="polite" className="notice notice-warning" role="alert">
@@ -359,74 +355,93 @@ export default async function XeroAccountingPage({
           )}
 
           {connection.status === 'connected' && (
-            <form
-              action="/api/integrations/xero/accounting/handover"
-              className="form-section integration-form"
-              method="post"
+            <details
+              className="settings-disclosure settings-disclosure-danger"
+              open={advancedControlsOpen}
             >
-              <div>
-                <h2>Change accounting authorizer</h2>
-                <p>
-                  Explicitly replace the server-held grant while pinning the same organisation. The
-                  old grant remains active unless the new tenant, scopes, token identity, and local
-                  transaction all validate.
-                </p>
-              </div>
-              <label className="field">
-                <span>Reason</span>
-                <textarea maxLength={1_000} minLength={10} name="reason" required rows={3} />
-              </label>
-              <label className="field">
-                <span>Current password</span>
-                <input autoComplete="current-password" name="password" required type="password" />
-              </label>
-              <label className="confirmation-field">
-                <input name="confirmation" required type="checkbox" value="handover" />
-                <span>I understand the new Xero login must authorize this same organisation.</span>
-              </label>
-              <button className="button button-secondary" type="submit">
-                Start authorizer handover
-              </button>
-            </form>
-          )}
+              <summary>Advanced Xero controls</summary>
+              <div className="settings-disclosure-content">
+                <form
+                  action="/api/integrations/xero/accounting/handover"
+                  className="settings-disclosure-section integration-form"
+                  method="post"
+                >
+                  <div>
+                    <h2>Change accounting authorizer</h2>
+                    <p>
+                      Explicitly replace the server-held grant while pinning the same organisation.
+                      The old grant remains active unless the new tenant, scopes, token identity,
+                      and local transaction all validate.
+                    </p>
+                  </div>
+                  <label className="field">
+                    <span>Reason</span>
+                    <textarea maxLength={1_000} minLength={10} name="reason" required rows={3} />
+                  </label>
+                  <label className="field">
+                    <span>Current password</span>
+                    <input
+                      autoComplete="current-password"
+                      name="password"
+                      required
+                      type="password"
+                    />
+                  </label>
+                  <label className="confirmation-field">
+                    <input name="confirmation" required type="checkbox" value="handover" />
+                    <span>
+                      I understand the new Xero login must authorize this same organisation.
+                    </span>
+                  </label>
+                  <button className="button button-secondary" type="submit">
+                    Start authorizer handover
+                  </button>
+                </form>
 
-          {connection.status === 'connected' && (
-            <form
-              action="/api/integrations/xero/accounting/disconnect"
-              className="danger-zone integration-disconnect"
-              method="post"
-            >
-              <div>
-                <h2>Disconnect accounting</h2>
-                <p>
-                  Stops future Xero operations and removes locally usable credentials. Historical
-                  tenant and invoice mappings are retained.
-                </p>
+                <form
+                  action="/api/integrations/xero/accounting/disconnect"
+                  className="danger-zone integration-disconnect"
+                  method="post"
+                >
+                  <div>
+                    <h2>Disconnect accounting</h2>
+                    <p>
+                      Stops future Xero operations and removes locally usable credentials.
+                      Historical tenant and invoice mappings are retained.
+                    </p>
+                  </div>
+                  <div className="disconnect-fields">
+                    <label className="field" htmlFor="disconnectReason">
+                      <span>Reason</span>
+                      <textarea
+                        id="disconnectReason"
+                        minLength={10}
+                        name="reason"
+                        required
+                        rows={3}
+                      />
+                    </label>
+                    <label className="field" htmlFor="disconnectPassword">
+                      <span>Current password</span>
+                      <input
+                        autoComplete="current-password"
+                        id="disconnectPassword"
+                        name="password"
+                        required
+                        type="password"
+                      />
+                    </label>
+                    <label className="confirmation-field">
+                      <input name="confirmation" required type="checkbox" value="disconnect" />
+                      <span>I understand this stops Xero exports until reconnection.</span>
+                    </label>
+                    <button className="button button-danger" type="submit">
+                      Disconnect Xero
+                    </button>
+                  </div>
+                </form>
               </div>
-              <div className="disconnect-fields">
-                <label className="field" htmlFor="disconnectReason">
-                  <span>Reason</span>
-                  <textarea id="disconnectReason" minLength={10} name="reason" required rows={3} />
-                </label>
-                <label className="field" htmlFor="disconnectPassword">
-                  <span>Current password</span>
-                  <input
-                    autoComplete="current-password"
-                    id="disconnectPassword"
-                    name="password"
-                    required
-                    type="password"
-                  />
-                </label>
-                <label className="confirmation-field">
-                  <input name="confirmation" required type="checkbox" value="disconnect" />
-                  <span>I understand this stops Xero exports until reconnection.</span>
-                </label>
-                <button className="button button-danger" type="submit">
-                  Disconnect Xero
-                </button>
-              </div>
-            </form>
+            </details>
           )}
         </>
       )}

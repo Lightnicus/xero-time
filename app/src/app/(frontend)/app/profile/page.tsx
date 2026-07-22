@@ -1,11 +1,12 @@
 import { cookies } from 'next/headers'
-import Link from 'next/link'
 import { getPayload } from 'payload'
 
 import { IdentitySecurityPanel } from '@/app/(frontend)/_components/IdentitySecurityPanel'
+import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import { PasswordChangeForm } from '@/app/(frontend)/_components/PasswordChangeForm'
 import { ProfileForm } from '@/app/(frontend)/_components/ProfileForm'
 import { timezoneOptionsIncluding } from '@/lib/member-app/date-time'
+import { defaultAppHome } from '@/lib/member-app/navigation'
 import { requireAppSession } from '@/lib/member-app/session'
 import {
   EXTERNAL_SESSION_COOKIE,
@@ -17,7 +18,7 @@ import config from '@/payload.config'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Profile | Project Time',
+  title: 'Profile & security | Project Time',
 }
 
 export default async function ProfilePage({
@@ -40,20 +41,16 @@ export default async function ProfilePage({
   ])
 
   return (
-    <div className="narrow-page page-stack">
-      <div className="breadcrumb">
-        <Link href="/app">My time</Link>
-        <span aria-hidden="true">/</span>
-        <span>Profile</span>
-      </div>
-
-      <section className="page-heading compact">
-        <div>
-          <p className="eyebrow">Your account</p>
-          <h1>Profile</h1>
-          <p>Choose how your name appears and which timezone the application uses by default.</p>
-        </div>
-      </section>
+    <div className="narrow-page page-stack account-workflow-page">
+      <PageHeader
+        breadcrumb={{
+          current: 'Profile & security',
+          href: defaultAppHome(session.user.role),
+          label: session.user.role === 'biller' ? 'Billing' : 'My time',
+        }}
+        description="Manage how your account appears, its default timezone, and sign-in security."
+        title="Profile & security"
+      />
 
       {saved && (
         <div aria-live="polite" className="notice notice-success" role="status">
@@ -110,12 +107,19 @@ export default async function ProfilePage({
         initialTimezone={session.user.timezone}
         timezones={timezoneOptionsIncluding(session.user.timezone)}
       />
-      <PasswordChangeForm />
-      <IdentitySecurityPanel
-        canLink={identityFeatures.loginEnabled && identityFeatures.linkingEnabled}
-        configured={identityFeatures.configured}
-        security={security}
-      />
+
+      <section aria-labelledby="account-security-heading" className="account-security-stack">
+        <div className="account-section-heading">
+          <h2 id="account-security-heading">Security</h2>
+          <p>Manage your password, linked sign-in methods, and active external sessions.</p>
+        </div>
+        <PasswordChangeForm />
+        <IdentitySecurityPanel
+          canLink={identityFeatures.loginEnabled && identityFeatures.linkingEnabled}
+          configured={identityFeatures.configured}
+          security={security}
+        />
+      </section>
     </div>
   )
 }

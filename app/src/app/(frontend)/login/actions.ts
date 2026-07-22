@@ -7,6 +7,7 @@ import { after } from 'next/server'
 import { generateExpiredPayloadCookie, generatePayloadCookie, getPayload } from 'payload'
 
 import { recordAuditEvent } from '@/lib/audit/service'
+import { defaultAppHome } from '@/lib/member-app/navigation'
 import { enforceRateLimit, rateLimitKey } from '@/lib/security/rate-limit'
 import { enqueueStaleAccountingHealthCheck } from '@/lib/xero/accounting/health-scheduling'
 import { EXTERNAL_SESSION_COOKIE, revokeCurrentExternalSession } from '@/lib/xero/identity/service'
@@ -23,7 +24,7 @@ const safeAppPath = (value: FormDataEntryValue | null): string => {
 
   const isAppPath = value === '/app' || value.startsWith('/app/') || value.startsWith('/app?')
 
-  return isAppPath && !value.startsWith('//') ? value : '/app'
+  return isAppPath && !value.startsWith('//') && !value.includes('\\') ? value : '/app'
 }
 
 export async function loginAction(
@@ -32,7 +33,7 @@ export async function loginAction(
 ): Promise<LoginActionState> {
   const emailValue = formData.get('email')
   const passwordValue = formData.get('password')
-  const destination = safeAppPath(formData.get('next'))
+  let destination = safeAppPath(formData.get('next'))
 
   if (
     typeof emailValue !== 'string' ||
@@ -65,6 +66,8 @@ export async function loginAction(
     if (!authConfig || !result.token || !result.user) {
       throw new Error('Login did not create a session token.')
     }
+
+    if (destination === '/app') destination = defaultAppHome(result.user.role)
 
     await payload.update({
       collection: 'users',

@@ -3,11 +3,14 @@ import { notFound } from 'next/navigation'
 
 import { hasActiveRole } from '@/access/roles'
 import { DeleteTimeEntryButton } from '@/app/(frontend)/_components/DeleteTimeEntryButton'
+import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import { TimeEntryForm, type TimeEntryFormValues } from '@/app/(frontend)/_components/TimeEntryForm'
 import { relationshipID } from '@/lib/domain/validation'
 import { findMyTimeEntry, listActiveProjectOptions } from '@/lib/member-app/data'
 import { instantToLocalDateTime, timezoneOptionsIncluding } from '@/lib/member-app/date-time'
 import { canLogTime, requireAppSession } from '@/lib/member-app/session'
+
+import '../../../../time-workflow.css'
 
 import type { Metadata } from 'next'
 
@@ -34,20 +37,12 @@ export default async function EditTimeEntryPage({ params }: { params: Promise<{ 
 
   if (!editable) {
     return (
-      <div className="narrow-page page-stack">
-        <div className="breadcrumb">
-          <Link href="/app">My time</Link>
-          <span aria-hidden="true">/</span>
-          <span>View time</span>
-        </div>
-
-        <section className="page-heading compact">
-          <div>
-            <p className="eyebrow">Read only</p>
-            <h1>Time entry</h1>
-            <p>This entry cannot be changed from the member application.</p>
-          </div>
-        </section>
+      <div className="narrow-page page-stack time-form-page">
+        <PageHeader
+          breadcrumb={{ current: 'View time', href: '/app', label: 'My time' }}
+          description="Review the recorded work and its billing status."
+          title="Time entry"
+        />
 
         <div className="notice notice-warning">
           {entry.billingStatus === 'unbilled'
@@ -139,23 +134,17 @@ export default async function EditTimeEntryPage({ params }: { params: Promise<{ 
   }
 
   return (
-    <div className="narrow-page page-stack">
-      <div className="breadcrumb">
-        <Link href="/app">My time</Link>
-        <span aria-hidden="true">/</span>
-        <span>Edit time</span>
-      </div>
-
-      <section className="page-heading compact">
-        <div>
-          <p className="eyebrow">Unbilled entry</p>
-          <h1>Edit time</h1>
-          <p>Changes update this entry while preserving the project billing snapshot rules.</p>
-        </div>
-        <Link className="button button-secondary" href={`/app/time/new?duplicate=${entry.id}`}>
-          Duplicate entry
-        </Link>
-      </section>
+    <div className="narrow-page page-stack time-form-page">
+      <PageHeader
+        action={
+          <Link className="button button-secondary" href={`/app/time/new?duplicate=${entry.id}`}>
+            Duplicate entry
+          </Link>
+        }
+        breadcrumb={{ current: 'Edit time', href: '/app', label: 'My time' }}
+        description="Update the work details for this unbilled entry."
+        title="Edit time"
+      />
 
       <TimeEntryForm
         entryID={entry.id}

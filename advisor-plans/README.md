@@ -56,10 +56,10 @@ eyebrow copy that restates a heading.
 
 | Plan | Title                                                          | Priority | Effort | Depends on          | Status |
 | ---- | -------------------------------------------------------------- | -------: | -----: | ------------------- | ------ |
-| 001  | Replace the flat header with role-aware navigation             |       P1 |      M | -                   | TODO   |
-| 002  | Put recording and reviewing time first                         |       P1 |      M | 001                 | TODO   |
-| 003  | Reduce billing to one selection-to-review path                 |       P1 |    M-L | 001, 002 primitives | TODO   |
-| 004  | Organise settings and progressively disclose advanced controls |       P2 |      M | 001, 002 primitives | TODO   |
+| 001  | Replace the flat header with role-aware navigation             |       P1 |      M | -                   | DONE   |
+| 002  | Put recording and reviewing time first                         |       P1 |      M | 001                 | DONE   |
+| 003  | Reduce billing to one selection-to-review path                 |       P1 |    M-L | 001, 002 primitives | DONE   |
+| 004  | Organise settings and progressively disclose advanced controls |       P2 |      M | 001, 002 primitives | DONE   |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED | REJECTED.
 
@@ -89,10 +89,9 @@ Status values: TODO | IN PROGRESS | DONE | BLOCKED | REJECTED.
   users to `next=/app`), but it is security-sensitive auth-routing work and
   should receive its own plan rather than ride inside a navigation refactor.
 
-## Review decision requested
+## Implementation result
 
-Approve, reject, or amend the hierarchy and the four scopes before any source
-implementation. In particular, confirm whether billers should have a secondary
-My time link; the recommendation is to remove it from their menu because they
-cannot create time and the Billing queue already exposes their operational
-review surface.
+The approved hierarchy and all four cleanup plans were implemented. Billers
+land on Billing and do not receive a secondary My time menu item. Static,
+unit, integration, performance, production-build, and responsive browser
+verification completed successfully.

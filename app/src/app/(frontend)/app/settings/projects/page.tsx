@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { hasActiveRole } from '@/access/roles'
+import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import { formatScaledAmount } from '@/lib/domain/money'
 import { requireAppSession } from '@/lib/member-app/session'
 import { previewProjectRateRecalculation } from '@/lib/projects/rate-recalculation'
@@ -12,7 +13,7 @@ import { ProjectXeroItemForm } from './ProjectXeroItemForm'
 
 import type { Metadata } from 'next'
 
-export const metadata: Metadata = { title: 'Projects, rates and Xero items | Project Time' }
+export const metadata: Metadata = { title: 'Project billing | Project Time' }
 
 type SearchParams = {
   error?: string
@@ -107,24 +108,16 @@ export default async function ProjectSettingsPage({
 
   return (
     <div className="wide-page page-stack">
-      <div className="breadcrumb">
-        <Link href="/app">My time</Link>
-        <span aria-hidden="true">/</span>
-        <span>Projects, rates and Xero items</span>
-      </div>
-      <section className="page-heading compact">
-        <div>
-          <p className="eyebrow">Commercial settings</p>
-          <h1>Projects, rates and Xero items</h1>
-          <p>
-            Map each project to its Xero sales item, and manage the rates applied to time and
-            invoice previews.
-          </p>
-        </div>
-        <Link className="button button-secondary" href="/admin/collections/projects">
-          Edit projects
-        </Link>
-      </section>
+      <PageHeader
+        action={
+          <Link className="button button-secondary" href="/admin/collections/projects">
+            Manage projects in Payload Admin ↗
+          </Link>
+        }
+        breadcrumb={{ current: 'Project billing', href: '/app/settings', label: 'Settings' }}
+        description="Map each project to its Xero sales item, and manage the rates applied to time and invoice previews."
+        title="Project billing"
+      />
 
       {params.updated && (
         <div className="notice notice-success" role="status">

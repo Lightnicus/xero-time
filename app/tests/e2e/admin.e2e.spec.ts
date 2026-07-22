@@ -107,7 +107,7 @@ test.describe('Admin Panel', () => {
     const inviteePassword = 'browser-invite-password-123!'
     await page.goto(`${serverURL}/app/settings/users`)
 
-    await expect(page.getByRole('heading', { name: 'People and invitations' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'People & invitations' })).toBeVisible()
     await page.getByLabel('Display name').fill('Browser Invitee')
     await page.getByLabel('Email address').fill(inviteeEmail)
     await page.getByLabel('Role').selectOption('member')

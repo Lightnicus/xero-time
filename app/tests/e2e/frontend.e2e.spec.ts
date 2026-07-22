@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 
 import {
   cleanupTestUser,
@@ -8,6 +8,38 @@ import {
   seedMemberAppFixture,
   seedMemberTimeEntries,
 } from '../helpers/seedUser'
+
+const datedTimeView = '/app?view=day&date=2026-07-18'
+
+const openAccountMenu = async (
+  page: Page,
+  displayName: string = memberAppUser.displayName,
+): Promise<void> => {
+  const accountTrigger = page.getByRole('button', { name: displayName })
+
+  await accountTrigger.click()
+  await expect(accountTrigger).toHaveAttribute('aria-expanded', 'true')
+}
+
+const openProfileFromAccount = async (
+  page: Page,
+  displayName: string = memberAppUser.displayName,
+): Promise<void> => {
+  await openAccountMenu(page, displayName)
+  await page.getByRole('link', { name: 'Profile & security' }).click()
+}
+
+const signOutFromAccount = async (
+  page: Page,
+  displayName: string = memberAppUser.displayName,
+): Promise<void> => {
+  await openAccountMenu(page, displayName)
+  await page.getByRole('button', { name: 'Sign out' }).click()
+}
+
+const openTimezoneDisclosure = async (page: Page): Promise<void> => {
+  await page.getByText('Change timezone', { exact: true }).click()
+}
 
 test.describe.serial('Member time application', () => {
   test.beforeAll(async () => {
@@ -62,7 +94,7 @@ test.describe.serial('Member time application', () => {
     await page.getByRole('button', { name: 'Set new password' }).click()
 
     await expect(page).toHaveURL(/\/app\/profile\?password=reset$/)
-    await page.getByRole('button', { name: 'Sign out' }).click()
+    await signOutFromAccount(page)
     await page.getByLabel('Email address').fill(memberAppUser.email)
     await page.getByLabel('Password').fill(memberAppUser.password)
     await page.getByRole('button', { name: 'Sign in' }).click()
@@ -72,7 +104,7 @@ test.describe.serial('Member time application', () => {
     await page.getByLabel('Password').fill(recoveredPassword)
     await page.getByRole('button', { name: 'Sign in' }).click()
     await expect(page).toHaveURL(/\/app$/)
-    await page.getByRole('link', { name: 'Profile' }).click()
+    await openProfileFromAccount(page)
     await page.getByLabel('Current password').fill(recoveredPassword)
     await page.getByLabel('New password', { exact: true }).fill(memberAppUser.password)
     await page.getByLabel('Confirm new password').fill(memberAppUser.password)
@@ -162,6 +194,7 @@ test.describe.serial('Member time application', () => {
     await page.getByRole('button', { name: 'Add time' }).click()
 
     await expect(page).toHaveURL(/\/app\?created=1$/)
+    await page.goto(datedTimeView)
     const rangeRow = page
       .getByRole('row')
       .filter({ hasText: 'Worked through a timezone-sensitive report' })
@@ -174,10 +207,14 @@ test.describe.serial('Member time application', () => {
     await page.getByLabel('Email address').fill(memberAppUser.email)
     await page.getByLabel('Password').fill(memberAppUser.password)
     await page.getByRole('button', { name: 'Sign in' }).click()
+    await expect(page).toHaveURL(/\/app$/)
 
+    await page.goto(datedTimeView)
+    await expect(page.getByRole('heading', { name: 'My time' })).toBeVisible()
     const sourceRow = page
       .getByRole('row')
       .filter({ hasText: 'Worked through a timezone-sensitive report' })
+    await expect(sourceRow).toBeVisible()
     await sourceRow.getByRole('link', { name: 'Edit' }).click()
     await page.getByRole('link', { name: 'Duplicate entry' }).click()
 
@@ -186,6 +223,7 @@ test.describe.serial('Member time application', () => {
     await expect(page.getByLabel('Description')).toHaveValue(
       'Worked through a timezone-sensitive report',
     )
+    await openTimezoneDisclosure(page)
     await expect(page.locator('#timezone')).toHaveValue('Pacific/Auckland')
     await expect(page.locator('#startLocal')).toHaveValue('2026-07-18T09:15')
     await expect(page.locator('#endLocal')).toHaveValue('2026-07-18T10:45')
@@ -204,6 +242,7 @@ test.describe.serial('Member time application', () => {
     await page.getByRole('button', { name: 'Add time' }).click()
 
     await expect(page).toHaveURL(/\/app\?created=1$/)
+    await page.goto(datedTimeView)
     const duplicateRow = page
       .getByRole('row')
       .filter({ hasText: 'Duplicated timezone-sensitive report' })
@@ -212,6 +251,8 @@ test.describe.serial('Member time application', () => {
     page.once('dialog', (dialog) => dialog.accept())
     await page.getByRole('button', { name: 'Delete entry' }).click()
 
+    await expect(page).toHaveURL(/\/app\?deleted=1$/)
+    await page.goto(datedTimeView)
     await expect(page.getByText('Duplicated timezone-sensitive report')).toHaveCount(0)
     await expect(page.getByText('Worked through a timezone-sensitive report')).toBeVisible()
   })
@@ -224,7 +265,7 @@ test.describe.serial('Member time application', () => {
     await page.getByLabel('Password').fill(memberAppUser.password)
     await page.getByRole('button', { name: 'Sign in' }).click()
 
-    await page.getByRole('link', { name: 'Profile' }).click()
+    await openProfileFromAccount(page)
     await expect(page.getByText(memberAppUser.email)).toBeVisible()
     await page.getByLabel('Display name').fill('Updated Time Member')
     await page.locator('#profileTimezone').fill('Mars/Olympus')
@@ -239,16 +280,20 @@ test.describe.serial('Member time application', () => {
     await expect(page.locator('.account-copy strong')).toHaveText('Updated Time Member')
 
     await page.getByRole('link', { name: 'Add time' }).first().click()
+    await openTimezoneDisclosure(page)
     await expect(page.locator('#timezone')).toHaveValue('Australia/Sydney')
     await page.getByRole('link', { name: 'Cancel' }).click()
+    await expect(page).toHaveURL(/\/app$/)
 
+    await page.goto(datedTimeView)
     const existingRow = page
       .getByRole('row')
       .filter({ hasText: 'Worked through a timezone-sensitive report' })
     await existingRow.getByRole('link', { name: 'Edit' }).click()
+    await openTimezoneDisclosure(page)
     await expect(page.locator('#timezone')).toHaveValue('Pacific/Auckland')
 
-    await page.getByRole('link', { name: 'Profile' }).click()
+    await openProfileFromAccount(page, 'Updated Time Member')
     await page.getByLabel('Display name').fill(memberAppUser.displayName)
     await page.locator('#profileTimezone').fill(memberAppUser.timezone)
     await page.getByRole('button', { name: 'Save profile' }).click()
@@ -262,7 +307,9 @@ test.describe.serial('Member time application', () => {
     await page.getByLabel('Email address').fill(memberAppUser.email)
     await page.getByLabel('Password').fill(memberAppUser.password)
     await page.getByRole('button', { name: 'Sign in' }).click()
+    await expect(page).toHaveURL(/\/app$/)
 
+    await page.goto('/app?view=all')
     await expect(page.getByText('Page 1 of 2')).toBeVisible()
     const pagination = page.getByRole('navigation', { name: 'Time entry pages' })
     await pagination.getByRole('link', { name: 'Next' }).click()
@@ -283,6 +330,7 @@ test.describe.serial('Member time application', () => {
     await page.getByLabel('Password').fill(memberAppUser.password)
     await page.getByRole('button', { name: 'Sign in' }).click()
 
+    await page.getByText('More filters', { exact: true }).click()
     await expect(page.getByLabel('Project')).toContainText('E2E-WEB')
     await page.getByLabel('View').selectOption('day')
     await page.getByLabel('Day or week containing').fill('2026-07-18')
@@ -297,22 +345,20 @@ test.describe.serial('Member time application', () => {
     ).toBeVisible()
     await expect(page.getByText('Worked through a timezone-sensitive report')).toBeVisible()
     await expect(page.getByText('Pagination entry 01')).toHaveCount(0)
+    await page.getByText('View daily and weekly breakdown', { exact: true }).click()
     await expect(
       page.getByRole('region', { name: 'Time totals' }).getByText('1h 30m').first(),
     ).toBeVisible()
 
+    await page.getByText('More filters', { exact: true }).click()
     await page.getByLabel('Billable').selectOption('no')
     await page.getByRole('button', { name: 'Apply filters' }).click()
-    await expect(
-      page.getByRole('heading', { name: 'No entries match these filters' }),
-    ).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'No entries match this view' })).toBeVisible()
 
     await page.getByLabel('Billable').selectOption('')
     await page.getByLabel('Billing status').selectOption('reserved')
     await page.getByRole('button', { name: 'Apply filters' }).click()
-    await expect(
-      page.getByRole('heading', { name: 'No entries match these filters' }),
-    ).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'No entries match this view' })).toBeVisible()
 
     await page.getByRole('link', { name: 'Clear filters' }).first().click()
     await expect(page.getByRole('heading', { name: 'My time' })).toBeVisible()
@@ -328,7 +374,9 @@ test.describe.serial('Member time application', () => {
     await page.getByRole('button', { name: 'Sign in' }).press('Enter')
     await expect(page).toHaveURL(/\/app$/)
 
-    const addTime = page.getByRole('link', { name: 'Add time' }).first()
+    const addTime = page
+      .locator('.mobile-navigation-controls')
+      .getByRole('link', { name: 'Add time', exact: true })
     await addTime.focus()
     await expect(addTime).toBeFocused()
     await page.keyboard.press('Enter')
@@ -349,7 +397,7 @@ test.describe.serial('Member time application', () => {
     await page.getByLabel('Email address').fill(memberAppUser.email)
     await page.getByLabel('Password').fill(memberAppUser.password)
     await page.getByRole('button', { name: 'Sign in' }).click()
-    await page.getByRole('link', { name: 'Profile' }).click()
+    await openProfileFromAccount(page)
 
     await page.getByLabel('Current password').fill(memberAppUser.password)
     await page.getByLabel('New password', { exact: true }).fill(replacementPassword)
@@ -358,7 +406,7 @@ test.describe.serial('Member time application', () => {
     await expect(page).toHaveURL(/\/app\/profile\?password=changed$/)
     await expect(page.getByText('Other browser sessions were revoked.')).toBeVisible()
 
-    await page.getByRole('button', { name: 'Sign out' }).click()
+    await signOutFromAccount(page)
     await page.getByLabel('Email address').fill(memberAppUser.email)
     await page.getByLabel('Password').fill(memberAppUser.password)
     await page.getByRole('button', { name: 'Sign in' }).click()
@@ -368,7 +416,7 @@ test.describe.serial('Member time application', () => {
     await page.getByLabel('Password').fill(replacementPassword)
     await page.getByRole('button', { name: 'Sign in' }).click()
     await expect(page).toHaveURL(/\/app$/)
-    await page.getByRole('link', { name: 'Profile' }).click()
+    await openProfileFromAccount(page)
     await page.getByLabel('Current password').fill(replacementPassword)
     await page.getByLabel('New password', { exact: true }).fill(memberAppUser.password)
     await page.getByLabel('Confirm new password').fill(memberAppUser.password)
@@ -394,7 +442,7 @@ test.describe.serial('Member time application', () => {
     expect(cookieAfterDeniedRoute).toBeDefined()
     await expect(page).toHaveURL(/^http:\/\/localhost:3101\/app$/)
 
-    await page.getByRole('button', { name: 'Sign out' }).click()
+    await signOutFromAccount(page)
 
     await expect(page).toHaveURL(/\/login$/)
     await page.goto('/app')

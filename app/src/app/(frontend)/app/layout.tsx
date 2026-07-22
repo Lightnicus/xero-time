@@ -1,23 +1,22 @@
 import Link from 'next/link'
 
-import { LogoutButton } from '@/app/(frontend)/_components/LogoutButton'
+import { AppNavigation } from '@/app/(frontend)/_components/AppNavigation'
 import { getBusinessSettings } from '@/lib/member-app/data'
-import { canLogTime, requireAppSession } from '@/lib/member-app/session'
+import { navigationForRole } from '@/lib/member-app/navigation'
+import { requireAppSession } from '@/lib/member-app/session'
 
 export const dynamic = 'force-dynamic'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await requireAppSession()
   const settings = await getBusinessSettings(session)
-  const showAdmin = session.user.role === 'owner' || session.user.role === 'admin'
-  const showBilling = showAdmin || session.user.role === 'biller'
-  const showNewTime = canLogTime(session.user)
+  const navigation = navigationForRole(session.user.role)
 
   return (
     <div className="app-shell">
       <header className="app-header">
         <div className="app-header-inner">
-          <Link className="app-brand" href="/app">
+          <Link className="app-brand" href={navigation.homeHref}>
             <span className="app-brand-mark" aria-hidden="true">
               PT
             </span>
@@ -27,38 +26,21 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             </span>
           </Link>
 
-          <nav aria-label="Primary" className="app-nav">
-            <Link href="/app">My time</Link>
-            {showNewTime && <Link href="/app/time/new">Add time</Link>}
-            <Link href="/app/profile">Profile</Link>
-            {showBilling && <Link href="/app/billing">Billing</Link>}
-            {showAdmin && <Link href="/app/settings/billing">Invoice defaults</Link>}
-            {showAdmin && <Link href="/app/settings/users">People</Link>}
-            {showAdmin && <Link href="/app/settings/customers">Customers</Link>}
-            {showAdmin && <Link href="/app/settings/projects">Projects</Link>}
-            {showAdmin && <Link href="/app/settings/xero">Xero</Link>}
-            {showAdmin && <Link href="/app/operations">Operations</Link>}
-            {showAdmin && <Link href="/admin">Admin</Link>}
-          </nav>
-
-          <div className="account-menu">
-            <span className="account-copy">
-              <strong>{session.user.displayName}</strong>
-              <small>{session.user.role}</small>
-            </span>
-            <LogoutButton />
-          </div>
+          <AppNavigation
+            displayName={session.user.displayName}
+            navigation={navigation}
+            roleLabel={session.user.role}
+          />
         </div>
       </header>
 
       <main className="app-main">{children}</main>
 
-      <footer className="app-footer">
-        <span>{settings.businessName}</span>
-        {settings.supportEmail && (
-          <a href={`mailto:${settings.supportEmail}`}>Need help? {settings.supportEmail}</a>
-        )}
-      </footer>
+      {settings.supportEmail && (
+        <footer className="app-footer">
+          <a href={`mailto:${settings.supportEmail}`}>Help and support · {settings.supportEmail}</a>
+        </footer>
+      )}
     </div>
   )
 }

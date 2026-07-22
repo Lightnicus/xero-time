@@ -6,6 +6,7 @@ import { getPayload } from 'payload'
 
 import { AccountLifecycleError, acceptInvitation } from '@/lib/account-lifecycle/service'
 import { setPayloadSessionCookie } from '@/lib/member-app/auth-cookie'
+import { defaultAppHome } from '@/lib/member-app/navigation'
 import { enforceRateLimit, rateLimitKey } from '@/lib/security/rate-limit'
 import config from '@/payload.config'
 
@@ -28,6 +29,7 @@ export async function acceptInvitationAction(
   if (password !== confirmation) return { message: 'The passwords do not match.' }
 
   const payload = await getPayload({ config })
+  let destination = '/app'
   try {
     await enforceRateLimit(payload, {
       key: rateLimitKey(await headers(), token.slice(0, 32)),
@@ -42,6 +44,7 @@ export async function acceptInvitationAction(
     })
     if (!login.token) throw new Error('Invitation acceptance did not create a session.')
     await setPayloadSessionCookie(payload, login.token)
+    destination = defaultAppHome(user.role)
   } catch (error) {
     return {
       message:
@@ -51,5 +54,5 @@ export async function acceptInvitationAction(
     }
   }
 
-  redirect('/app')
+  redirect(destination)
 }

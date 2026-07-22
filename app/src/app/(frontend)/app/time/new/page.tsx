@@ -1,11 +1,13 @@
-import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 
+import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import { TimeEntryForm, type TimeEntryFormValues } from '@/app/(frontend)/_components/TimeEntryForm'
 import { formatCalendarDateInTimezone, relationshipID } from '@/lib/domain/validation'
 import { findMyTimeEntry, listActiveProjectOptions } from '@/lib/member-app/data'
 import { instantToLocalDateTime, timezoneOptionsIncluding } from '@/lib/member-app/date-time'
 import { canLogTime, requireAppSession } from '@/lib/member-app/session'
+
+import '../../../time-workflow.css'
 
 import type { Metadata } from 'next'
 
@@ -70,24 +72,20 @@ export default async function NewTimeEntryPage({
   const duplicate = Boolean(source)
 
   return (
-    <div className="narrow-page page-stack">
-      <div className="breadcrumb">
-        <Link href="/app">My time</Link>
-        <span aria-hidden="true">/</span>
-        <span>{duplicate ? 'Duplicate time' : 'Add time'}</span>
-      </div>
-
-      <section className="page-heading compact">
-        <div>
-          <p className="eyebrow">Manual entry</p>
-          <h1>{duplicate ? 'Duplicate time' : 'Add time'}</h1>
-          <p>
-            {duplicate
-              ? 'Review the copied details before creating a separate unbilled entry.'
-              : 'Record completed work using a total duration or exact start and finish.'}
-          </p>
-        </div>
-      </section>
+    <div className="narrow-page page-stack time-form-page">
+      <PageHeader
+        breadcrumb={{
+          current: duplicate ? 'Duplicate time' : 'Add time',
+          href: '/app',
+          label: 'My time',
+        }}
+        description={
+          duplicate
+            ? 'Review the copied work before adding it as a separate entry.'
+            : 'Record completed work with a duration or exact start and finish.'
+        }
+        title={duplicate ? 'Duplicate time' : 'Add time'}
+      />
 
       {duplicate && !sourceProjectAvailable && (
         <div className="notice notice-warning">

@@ -4,6 +4,8 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { hasActiveRole } from '@/access/roles'
+import { MetricStrip } from '@/app/(frontend)/_components/MetricStrip'
+import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import { createBillingPreview } from '@/lib/billing/reservation'
 import { readSelectionToken } from '@/lib/billing/selection-token'
 import { formatScaledAmount } from '@/lib/domain/money'
@@ -13,12 +15,19 @@ import { confirmBillingExportAction } from '../actions'
 
 import type { Metadata } from 'next'
 
+import '../../../billing-workflow.css'
+
 export const metadata: Metadata = { title: 'Invoice preview | Project Time' }
 
 const duration = (seconds: number): string => {
   const minutes = seconds / 60
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
 }
+
+const currencyTotalsLabel = (totals: Map<string, number>): string =>
+  [...totals]
+    .map(([currency, amountScaled]) => formatScaledAmount(amountScaled, currency))
+    .join(' · ')
 
 export default async function BillingPreviewPage({
   searchParams,
@@ -53,27 +62,42 @@ export default async function BillingPreviewPage({
     preview.summary.entryCount > settings.maxWaitLines ||
     settings.waitForResultEnabled !== true
   const canOverride = session.user.role !== 'biller' || settings.allowBillerModeOverride === true
+  const customerCount = new Set(preview.invoices.map((invoice) => invoice.contactID)).size
+  const invoiceDates = new Set(preview.invoices.map((invoice) => invoice.invoiceDate))
+  const dueDates = new Set(preview.invoices.map((invoice) => invoice.dueDate))
+  const subtotalByCurrency = new Map<string, number>()
+  const taxByCurrency = new Map<string, number>()
+  const totalByCurrency = new Map<string, number>()
+  for (const invoice of preview.invoices) {
+    subtotalByCurrency.set(
+      invoice.currency,
+      (subtotalByCurrency.get(invoice.currency) ?? 0) + invoice.subtotalScaled,
+    )
+    taxByCurrency.set(
+      invoice.currency,
+      (taxByCurrency.get(invoice.currency) ?? 0) + invoice.taxScaled,
+    )
+    totalByCurrency.set(
+      invoice.currency,
+      (totalByCurrency.get(invoice.currency) ?? 0) + invoice.totalScaled,
+    )
+  }
+  const invoiceDateLabel =
+    invoiceDates.size === 1
+      ? ([...invoiceDates][0] as string)
+      : `${invoiceDates.size} invoice dates`
+  const dueDateLabel =
+    dueDates.size === 1 ? ([...dueDates][0] as string) : `${dueDates.size} due dates`
 
   return (
-    <div className="wide-page page-stack">
-      <div className="breadcrumb">
-        <Link href="/app/billing">Billing queue</Link>
-        <span aria-hidden="true">/</span>
-        <span>Preview</span>
-      </div>
-      <section className="page-heading compact">
-        <div>
-          <p className="eyebrow">Exact draft preview</p>
-          <h1>
-            Review {preview.invoices.length} Xero{' '}
-            {preview.invoices.length === 1 ? 'invoice' : 'invoices'}
-          </h1>
-          <p>
-            Every source entry remains a separate line. The server will rebuild and checksum this
-            preview inside the reservation transaction.
-          </p>
-        </div>
-      </section>
+    <div className="wide-page page-stack billing-workflow-page">
+      <PageHeader
+        breadcrumb={{ current: 'Review drafts', href: '/app/billing', label: 'Billing queue' }}
+        description="Check customers, line items, dates and totals. Nothing is created until you confirm below."
+        title={`Review ${preview.invoices.length} draft ${
+          preview.invoices.length === 1 ? 'invoice' : 'invoices'
+        }`}
+      />
       {params.status && (
         <div className="notice notice-warning" role="alert">
           The previous confirmation was stale or could not be completed. This is a fresh preview;
@@ -82,8 +106,8 @@ export default async function BillingPreviewPage({
       )}
       {forcedBackground && (
         <div className="notice">
-          This selection will run in the background because wait mode is disabled or its
-          invoice/line threshold is exceeded.
+          Xero submission will continue in the background because this selection exceeds the
+          configured wait limit or wait mode is off.
         </div>
       )}
       {settings.acceptingNewExports !== true && (
@@ -92,53 +116,69 @@ export default async function BillingPreviewPage({
         </div>
       )}
 
-      <section className="summary-grid" aria-label="Preview summary">
-        <article className="summary-card">
-          <span>Entries</span>
-          <strong>{preview.summary.entryCount}</strong>
-          <small>{duration(preview.summary.durationSeconds)}</small>
-        </article>
-        <article className="summary-card">
-          <span>Invoices</span>
-          <strong>{preview.summary.invoiceCount}</strong>
-          <small>{preview.summary.currencies.join(', ')}</small>
-        </article>
-        <article className="summary-card">
-          <span>Xero references</span>
-          <strong>
-            {preview.invoices.length}{' '}
-            {preview.invoices.length === 1 ? 'customer sequence' : 'customer sequences'}
-          </strong>
-          <small>Shown on the draft invoices below</small>
-        </article>
-      </section>
+      <MetricStrip
+        label="Preview summary"
+        metrics={[
+          {
+            label: 'Draft invoices',
+            value: `${preview.summary.invoiceCount} · ${customerCount} ${customerCount === 1 ? 'customer' : 'customers'}`,
+          },
+          {
+            label: 'Line items',
+            value: `${preview.summary.entryCount} · ${duration(preview.summary.durationSeconds)}`,
+          },
+          { label: 'Dates', value: `${invoiceDateLabel} · due ${dueDateLabel}` },
+        ]}
+      />
+      <MetricStrip
+        label="Preview values"
+        metrics={[
+          { label: 'Pre-tax', value: currencyTotalsLabel(subtotalByCurrency) },
+          { label: 'Tax', value: currencyTotalsLabel(taxByCurrency) },
+          { label: 'Total', value: currencyTotalsLabel(totalByCurrency) },
+        ]}
+      />
 
       {preview.invoices.map((invoice) => (
-        <section className="panel page-stack invoice-preview" key={invoice.applicationReference}>
-          <div className="invoice-header-grid">
+        <section
+          className="billing-invoice-preview"
+          key={invoice.applicationReference}
+          aria-labelledby={`invoice-${invoice.applicationReference}`}
+        >
+          <div className="billing-invoice-heading">
             <div>
-              <span>Customer / Xero contact</span>
-              <strong>{invoice.contactName}</strong>
-              <small>{invoice.contactID}</small>
+              <span>Draft invoice</span>
+              <h2 id={`invoice-${invoice.applicationReference}`}>{invoice.contactName}</h2>
             </div>
-            <div>
-              <span>Reference</span>
-              <strong>{invoice.applicationReference}</strong>
-              <small>ACCREC · DRAFT</small>
-            </div>
-            <div>
-              <span>Dates</span>
-              <strong>{invoice.invoiceDate}</strong>
-              <small>Due {invoice.dueDate}</small>
-            </div>
-            <div>
-              <span>Currency / amount type</span>
-              <strong>{invoice.currency}</strong>
-              <small>{preview.settings.lineAmountType}</small>
-            </div>
+            <strong>{invoice.applicationReference}</strong>
           </div>
-          <div className="table-wrap">
-            <table className="time-table billing-table">
+          <dl className="billing-invoice-facts">
+            <div>
+              <dt>Invoice date</dt>
+              <dd>{invoice.invoiceDate}</dd>
+            </div>
+            <div>
+              <dt>Due date</dt>
+              <dd>{invoice.dueDate}</dd>
+            </div>
+            <div>
+              <dt>Currency</dt>
+              <dd>{invoice.currency}</dd>
+            </div>
+            <div>
+              <dt>Contact</dt>
+              <dd>{invoice.contactID}</dd>
+            </div>
+            <div>
+              <dt>Type</dt>
+              <dd>ACCREC · DRAFT · {preview.settings.lineAmountType}</dd>
+            </div>
+          </dl>
+          <div className="billing-preview-table-shell">
+            <table className="billing-workflow-table billing-preview-table">
+              <caption className="visually-hidden">
+                Draft invoice lines for {invoice.contactName}
+              </caption>
               <thead>
                 <tr>
                   <th scope="col">Source</th>
@@ -153,18 +193,27 @@ export default async function BillingPreviewPage({
                 {invoice.lines.map((line) => (
                   <tr key={line.entryID}>
                     <td>
+                      <span className="billing-mobile-label">Source</span>
                       <Link href={`/app/time/${line.entryID}/edit`}>{line.workDate}</Link>
                       <small>
                         {line.userName} · {line.projectCode}
                       </small>
                     </td>
-                    <td className="billing-description">{line.lineDescription}</td>
+                    <td className="billing-workflow-description">
+                      <span className="billing-mobile-label">Invoice description</span>
+                      {line.lineDescription}
+                    </td>
                     <td>
+                      <span className="billing-mobile-label">Quantity</span>
                       {(line.quantityScaled / 10_000).toFixed(4)} h
                       <small>{duration(line.durationSeconds)}</small>
                     </td>
-                    <td>{formatScaledAmount(line.rateScaled, line.currency)}</td>
                     <td>
+                      <span className="billing-mobile-label">Unit rate</span>
+                      {formatScaledAmount(line.rateScaled, line.currency)}
+                    </td>
+                    <td>
+                      <span className="billing-mobile-label">Xero coding</span>
                       <strong>
                         {line.itemCode} — {line.itemName}
                       </strong>
@@ -178,6 +227,7 @@ export default async function BillingPreviewPage({
                       </small>
                     </td>
                     <td>
+                      <span className="billing-mobile-label">Amount</span>
                       <strong>{formatScaledAmount(line.amountScaled, line.currency)}</strong>
                       <small>Tax {formatScaledAmount(line.taxScaled, line.currency)}</small>
                     </td>
@@ -203,41 +253,17 @@ export default async function BillingPreviewPage({
         </section>
       ))}
 
-      <form action={confirmBillingExportAction} className="panel entry-form confirmation-panel">
+      <form action={confirmBillingExportAction} className="billing-confirmation-panel">
         <input name="batchReference" type="hidden" value={preview.batchReference} />
         <input name="checksum" type="hidden" value={preview.checksum} />
         <input name="selectionToken" type="hidden" value={token} />
         <div>
-          <h2>Confirm and reserve</h2>
+          <h2>Create draft invoices</h2>
           <p>
-            Confirmation atomically reserves all lines, saves immutable snapshots, and creates one
-            durable job for each invoice.
+            Confirmation reserves these time entries against duplicate billing and sends the draft
+            invoices to Xero. Follow progress or recover a failed submission from Export history.
           </p>
         </div>
-        <label className="field">
-          <span>Execution mode</span>
-          <select
-            defaultValue={forcedBackground ? 'background' : configuredMode}
-            disabled={!canOverride || forcedBackground}
-            name="requestedMode"
-          >
-            <option value="background">Background</option>
-            <option value="wait-for-result">Wait briefly for Xero</option>
-          </select>
-          {(!canOverride || forcedBackground) && (
-            <input
-              name="requestedMode"
-              type="hidden"
-              value={forcedBackground ? 'background' : configuredMode}
-            />
-          )}
-        </label>
-        {canOverride && (
-          <label className="field">
-            <span>Override reason (required only when changing the configured mode)</span>
-            <input maxLength={500} minLength={10} name="modeOverrideReason" />
-          </label>
-        )}
         <label className="confirmation-field">
           <input name="confirmed" required type="checkbox" value="yes" />
           <span>
@@ -245,7 +271,41 @@ export default async function BillingPreviewPage({
             account, tax, tracking value, and total.
           </span>
         </label>
-        <div className="filter-actions">
+        <details className="billing-safeguards">
+          <summary>Technical safeguards and delivery</summary>
+          <div className="billing-safeguards-content">
+            <p>
+              Before creating drafts, Project Time rechecks the source entries and totals, rejects
+              stale changes, keeps every source entry as its own line, reserves each line once, and
+              records each submission for recovery.
+            </p>
+            <label className="field">
+              <span>Execution mode</span>
+              <select
+                defaultValue={forcedBackground ? 'background' : configuredMode}
+                disabled={!canOverride || forcedBackground}
+                name="requestedMode"
+              >
+                <option value="background">Background</option>
+                <option value="wait-for-result">Wait briefly for Xero</option>
+              </select>
+              {(!canOverride || forcedBackground) && (
+                <input
+                  name="requestedMode"
+                  type="hidden"
+                  value={forcedBackground ? 'background' : configuredMode}
+                />
+              )}
+            </label>
+            {canOverride && (
+              <label className="field">
+                <span>Override reason (required only when changing the configured mode)</span>
+                <input maxLength={500} minLength={10} name="modeOverrideReason" />
+              </label>
+            )}
+          </div>
+        </details>
+        <div className="billing-confirmation-actions">
           <Link className="button button-secondary" href="/app/billing">
             Cancel preview
           </Link>
@@ -254,7 +314,7 @@ export default async function BillingPreviewPage({
             disabled={settings.acceptingNewExports !== true}
             type="submit"
           >
-            Reserve and export
+            Create draft invoices
           </button>
         </div>
       </form>

@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { hasActiveRole } from '@/access/roles'
+import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import { requireAppSession } from '@/lib/member-app/session'
 import {
   ACCOUNTING_FLOW_COOKIE,
@@ -37,22 +38,15 @@ export default async function SelectXeroTenantPage({
 
   return (
     <div className="narrow-page page-stack">
-      <div className="breadcrumb">
-        <Link href="/app/settings/xero">Xero accounting</Link>
-        <span aria-hidden="true">/</span>
-        <span>Select organisation</span>
-      </div>
-
-      <section className="page-heading compact">
-        <div>
-          <p className="eyebrow">Explicit tenant selection</p>
-          <h1>Select Xero organisation</h1>
-          <p>
-            Xero returned more than one organisation for this authorization. Choose the single
-            business organisation this application must pin.
-          </p>
-        </div>
-      </section>
+      <PageHeader
+        breadcrumb={{
+          current: 'Select organisation',
+          href: '/app/settings/xero',
+          label: 'Xero accounting',
+        }}
+        description="Xero returned more than one organisation for this authorization. Choose the single business organisation this application must pin."
+        title="Select Xero organisation"
+      />
 
       <form
         action="/api/integrations/xero/accounting/select"

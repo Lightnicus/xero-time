@@ -1,9 +1,14 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
+import { FilterDisclosure } from '@/app/(frontend)/_components/FilterDisclosure'
+import { MetricStrip } from '@/app/(frontend)/_components/MetricStrip'
+import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
+import { TimeEntryList } from '@/app/(frontend)/_components/TimeEntryList'
 import { formatCalendarDateInTimezone } from '@/lib/domain/validation'
 import {
   getBusinessSettings,
+  listActiveProjectOptions,
   listMyCustomerFilterOptions,
   listMyProjectFilterOptions,
   listMyTimeEntries,
@@ -16,7 +21,8 @@ import {
   shiftCalendarDate,
   type TimeEntryFilters,
 } from '@/lib/member-app/time-filters'
-import type { TimeEntry } from '@/payload-types'
+
+import '../time-workflow.css'
 
 import type { Metadata } from 'next'
 
@@ -41,19 +47,6 @@ const flashMessage = (params: Record<string, string | string[] | undefined>): st
   return null
 }
 
-const rangeLabel = (entry: TimeEntry, locale: string, use12HourTime: boolean): string | null => {
-  if (!entry.startAt || !entry.endAt) return null
-
-  const formatter = new Intl.DateTimeFormat(locale, {
-    hour: 'numeric',
-    hour12: use12HourTime,
-    minute: '2-digit',
-    timeZone: entry.timezone,
-  })
-
-  return `${formatter.format(new Date(entry.startAt))}–${formatter.format(new Date(entry.endAt))}`
-}
-
 const appHref = (filters: TimeEntryFilters, page?: number): string => {
   const params = searchParamsForFilters(filters)
   if (page && page > 1) params.set('page', String(page))
@@ -73,8 +66,9 @@ export default async function TimeEntriesPage({
   const requestedPage = /^\d+$/.test(pageValue) ? Number(pageValue) : 1
   const today = formatCalendarDateInTimezone(new Date(), session.user.timezone)
   let filters = normalizeTimeEntryFilters(params, today)
-  const [settings, projectOptions, customerOptions, result] = await Promise.all([
+  const [settings, activeProjects, projectOptions, customerOptions, result] = await Promise.all([
     getBusinessSettings(session),
+    listActiveProjectOptions(session),
     listMyProjectFilterOptions(session),
     listMyCustomerFilterOptions(session),
     listMyTimeEntries(session, requestedPage, filters),
@@ -110,26 +104,27 @@ export default async function TimeEntriesPage({
             dateRange?.to ?? filters.anchorDate,
           )}`
   const periodStep = filters.view === 'day' ? 1 : 7
+  const recordedDailyTotals = result.summary.daily.filter((total) => total.entryCount > 0)
+  const recordedWeeklyTotals = result.summary.weekly.filter((total) => total.entryCount > 0)
   const dailyTotals =
-    filters.view === 'all' ? result.summary.daily.slice(0, 14) : result.summary.daily
+    filters.view === 'all' ? recordedDailyTotals.slice(0, 14) : recordedDailyTotals
   const weeklyTotals =
-    filters.view === 'all' ? result.summary.weekly.slice(0, 12) : result.summary.weekly
+    filters.view === 'all' ? recordedWeeklyTotals.slice(0, 12) : recordedWeeklyTotals
+  const activeFilterCount = [
+    filters.project,
+    filters.customer,
+    filters.billingStatus,
+    filters.billable,
+  ].filter(Boolean).length
   const hasAnyEntries = projectOptions.length > 0
+  const canStartFirstEntry = canCreate && activeProjects.length > 0
 
   return (
-    <div className="page-stack">
-      <section className="page-heading">
-        <div>
-          <p className="eyebrow">Your work</p>
-          <h1>My time</h1>
-          <p>Review your entries, focus a billing period, and add work for a customer project.</p>
-        </div>
-        {canCreate && (
-          <Link className="button button-primary" href="/app/time/new">
-            Add time
-          </Link>
-        )}
-      </section>
+    <div className="page-stack time-workflow-page">
+      <PageHeader
+        description="Review recorded work and focus the period you need."
+        title="My time"
+      />
 
       {message && (
         <div aria-live="polite" className="notice notice-success" role="status">
@@ -143,14 +138,14 @@ export default async function TimeEntriesPage({
         </div>
       )}
 
-      <section aria-label="Time filters" className="panel filter-panel">
-        <div className="period-heading">
+      <section aria-label="Time filters" className="time-period-panel">
+        <div className="time-period-heading">
           <div>
             <span>Viewing</span>
             <strong>{periodLabel}</strong>
           </div>
           {filters.view !== 'all' && (
-            <nav aria-label="Time period" className="period-navigation">
+            <nav aria-label="Time period" className="time-period-navigation">
               <Link
                 aria-label="Previous period"
                 className="button button-secondary"
@@ -181,9 +176,9 @@ export default async function TimeEntriesPage({
           )}
         </div>
 
-        <form action="/app" className="filter-form" method="get">
-          <div className="filter-grid">
-            <label className="field" htmlFor="view">
+        <form action="/app" className="time-filter-form" method="get">
+          <div className="time-period-fields">
+            <label className="field time-filter-field" htmlFor="view">
               <span>View</span>
               <select defaultValue={filters.view} id="view" name="view">
                 <option value="week">Week</option>
@@ -192,145 +187,82 @@ export default async function TimeEntriesPage({
               </select>
             </label>
 
-            <label className="field" htmlFor="date">
+            <label className="field time-filter-field time-filter-date" htmlFor="date">
               <span>Day or week containing</span>
               <input defaultValue={filters.anchorDate} id="date" name="date" type="date" />
             </label>
-
-            <label className="field" htmlFor="projectFilter">
-              <span>Project</span>
-              <select defaultValue={filters.project ?? ''} id="projectFilter" name="project">
-                <option value="">All projects</option>
-                {projectOptions.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.code} — {project.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="field" htmlFor="customerFilter">
-              <span>Customer</span>
-              <select defaultValue={filters.customer ?? ''} id="customerFilter" name="customer">
-                <option value="">All customers</option>
-                {customerOptions.map((customer) => (
-                  <option key={customer.id} value={customer.id}>
-                    {customer.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="field" htmlFor="billingStatus">
-              <span>Billing status</span>
-              <select
-                defaultValue={filters.billingStatus ?? ''}
-                id="billingStatus"
-                name="billingStatus"
-              >
-                <option value="">All statuses</option>
-                <option value="unbilled">Unbilled</option>
-                <option value="reserved">Reserved</option>
-                <option value="exported">Exported</option>
-              </select>
-            </label>
-
-            <label className="field" htmlFor="billable">
-              <span>Billable</span>
-              <select defaultValue={filters.billable ?? ''} id="billable" name="billable">
-                <option value="">All entries</option>
-                <option value="yes">Billable</option>
-                <option value="no">Non-billable</option>
-              </select>
-            </label>
           </div>
 
-          <div className="filter-actions">
-            <Link className="button button-secondary" href="/app">
-              Clear filters
-            </Link>
-            <button className="button button-primary" type="submit">
+          <div className="time-filter-footer">
+            <FilterDisclosure activeCount={activeFilterCount} clearHref="/app">
+              <div className="time-advanced-filter-grid">
+                <label className="field" htmlFor="projectFilter">
+                  <span>Project</span>
+                  <select defaultValue={filters.project ?? ''} id="projectFilter" name="project">
+                    <option value="">All projects</option>
+                    {projectOptions.map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.code} — {project.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field" htmlFor="customerFilter">
+                  <span>Customer</span>
+                  <select defaultValue={filters.customer ?? ''} id="customerFilter" name="customer">
+                    <option value="">All customers</option>
+                    {customerOptions.map((customer) => (
+                      <option key={customer.id} value={customer.id}>
+                        {customer.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field" htmlFor="billingStatus">
+                  <span>Billing status</span>
+                  <select
+                    defaultValue={filters.billingStatus ?? ''}
+                    id="billingStatus"
+                    name="billingStatus"
+                  >
+                    <option value="">All statuses</option>
+                    <option value="unbilled">Unbilled</option>
+                    <option value="reserved">Reserved</option>
+                    <option value="exported">Exported</option>
+                  </select>
+                </label>
+
+                <label className="field" htmlFor="billable">
+                  <span>Billable</span>
+                  <select defaultValue={filters.billable ?? ''} id="billable" name="billable">
+                    <option value="">All entries</option>
+                    <option value="yes">Billable</option>
+                    <option value="no">Non-billable</option>
+                  </select>
+                </label>
+              </div>
+            </FilterDisclosure>
+
+            <button className="button button-primary time-filter-apply" type="submit">
               Apply filters
             </button>
           </div>
         </form>
       </section>
 
-      <section aria-label="Time summary" className="summary-grid">
-        <article className="summary-card">
-          <span>Filtered time</span>
-          <strong>{formatDuration(result.summary.durationSeconds)}</strong>
-          <small>{pluralEntries(result.summary.entryCount)}</small>
-        </article>
-        <article className="summary-card">
-          <span>Billable time</span>
-          <strong>{formatDuration(result.summary.billableSeconds)}</strong>
-          <small>Across the current filters</small>
-        </article>
-        <article className="summary-card">
-          <span>Billing state</span>
-          <strong>{result.summary.unbilledCount} unbilled</strong>
-          <small>{result.summary.lockedCount} reserved or exported</small>
-        </article>
-      </section>
+      <MetricStrip
+        label="Time summary"
+        metrics={[
+          { label: 'Total time', value: formatDuration(result.summary.durationSeconds) },
+          { label: 'Entries', value: pluralEntries(result.summary.entryCount) },
+          { label: 'Billable', value: formatDuration(result.summary.billableSeconds) },
+        ]}
+      />
 
-      <section aria-labelledby="time-totals-heading" className="panel totals-panel">
-        <div className="panel-heading">
-          <div>
-            <h2 id="time-totals-heading">Time totals</h2>
-            <p>
-              Daily and weekly totals reflect every entry matching the filters, not just this page.
-            </p>
-          </div>
-        </div>
-        <div className="totals-grid">
-          <div>
-            <h3>Daily</h3>
-            {dailyTotals.length > 0 ? (
-              <ol className="totals-list">
-                {dailyTotals.map((total) => (
-                  <li key={total.date}>
-                    <span>
-                      <strong>{formatDate(total.date)}</strong>
-                      <small>{pluralEntries(total.entryCount)}</small>
-                    </span>
-                    <strong>{formatDuration(total.durationSeconds)}</strong>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <p className="muted-copy">No daily totals for these filters.</p>
-            )}
-            {filters.view === 'all' && result.summary.daily.length > dailyTotals.length && (
-              <small className="totals-note">Showing the latest 14 recorded days.</small>
-            )}
-          </div>
-          <div>
-            <h3>Weekly</h3>
-            {weeklyTotals.length > 0 ? (
-              <ol className="totals-list">
-                {weeklyTotals.map((total) => (
-                  <li key={total.date}>
-                    <span>
-                      <strong>Week of {formatDate(total.date)}</strong>
-                      <small>{pluralEntries(total.entryCount)}</small>
-                    </span>
-                    <strong>{formatDuration(total.durationSeconds)}</strong>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <p className="muted-copy">No weekly totals for these filters.</p>
-            )}
-            {filters.view === 'all' && result.summary.weekly.length > weeklyTotals.length && (
-              <small className="totals-note">Showing the latest 12 recorded weeks.</small>
-            )}
-          </div>
-        </div>
-      </section>
-
-      <section aria-labelledby="recent-time-heading" className="panel">
-        <div className="panel-heading">
+      <section aria-labelledby="recent-time-heading" className="time-entry-section">
+        <div className="time-entry-section-heading">
           <div>
             <h2 id="recent-time-heading">Time entries</h2>
             <p>
@@ -341,18 +273,23 @@ export default async function TimeEntriesPage({
 
         {result.entries.length === 0 ? (
           <div className="empty-state">
-            <h3>{hasAnyEntries ? 'No entries match these filters' : 'No time recorded yet'}</h3>
+            <h3>{hasAnyEntries ? 'No entries match this view' : 'No time recorded yet'}</h3>
             <p>
               {hasAnyEntries
-                ? 'Try another period or clear the filters to see more of your time.'
-                : 'Your entries will appear here once you add your first piece of work.'}
+                ? 'Try another period, view all recorded time, or change the advanced filters.'
+                : activeProjects.length > 0
+                  ? 'Your entries will appear here once you add your first piece of work.'
+                  : 'An active customer project is needed before time can be recorded.'}
             </p>
             {hasAnyEntries ? (
-              <Link className="button button-secondary" href="/app">
-                Clear filters
+              <Link
+                className="button button-secondary"
+                href={appHref({ anchorDate: today, view: 'all' })}
+              >
+                View all time
               </Link>
             ) : (
-              canCreate && (
+              canStartFirstEntry && (
                 <Link className="button button-primary" href="/app/time/new">
                   Add your first entry
                 </Link>
@@ -361,62 +298,13 @@ export default async function TimeEntriesPage({
           </div>
         ) : (
           <>
-            <div className="table-wrap">
-              <table className="time-table">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Project and description</th>
-                    <th>Duration</th>
-                    <th>Billing</th>
-                    <th>
-                      <span className="visually-hidden">Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.entries.map((entry) => {
-                    const range = rangeLabel(
-                      entry,
-                      settings.locale,
-                      settings.timeDisplayStyle === '12-hour',
-                    )
-                    const locked = entry.billingStatus !== 'unbilled'
-
-                    return (
-                      <tr key={entry.id}>
-                        <td>
-                          <strong>{formatDate(entry.workDate)}</strong>
-                          {range && <small>{range}</small>}
-                        </td>
-                        <td>
-                          <span className="project-label">
-                            {entry.customerNameSnapshot} · {entry.projectCodeSnapshot} ·{' '}
-                            {entry.projectNameSnapshot}
-                          </span>
-                          <span className="entry-description">{entry.description}</span>
-                          <small className="text-capitalize">{entry.inputMode} entry</small>
-                        </td>
-                        <td>
-                          <strong>{formatDuration(entry.durationSeconds)}</strong>
-                          <small>{entry.billable ? 'Billable' : 'Non-billable'}</small>
-                        </td>
-                        <td>
-                          <span className={`status status-${entry.billingStatus}`}>
-                            {entry.billingStatus}
-                          </span>
-                        </td>
-                        <td className="table-action">
-                          <Link href={`/app/time/${entry.id}/edit`}>
-                            {locked ? 'View' : 'Edit'}
-                          </Link>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <TimeEntryList
+              entries={result.entries}
+              formatDate={formatDate}
+              formatDuration={formatDuration}
+              locale={settings.locale}
+              use12HourTime={settings.timeDisplayStyle === '12-hour'}
+            />
 
             {result.totalPages > 1 && (
               <nav aria-label="Time entry pages" className="pagination">
@@ -448,6 +336,51 @@ export default async function TimeEntriesPage({
           </>
         )}
       </section>
+
+      {result.summary.entryCount > 0 && (
+        <details className="time-breakdown">
+          <summary>View daily and weekly breakdown</summary>
+          <section aria-label="Time totals" className="time-breakdown-content">
+            <p>Totals include every entry matching these filters, not only the current page.</p>
+            <div className="time-breakdown-grid">
+              <div>
+                <h3>Daily</h3>
+                <ol className="totals-list">
+                  {dailyTotals.map((total) => (
+                    <li key={total.date}>
+                      <span>
+                        <strong>{formatDate(total.date)}</strong>
+                        <small>{pluralEntries(total.entryCount)}</small>
+                      </span>
+                      <strong>{formatDuration(total.durationSeconds)}</strong>
+                    </li>
+                  ))}
+                </ol>
+                {filters.view === 'all' && recordedDailyTotals.length > dailyTotals.length && (
+                  <small className="totals-note">Showing the latest 14 recorded days.</small>
+                )}
+              </div>
+              <div>
+                <h3>Weekly</h3>
+                <ol className="totals-list">
+                  {weeklyTotals.map((total) => (
+                    <li key={total.date}>
+                      <span>
+                        <strong>Week of {formatDate(total.date)}</strong>
+                        <small>{pluralEntries(total.entryCount)}</small>
+                      </span>
+                      <strong>{formatDuration(total.durationSeconds)}</strong>
+                    </li>
+                  ))}
+                </ol>
+                {filters.view === 'all' && recordedWeeklyTotals.length > weeklyTotals.length && (
+                  <small className="totals-note">Showing the latest 12 recorded weeks.</small>
+                )}
+              </div>
+            </div>
+          </section>
+        </details>
+      )}
     </div>
   )
 }

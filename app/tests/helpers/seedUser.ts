@@ -22,6 +22,26 @@ export const memberAppUser = {
   timezone: 'Pacific/Auckland' as const,
 }
 
+export const adminAppUser = {
+  _verified: true,
+  active: true,
+  displayName: 'E2E Navigation Admin',
+  email: 'navigation-admin@example.test',
+  password: 'admin-password-only',
+  role: 'admin' as const,
+  timezone: 'Pacific/Auckland' as const,
+}
+
+export const billerAppUser = {
+  _verified: true,
+  active: true,
+  displayName: 'E2E Navigation Biller',
+  email: 'navigation-biller@example.test',
+  password: 'biller-password-only',
+  role: 'biller' as const,
+  timezone: 'Pacific/Auckland' as const,
+}
+
 export const adminRateProject = {
   code: 'E2E-RATE',
   name: 'Admin Rate Project',
@@ -376,6 +396,40 @@ export async function seedMemberAppFixture(): Promise<void> {
     overrideAccess: false,
     req: ownerReq,
   })
+}
+
+/** Seeds one deterministic user for every custom-application navigation role. */
+export async function seedNavigationRoleFixture(): Promise<void> {
+  assertIsolatedE2EDatabase()
+  const payload = await getPayload({ config })
+
+  await cleanE2EDatabase(payload)
+
+  const owner = await payload.create({
+    collection: 'users',
+    data: testUser,
+    disableVerificationEmail: true,
+    overrideAccess: true,
+  })
+  const ownerReq = await createLocalReq({ user: owner }, payload)
+
+  for (const user of [adminAppUser, billerAppUser, memberAppUser]) {
+    await payload.create({
+      collection: 'users',
+      data: user,
+      disableVerificationEmail: true,
+      overrideAccess: false,
+      req: ownerReq,
+    })
+  }
+}
+
+/** Removes the isolated role-navigation fixture and any browser-test side effects. */
+export async function cleanupNavigationRoleFixture(): Promise<void> {
+  assertIsolatedE2EDatabase()
+  const payload = await getPayload({ config })
+
+  await cleanE2EDatabase(payload)
 }
 
 export async function seedMemberTimeEntries(count: number): Promise<void> {

@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import type { ReactNode } from 'react'
+
 type VisibleEntry = {
   amountScaled: number
   currency: string
@@ -23,6 +25,10 @@ type SelectionSummary = {
   entryCount: number
   invoiceCount: number
 }
+
+type BillingScope = 'all-matching' | 'all-uninvoiced' | 'explicit'
+
+type ServerAction = (formData: FormData) => Promise<void>
 
 const scaledAmount = (value: number, currency: string): string => {
   const whole = Math.floor(value / 10_000)
@@ -46,23 +52,68 @@ const valueLabel = (currencyAmounts: Map<string, number>): string => {
   return scaledAmount(value, currency)
 }
 
-const emptySummary = (): SelectionSummary => ({
-  currencyAmounts: new Map(),
-  durationSeconds: 0,
-  entryCount: 0,
-  invoiceCount: 0,
+const summarizeVisibleEntries = (entries: VisibleEntry[]): SelectionSummary => {
+  const currencyAmounts = new Map<string, number>()
+  const groups = new Set<string>()
+  let durationSeconds = 0
+
+  for (const entry of entries) {
+    durationSeconds += entry.durationSeconds
+    currencyAmounts.set(
+      entry.currency,
+      (currencyAmounts.get(entry.currency) ?? 0) + entry.amountScaled,
+    )
+    groups.add(entry.groupKey)
+  }
+
+  return {
+    currencyAmounts,
+    durationSeconds,
+    entryCount: entries.length,
+    invoiceCount: groups.size,
+  }
+}
+
+const summarizeAllMatching = (summary: AllMatchingSummary): SelectionSummary => ({
+  currencyAmounts: new Map(
+    summary.currencyAmounts.map((item) => [item.currency, item.amountScaled]),
+  ),
+  durationSeconds: summary.durationSeconds,
+  entryCount: summary.entryCount,
+  invoiceCount: summary.groupCounts.filter((item) => item.count > 0).length,
 })
+
+const summaryLabel = (summary: SelectionSummary): string =>
+  `${summary.entryCount} ${summary.entryCount === 1 ? 'entry' : 'entries'} · ${duration(
+    summary.durationSeconds,
+  )} · ${valueLabel(summary.currencyAmounts)} · ${summary.invoiceCount} ${
+    summary.invoiceCount === 1 ? 'draft invoice' : 'draft invoices'
+  }`
 
 export function BillingSelectionToolbar({
   allMatching,
+  allUninvoiced,
+  allUninvoicedAction,
+  allUninvoicedUnavailableReason,
+  children,
   visibleEntries,
 }: {
   allMatching: AllMatchingSummary
+  allUninvoiced: AllMatchingSummary | null
+  allUninvoicedAction: ServerAction
+  allUninvoicedUnavailableReason?: string
+  children: ReactNode
   visibleEntries: VisibleEntry[]
 }) {
   const root = useRef<HTMLDivElement>(null)
-  const [explicit, setExplicit] = useState<SelectionSummary>(emptySummary)
-  const [matching, setMatching] = useState<SelectionSummary>(emptySummary)
+  const [scope, setScope] = useState<BillingScope>('explicit')
+  const [explicit, setExplicit] = useState<SelectionSummary>(() =>
+    summarizeVisibleEntries(visibleEntries),
+  )
+  const [matching, setMatching] = useState<SelectionSummary>(() =>
+    summarizeAllMatching(allMatching),
+  )
+  const uninvoiced = allUninvoiced ? summarizeAllMatching(allUninvoiced) : null
 
   const refresh = useCallback(() => {
     const form = root.current?.closest('form')
@@ -74,23 +125,7 @@ export function BillingSelectionToolbar({
     )
     const selectedEntries = visibleEntries.filter((entry) => selectedIDs.has(entry.entryID))
     const excludedEntries = visibleEntries.filter((entry) => !selectedIDs.has(entry.entryID))
-    const explicitCurrencies = new Map<string, number>()
-    const explicitGroups = new Set<string>()
-    let explicitDuration = 0
-    for (const entry of selectedEntries) {
-      explicitDuration += entry.durationSeconds
-      explicitCurrencies.set(
-        entry.currency,
-        (explicitCurrencies.get(entry.currency) ?? 0) + entry.amountScaled,
-      )
-      explicitGroups.add(entry.groupKey)
-    }
-    setExplicit({
-      currencyAmounts: explicitCurrencies,
-      durationSeconds: explicitDuration,
-      entryCount: selectedEntries.length,
-      invoiceCount: explicitGroups.size,
-    })
+    setExplicit(summarizeVisibleEntries(selectedEntries))
 
     const matchingCurrencies = new Map(
       allMatching.currencyAmounts.map((item) => [item.currency, item.amountScaled]),
@@ -133,31 +168,125 @@ export function BillingSelectionToolbar({
     refresh()
   }
 
+  const chosenSummary = scope === 'explicit' ? explicit : matching
+  const actionDisabled =
+    scope === 'explicit'
+      ? explicit.entryCount === 0
+      : scope === 'all-matching'
+        ? matching.entryCount === 0
+        : !uninvoiced || uninvoiced.entryCount === 0
+  const disabledReason =
+    scope === 'explicit'
+      ? 'Select at least one row to review.'
+      : scope === 'all-matching'
+        ? 'No eligible entries remain in the current filters.'
+        : (allUninvoicedUnavailableReason ?? 'There are no eligible uninvoiced entries to review.')
+
   return (
-    <div className="billing-selection-toolbar page-stack" ref={root}>
-      <div className="filter-actions">
-        <button className="button button-secondary" onClick={() => setVisible(true)} type="button">
-          Select visible
-        </button>
-        <button className="button button-secondary" onClick={() => setVisible(false)} type="button">
-          Clear visible
-        </button>
+    <div className="billing-selection-toolbar" ref={root}>
+      <div className="billing-selection-heading">
+        <div>
+          <h2>Choose what to invoice</h2>
+          <p>Pick a scope, check the summary, then review the drafts before creating anything.</p>
+        </div>
+        <div className="billing-visible-actions" aria-label="Visible row selection">
+          <button
+            className="button button-secondary"
+            disabled={visibleEntries.length === 0 || scope === 'all-uninvoiced'}
+            onClick={() => setVisible(true)}
+            type="button"
+          >
+            Select visible
+          </button>
+          <button
+            className="button button-secondary"
+            disabled={visibleEntries.length === 0 || scope === 'all-uninvoiced'}
+            onClick={() => setVisible(false)}
+            type="button"
+          >
+            Clear visible
+          </button>
+        </div>
       </div>
-      <div className="selection-summary-grid" role="status">
-        <div>
-          <strong>Selected preview</strong>
-          <span>
-            {explicit.entryCount} entries · {duration(explicit.durationSeconds)} ·{' '}
-            {valueLabel(explicit.currencyAmounts)} · {explicit.invoiceCount} invoices
-          </span>
+
+      <fieldset className="billing-scope-fieldset">
+        <legend>Invoice scope</legend>
+        <div className="billing-scope-options">
+          <label className="billing-scope-option">
+            <input
+              checked={scope === 'explicit'}
+              name="billingScope"
+              onChange={() => setScope('explicit')}
+              type="radio"
+              value="explicit"
+            />
+            <span>
+              <strong>Selected rows</strong>
+              <small>Only the checked rows in this queue.</small>
+            </span>
+          </label>
+          <label className="billing-scope-option">
+            <input
+              checked={scope === 'all-matching'}
+              name="billingScope"
+              onChange={() => setScope('all-matching')}
+              type="radio"
+              value="all-matching"
+            />
+            <span>
+              <strong>All matching filters</strong>
+              <small>Every match, minus any visible rows you clear.</small>
+            </span>
+          </label>
+          <label className="billing-scope-option">
+            <input
+              checked={scope === 'all-uninvoiced'}
+              disabled={!uninvoiced}
+              name="billingScope"
+              onChange={() => setScope('all-uninvoiced')}
+              type="radio"
+              value="all-uninvoiced"
+            />
+            <span>
+              <strong>All uninvoiced</strong>
+              <small>
+                {allUninvoicedUnavailableReason ??
+                  'Every eligible entry, ignoring the current filters and row choices.'}
+              </small>
+            </span>
+          </label>
         </div>
-        <div>
-          <strong>All matching preview</strong>
-          <span>
-            {matching.entryCount} entries · {duration(matching.durationSeconds)} ·{' '}
-            {valueLabel(matching.currencyAmounts)} · {matching.invoiceCount} invoices
-          </span>
-        </div>
+      </fieldset>
+
+      <div className="billing-selection-rows">{children}</div>
+
+      <div aria-atomic="true" aria-live="polite" className="billing-scope-summary">
+        <span>{scope === 'all-uninvoiced' ? 'All uninvoiced' : 'Current scope'}</span>
+        <strong>
+          {scope === 'all-uninvoiced' && uninvoiced
+            ? summaryLabel(uninvoiced)
+            : summaryLabel(chosenSummary)}
+        </strong>
+      </div>
+
+      <div className="billing-review-action">
+        {actionDisabled && <p>{disabledReason}</p>}
+        <button
+          className="button button-primary"
+          disabled={actionDisabled}
+          formAction={scope === 'all-uninvoiced' ? allUninvoicedAction : undefined}
+          name={scope === 'all-uninvoiced' ? undefined : 'selectionType'}
+          type="submit"
+          value={
+            scope === 'all-uninvoiced'
+              ? undefined
+              : scope === 'explicit'
+                ? 'explicit'
+                : 'all-matching'
+          }
+        >
+          Review draft invoices
+        </button>
       </div>
     </div>
   )

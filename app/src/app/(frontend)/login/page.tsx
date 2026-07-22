@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { getPayload } from 'payload'
 
+import { defaultAppHome } from '@/lib/member-app/navigation'
 import { getAppSession } from '@/lib/member-app/session'
 import { identityFeatureView } from '@/lib/xero/identity/service'
 import config from '@/payload.config'
@@ -29,7 +30,7 @@ export default async function LoginPage({
 }) {
   const session = await getAppSession()
 
-  if (session) redirect('/app')
+  if (session) redirect(defaultAppHome(session.user.role))
 
   const params = await searchParams
   const nextPath = safeNextPath(params.next)

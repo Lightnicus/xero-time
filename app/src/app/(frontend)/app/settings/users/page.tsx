@@ -6,6 +6,7 @@ import {
   InvitationCreateForm,
   InvitationRowActions,
 } from '@/app/(frontend)/_components/InvitationManagementForms'
+import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import { getInvitationManagementView, type InviteRole } from '@/lib/account-lifecycle/service'
 import { getBusinessSettings } from '@/lib/member-app/data'
 import { timezoneOptionsIncluding } from '@/lib/member-app/date-time'
@@ -16,7 +17,7 @@ import { ownerTransitionAction, recoverIdentityAction } from './actions'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'People and invitations | Project Time',
+  title: 'People & invitations | Project Time',
 }
 
 export default async function UserSettingsPage({
@@ -63,22 +64,39 @@ export default async function UserSettingsPage({
 
   return (
     <div className="wide-page page-stack">
-      <div className="breadcrumb">
-        <Link href="/app">My time</Link>
-        <span aria-hidden="true">/</span>
-        <span>People</span>
-      </div>
+      <PageHeader
+        action={
+          <Link className="button button-secondary" href="/admin/collections/users">
+            Manage users in Payload Admin ↗
+          </Link>
+        }
+        breadcrumb={{ current: 'People & invitations', href: '/app/settings', label: 'Settings' }}
+        description="Invite users without creating or sharing temporary passwords."
+        title="People & invitations"
+      />
 
-      <section className="page-heading compact">
-        <div>
-          <p className="eyebrow">Account administration</p>
-          <h1>People and invitations</h1>
-          <p>Invite users without creating or sharing temporary passwords.</p>
+      {session.user.role === 'owner' && params.ownership === 'changed' && (
+        <div className="notice notice-success" role="status">
+          Ownership changed and recorded in the audit history.
         </div>
-        <Link className="button button-secondary" href="/admin/collections/users">
-          Manage active users
-        </Link>
-      </section>
+      )}
+      {session.user.role === 'owner' && params.ownership && params.ownership !== 'changed' && (
+        <div className="notice notice-warning" role="alert">
+          Ownership could not be changed. Check the target, recovery credential, and remaining
+          owners.
+        </div>
+      )}
+      {params.identityRecovery === 'revoked' && (
+        <div className="notice notice-success" role="status">
+          The identity link and local external sessions were revoked and audited.
+        </div>
+      )}
+      {params.identityRecovery && params.identityRecovery !== 'revoked' && (
+        <div className="notice notice-warning" role="alert">
+          Identity recovery could not be completed. Check the target, confirmation, password, and
+          recovery method.
+        </div>
+      )}
 
       <InvitationCreateForm
         defaultTimezone={settings.defaultTimezone}
@@ -86,128 +104,9 @@ export default async function UserSettingsPage({
         timezones={timezoneOptionsIncluding(settings.defaultTimezone)}
       />
 
-      {session.user.role === 'owner' && (
-        <section className="panel page-stack">
-          <div>
-            <p className="eyebrow">High-impact action</p>
-            <h2>Ownership transition</h2>
-            <p>
-              Promote an active password-capable user, or demote an owner after another recovery
-              owner is proven to remain. A different owner must perform a current owner’s demotion.
-            </p>
-          </div>
-          {params.ownership === 'changed' && (
-            <div className="notice notice-success" role="status">
-              Ownership changed and recorded in the audit history.
-            </div>
-          )}
-          {params.ownership && params.ownership !== 'changed' && (
-            <div className="notice notice-warning" role="alert">
-              Ownership could not be changed. Check the target, recovery credential, and remaining
-              owners.
-            </div>
-          )}
-          <form action={ownerTransitionAction} className="compact-form">
-            <div className="form-grid">
-              <label className="field">
-                <span>Action</span>
-                <select name="action" required>
-                  <option value="promote">Promote to owner</option>
-                  <option value="demote">Demote owner to administrator</option>
-                </select>
-              </label>
-              <label className="field">
-                <span>Target user</span>
-                <select name="targetUserID" required>
-                  {users.docs.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.displayName} ({user.role})
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>Current password</span>
-                <input autoComplete="current-password" name="password" required type="password" />
-              </label>
-              <label className="field">
-                <span>Reason</span>
-                <input maxLength={1_000} minLength={10} name="reason" required />
-              </label>
-            </div>
-            <div className="form-actions">
-              <button className="button button-danger" type="submit">
-                Confirm ownership transition
-              </button>
-            </div>
-          </form>
-        </section>
-      )}
-
-      <section className="panel page-stack">
-        <div>
-          <p className="eyebrow">Identity recovery</p>
-          <h2>Revoke a compromised Xero identity link</h2>
-          <p>
-            This revokes the selected user’s Xero identity and all local external sessions while
-            retaining email/password recovery. It never changes the business accounting connection.
-            Administrators cannot recover an owner account.
-          </p>
-        </div>
-        {params.identityRecovery === 'revoked' && (
-          <div className="notice notice-success" role="status">
-            The identity link and local external sessions were revoked and audited.
-          </div>
-        )}
-        {params.identityRecovery && params.identityRecovery !== 'revoked' && (
-          <div className="notice notice-warning" role="alert">
-            Identity recovery could not be completed. Check the target, confirmation, password, and
-            recovery method.
-          </div>
-        )}
-        <form action={recoverIdentityAction} className="compact-form">
-          <div className="form-grid">
-            <label className="field">
-              <span>Linked user</span>
-              <select name="targetUserID" required>
-                {recoverableUsers.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.displayName} ({user.role})
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Your current password</span>
-              <input autoComplete="current-password" name="password" required type="password" />
-            </label>
-            <label className="field">
-              <span>Reason</span>
-              <input maxLength={1_000} minLength={10} name="reason" required />
-            </label>
-            <label className="field">
-              <span>Type REVOKE XERO</span>
-              <input name="confirmation" pattern="REVOKE XERO" required />
-            </label>
-          </div>
-          <div className="form-actions">
-            <button
-              className="button button-danger"
-              disabled={recoverableUsers.length === 0}
-              type="submit"
-            >
-              Revoke identity and sessions
-            </button>
-          </div>
-        </form>
-      </section>
-
       <section className="panel invitation-list-panel">
         <div className="integration-heading">
-          <div>
-            <p className="eyebrow">Setup links</p>
-            <h2>Invitation history</h2>
-          </div>
+          <h2>Invitation history</h2>
           <span>{invitations.length} shown</span>
         </div>
 
@@ -242,6 +141,112 @@ export default async function UserSettingsPage({
         Invitation links are bearer credentials. Development shows each newly generated link once;
         production only sends it through the configured Resend account.
       </div>
+
+      <details
+        className="settings-disclosure"
+        open={Boolean(params.ownership || params.identityRecovery)}
+      >
+        <summary>Advanced account administration</summary>
+        <div className="settings-disclosure-content">
+          {session.user.role === 'owner' && (
+            <section className="settings-disclosure-section">
+              <div>
+                <h2>Ownership transition</h2>
+                <p>
+                  Promote an active password-capable user, or demote an owner after another recovery
+                  owner is proven to remain. A different owner must perform a current owner’s
+                  demotion.
+                </p>
+              </div>
+              <form action={ownerTransitionAction} className="compact-form">
+                <div className="form-grid">
+                  <label className="field">
+                    <span>Action</span>
+                    <select name="action" required>
+                      <option value="promote">Promote to owner</option>
+                      <option value="demote">Demote owner to administrator</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Target user</span>
+                    <select name="targetUserID" required>
+                      {users.docs.map((user) => (
+                        <option key={user.id} value={user.id}>
+                          {user.displayName} ({user.role})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Current password</span>
+                    <input
+                      autoComplete="current-password"
+                      name="password"
+                      required
+                      type="password"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Reason</span>
+                    <input maxLength={1_000} minLength={10} name="reason" required />
+                  </label>
+                </div>
+                <div className="form-actions">
+                  <button className="button button-danger" type="submit">
+                    Confirm ownership transition
+                  </button>
+                </div>
+              </form>
+            </section>
+          )}
+
+          <section className="settings-disclosure-section">
+            <div>
+              <h2>Revoke a compromised Xero identity link</h2>
+              <p>
+                This revokes the selected user’s Xero identity and all local external sessions while
+                retaining email/password recovery. It never changes the business accounting
+                connection. Administrators cannot recover an owner account.
+              </p>
+            </div>
+            <form action={recoverIdentityAction} className="compact-form">
+              <div className="form-grid">
+                <label className="field">
+                  <span>Linked user</span>
+                  <select name="targetUserID" required>
+                    {recoverableUsers.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.displayName} ({user.role})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Your current password</span>
+                  <input autoComplete="current-password" name="password" required type="password" />
+                </label>
+                <label className="field">
+                  <span>Reason</span>
+                  <input maxLength={1_000} minLength={10} name="reason" required />
+                </label>
+                <label className="field">
+                  <span>Type REVOKE XERO</span>
+                  <input name="confirmation" pattern="REVOKE XERO" required />
+                </label>
+              </div>
+              <div className="form-actions">
+                <button
+                  className="button button-danger"
+                  disabled={recoverableUsers.length === 0}
+                  type="submit"
+                >
+                  Revoke identity and sessions
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      </details>
     </div>
   )
 }

@@ -25,7 +25,7 @@ export function PasswordChangeForm() {
   return (
     <form action={action} className="form-section password-change-form">
       <div>
-        <h2>Change password</h2>
+        <h3>Change password</h3>
         <p>Changing your password signs out every other browser session.</p>
       </div>
       <div className="form-grid">

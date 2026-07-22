@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { getPayload } from 'payload'
 
 import { getInvitationPreview } from '@/lib/account-lifecycle/service'
+import { defaultAppHome } from '@/lib/member-app/navigation'
 import { getAppSession } from '@/lib/member-app/session'
 import { identityFeatureView } from '@/lib/xero/identity/service'
 import config from '@/payload.config'
@@ -22,7 +23,8 @@ export default async function InvitationPage({
 }: {
   searchParams: Promise<{ token?: string | string[]; xero?: string | string[] }>
 }) {
-  if (await getAppSession()) redirect('/app')
+  const session = await getAppSession()
+  if (session) redirect(defaultAppHome(session.user.role))
   const params = await searchParams
   const suppliedToken = params.token
   const token = typeof suppliedToken === 'string' ? suppliedToken : ''

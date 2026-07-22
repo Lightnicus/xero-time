@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { hasActiveRole } from '@/access/roles'
+import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import { getBusinessSettings } from '@/lib/member-app/data'
 import { requireAppSession } from '@/lib/member-app/session'
 import { searchXeroContacts, type XeroContactView } from '@/lib/xero/accounting/contacts'
@@ -16,7 +17,7 @@ import {
 
 import type { Metadata } from 'next'
 
-export const metadata: Metadata = { title: 'Customer settings | Project Time' }
+export const metadata: Metadata = { title: 'Customer billing | Project Time' }
 
 type Params = {
   customer?: string | string[]
@@ -89,24 +90,16 @@ export default async function CustomerMappingPage({
 
   return (
     <div className="wide-page page-stack">
-      <div className="breadcrumb">
-        <Link href="/app">My time</Link>
-        <span aria-hidden="true">/</span>
-        <span>Customers</span>
-      </div>
-      <section className="page-heading compact">
-        <div>
-          <p className="eyebrow">Customers</p>
-          <h1>Customer billing settings</h1>
-          <p>
-            Configure readable invoice references and map each customer to a Xero contact. Contact
-            names are display snapshots and are never used to remap automatically.
-          </p>
-        </div>
-        <Link className="button button-secondary" href="/admin/collections/customers">
-          Edit local customers
-        </Link>
-      </section>
+      <PageHeader
+        action={
+          <Link className="button button-secondary" href="/admin/collections/customers">
+            Manage customers in Payload Admin ↗
+          </Link>
+        }
+        breadcrumb={{ current: 'Customer billing', href: '/app/settings', label: 'Settings' }}
+        description="Configure readable invoice references and map each customer to a Xero contact. Contact names are display snapshots and are never used to remap automatically."
+        title="Customer billing"
+      />
 
       {params.status && (
         <div

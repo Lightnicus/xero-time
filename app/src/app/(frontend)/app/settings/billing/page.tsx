@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { hasActiveRole } from '@/access/roles'
+import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import { getBillingDefaultSettingsView } from '@/lib/billing/default-settings'
 import { requireAppSession } from '@/lib/member-app/session'
 
@@ -10,7 +11,7 @@ import { BillingDefaultsForm } from './BillingDefaultsForm'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Billing settings | Project Time',
+  title: 'Invoice defaults | Project Time',
 }
 
 type SearchParams = {
@@ -38,25 +39,16 @@ export default async function BillingSettingsPage({
 
   return (
     <div className="narrow-page page-stack">
-      <div className="breadcrumb">
-        <Link href="/app/billing">Billing</Link>
-        <span aria-hidden="true">/</span>
-        <span>Invoice defaults</span>
-      </div>
-
-      <section className="page-heading compact">
-        <div>
-          <p className="eyebrow">Billing setup</p>
-          <h1>Invoice defaults</h1>
-          <p>
-            Choose the account and tax type used for new Xero invoice previews. Existing export
-            snapshots are unchanged.
-          </p>
-        </div>
-        <Link className="button button-secondary" href="/app/billing">
-          Billing
-        </Link>
-      </section>
+      <PageHeader
+        action={
+          <Link className="button button-secondary" href="/app/billing">
+            Back to billing
+          </Link>
+        }
+        breadcrumb={{ current: 'Invoice defaults', href: '/app/settings', label: 'Settings' }}
+        description="Choose the account and tax type used for new Xero invoice previews. Existing export snapshots are unchanged."
+        title="Invoice defaults"
+      />
 
       {params.saved === '1' && (
         <div aria-live="polite" className="notice notice-success" role="status">

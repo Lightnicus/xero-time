@@ -102,7 +102,7 @@ export function TimeEntryForm({
   }
 
   return (
-    <form action={formAction} className="entry-form">
+    <form action={formAction} className="time-entry-form">
       {entryID && <input name="entryID" type="hidden" value={entryID} />}
 
       {!hasProjects && (
@@ -121,17 +121,9 @@ export function TimeEntryForm({
         </label>
       )}
 
-      <section className="form-section" aria-labelledby="work-details-heading">
-        <div className="form-section-heading">
-          <span>1</span>
-          <div>
-            <h2 id="work-details-heading">Work details</h2>
-            <p>Choose the project and describe what you completed.</p>
-          </div>
-        </div>
-
-        <div className="form-grid">
-          <label className="field field-full" htmlFor="project">
+      <section aria-label="Time entry details" className="time-form-surface">
+        <div className="time-form-fields">
+          <label className="field" htmlFor="project">
             <span>Project</span>
             <select
               aria-invalid={Boolean(state.fieldErrors?.project)}
@@ -152,7 +144,7 @@ export function TimeEntryForm({
             <FieldError field="project" state={state} />
           </label>
 
-          <label className="field field-full" htmlFor="description">
+          <label className="field" htmlFor="description">
             <span>Description</span>
             <textarea
               aria-invalid={Boolean(state.fieldErrors?.description)}
@@ -162,14 +154,146 @@ export function TimeEntryForm({
               onChange={(event) => setDescription(event.target.value)}
               placeholder="What did you work on?"
               required
-              rows={4}
+              rows={3}
               value={description}
             />
-            <small>This will become the description for its mapped Xero invoice line.</small>
+            <small>Describe the completed work clearly enough for the customer invoice.</small>
             <FieldError field="description" state={state} />
           </label>
 
-          <label className="checkbox-field field-full">
+          <fieldset className="time-mode-fieldset">
+            <legend>Entry method</legend>
+            <div className="time-mode-options">
+              <label
+                className={
+                  inputMode === 'duration' ? 'time-mode-option selected' : 'time-mode-option'
+                }
+              >
+                <input
+                  checked={inputMode === 'duration'}
+                  name="inputMode"
+                  onChange={() => setInputMode('duration')}
+                  type="radio"
+                  value="duration"
+                />
+                <span>
+                  <strong>Hours and minutes</strong>
+                  <small>Enter the total worked.</small>
+                </span>
+              </label>
+              <label
+                className={inputMode === 'range' ? 'time-mode-option selected' : 'time-mode-option'}
+              >
+                <input
+                  checked={inputMode === 'range'}
+                  name="inputMode"
+                  onChange={() => setInputMode('range')}
+                  type="radio"
+                  value="range"
+                />
+                <span>
+                  <strong>Start and finish</strong>
+                  <small>Calculate from exact times.</small>
+                </span>
+              </label>
+            </div>
+            <FieldError field="inputMode" state={state} />
+          </fieldset>
+
+          {inputMode === 'duration' ? (
+            <div className="time-duration-grid">
+              <label className="field time-work-date" htmlFor="workDate">
+                <span>Work date</span>
+                <input
+                  aria-invalid={Boolean(state.fieldErrors?.workDate)}
+                  id="workDate"
+                  name="workDate"
+                  onChange={(event) => setWorkDate(event.target.value)}
+                  required
+                  type="date"
+                  value={workDate}
+                />
+                <FieldError field="workDate" state={state} />
+              </label>
+
+              <label className="field" htmlFor="enteredHours">
+                <span>Hours</span>
+                <input
+                  aria-invalid={Boolean(state.fieldErrors?.enteredHours)}
+                  id="enteredHours"
+                  inputMode="numeric"
+                  max={24}
+                  min={0}
+                  name="enteredHours"
+                  onChange={(event) => setEnteredHours(event.target.value)}
+                  required
+                  step={1}
+                  type="number"
+                  value={enteredHours}
+                />
+                <FieldError field="enteredHours" state={state} />
+              </label>
+
+              <label className="field" htmlFor="enteredMinutes">
+                <span>Minutes</span>
+                <input
+                  aria-invalid={Boolean(state.fieldErrors?.enteredMinutes)}
+                  id="enteredMinutes"
+                  inputMode="numeric"
+                  max={59}
+                  min={0}
+                  name="enteredMinutes"
+                  onChange={(event) => setEnteredMinutes(event.target.value)}
+                  required
+                  step={1}
+                  type="number"
+                  value={enteredMinutes}
+                />
+                <FieldError field="enteredMinutes" state={state} />
+              </label>
+            </div>
+          ) : (
+            <div className="time-range-grid">
+              <label className="field" htmlFor="startLocal">
+                <span>Start</span>
+                <input
+                  aria-invalid={Boolean(state.fieldErrors?.startLocal)}
+                  id="startLocal"
+                  name="startLocal"
+                  onChange={(event) => setStartLocal(event.target.value)}
+                  required
+                  step={60}
+                  type="datetime-local"
+                  value={startLocal}
+                />
+                <FieldError field="startLocal" state={state} />
+              </label>
+
+              <label className="field" htmlFor="endLocal">
+                <span>Finish</span>
+                <input
+                  aria-invalid={Boolean(state.fieldErrors?.endLocal)}
+                  id="endLocal"
+                  name="endLocal"
+                  onChange={(event) => setEndLocal(event.target.value)}
+                  required
+                  step={60}
+                  type="datetime-local"
+                  value={endLocal}
+                />
+                <FieldError field="endLocal" state={state} />
+              </label>
+            </div>
+          )}
+
+          {inputMode === 'range' && calculatedSeconds !== null && calculatedSeconds > 0 && (
+            <div className="time-calculated-duration" aria-live="polite">
+              Calculated duration: {Math.floor(calculatedSeconds / 3_600)}h{' '}
+              {Math.floor((calculatedSeconds % 3_600) / 60)}m
+            </div>
+          )}
+
+          <label className="checkbox-field time-billable-field">
             <input
               checked={billable}
               name="billable"
@@ -179,205 +303,77 @@ export function TimeEntryForm({
             />
             <span>
               <strong>Billable time</strong>
-              <small>Include this entry when preparing billable time for Xero.</small>
+              <small>Include this work when preparing the customer invoice.</small>
             </span>
           </label>
-        </div>
-      </section>
 
-      <section className="form-section" aria-labelledby="time-details-heading">
-        <div className="form-section-heading">
-          <span>2</span>
-          <div>
-            <h2 id="time-details-heading">Time</h2>
-            <p>Enter a duration or a precise start and finish. There is no running timer.</p>
-          </div>
-        </div>
-
-        <fieldset className="mode-fieldset">
-          <legend>Entry method</legend>
-          <div className="mode-options">
-            <label className={inputMode === 'duration' ? 'mode-option selected' : 'mode-option'}>
-              <input
-                checked={inputMode === 'duration'}
-                name="inputMode"
-                onChange={() => setInputMode('duration')}
-                type="radio"
-                value="duration"
-              />
-              <span>
-                <strong>Hours and minutes</strong>
-                <small>Best when you already know the total.</small>
-              </span>
-            </label>
-            <label className={inputMode === 'range' ? 'mode-option selected' : 'mode-option'}>
-              <input
-                checked={inputMode === 'range'}
-                name="inputMode"
-                onChange={() => setInputMode('range')}
-                type="radio"
-                value="range"
-              />
-              <span>
-                <strong>Start and finish</strong>
-                <small>The duration is calculated for you.</small>
-              </span>
-            </label>
-          </div>
-          <FieldError field="inputMode" state={state} />
-        </fieldset>
-
-        {inputMode === 'duration' ? (
-          <div className="form-grid form-grid-time">
-            <label className="field" htmlFor="workDate">
-              <span>Work date</span>
-              <input
-                aria-invalid={Boolean(state.fieldErrors?.workDate)}
-                id="workDate"
-                name="workDate"
-                onChange={(event) => setWorkDate(event.target.value)}
-                required
-                type="date"
-                value={workDate}
-              />
-              <FieldError field="workDate" state={state} />
-            </label>
-
-            <label className="field" htmlFor="enteredHours">
-              <span>Hours</span>
-              <input
-                aria-invalid={Boolean(state.fieldErrors?.enteredHours)}
-                id="enteredHours"
-                inputMode="numeric"
-                max={24}
-                min={0}
-                name="enteredHours"
-                onChange={(event) => setEnteredHours(event.target.value)}
-                required
-                step={1}
-                type="number"
-                value={enteredHours}
-              />
-              <FieldError field="enteredHours" state={state} />
-            </label>
-
-            <label className="field" htmlFor="enteredMinutes">
-              <span>Minutes</span>
-              <input
-                aria-invalid={Boolean(state.fieldErrors?.enteredMinutes)}
-                id="enteredMinutes"
-                inputMode="numeric"
-                max={59}
-                min={0}
-                name="enteredMinutes"
-                onChange={(event) => setEnteredMinutes(event.target.value)}
-                required
-                step={1}
-                type="number"
-                value={enteredMinutes}
-              />
-              <FieldError field="enteredMinutes" state={state} />
-            </label>
-          </div>
-        ) : (
-          <div className="form-grid">
-            <label className="field" htmlFor="startLocal">
-              <span>Start</span>
-              <input
-                aria-invalid={Boolean(state.fieldErrors?.startLocal)}
-                id="startLocal"
-                name="startLocal"
-                onChange={(event) => setStartLocal(event.target.value)}
-                required
-                step={60}
-                type="datetime-local"
-                value={startLocal}
-              />
-              <FieldError field="startLocal" state={state} />
-            </label>
-
-            <label className="field" htmlFor="endLocal">
-              <span>Finish</span>
-              <input
-                aria-invalid={Boolean(state.fieldErrors?.endLocal)}
-                id="endLocal"
-                name="endLocal"
-                onChange={(event) => setEndLocal(event.target.value)}
-                required
-                step={60}
-                type="datetime-local"
-                value={endLocal}
-              />
-              <FieldError field="endLocal" state={state} />
-            </label>
-          </div>
-        )}
-
-        <label className="field timezone-field" htmlFor="timezone">
-          <span>Timezone</span>
-          <input
-            aria-invalid={Boolean(state.fieldErrors?.timezone)}
-            autoComplete="off"
-            id="timezone"
-            list={`time-entry-timezone-options-${mode}`}
-            name="timezone"
-            onChange={(event) => setTimezone(event.target.value)}
-            placeholder="Search IANA timezones"
-            required
-            value={timezone}
-          />
-          <datalist id={`time-entry-timezone-options-${mode}`}>
-            {timezones.map((timezone) => (
-              <option key={timezone.value} value={timezone.value}>
-                {timezone.label}
-              </option>
-            ))}
-          </datalist>
-          <small>
-            Start and finish are interpreted in this timezone
-            {offsetLabel ? ` (${offsetLabel} at the selected start)` : ''}.
-          </small>
-          <FieldError field="timezone" state={state} />
-        </label>
-        {inputMode === 'range' && calculatedSeconds !== null && calculatedSeconds > 0 && (
-          <div className="notice" aria-live="polite">
-            Calculated duration: {Math.floor(calculatedSeconds / 3_600)}h{' '}
-            {Math.floor((calculatedSeconds % 3_600) / 60)}m
-          </div>
-        )}
-      </section>
-
-      {mode === 'edit' && requiresCorrectionReason && (
-        <section className="form-section" aria-labelledby="correction-reason-heading">
-          <div className="form-section-heading">
-            <span>3</span>
+          <div className="time-timezone-context">
             <div>
-              <h2 id="correction-reason-heading">Correction audit</h2>
-              <p>Owner and administrator corrections are recorded in the audit trail.</p>
+              <span>Timezone</span>
+              <strong>{timezone.replaceAll('_', ' ')}</strong>
+              {offsetLabel && <small>{offsetLabel} at the selected start</small>}
             </div>
+            <details
+              className="time-timezone-disclosure"
+              open={Boolean(state.fieldErrors?.timezone) || undefined}
+            >
+              <summary>Change timezone</summary>
+              <label className="field" htmlFor="timezone">
+                <span>Timezone</span>
+                <input
+                  aria-invalid={Boolean(state.fieldErrors?.timezone)}
+                  autoComplete="off"
+                  id="timezone"
+                  list={`time-entry-timezone-options-${mode}`}
+                  name="timezone"
+                  onChange={(event) => setTimezone(event.target.value)}
+                  placeholder="Search IANA timezones"
+                  required
+                  value={timezone}
+                />
+                <datalist id={`time-entry-timezone-options-${mode}`}>
+                  {timezones.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </datalist>
+                <small>Start and finish are interpreted in this timezone.</small>
+                <FieldError field="timezone" state={state} />
+              </label>
+            </details>
           </div>
-          <label className="field" htmlFor="privilegedCorrectionReason">
-            <span>Reason</span>
-            <textarea
-              aria-invalid={Boolean(state.fieldErrors?.privilegedCorrectionReason)}
-              id="privilegedCorrectionReason"
-              maxLength={1_000}
-              minLength={10}
-              name="privilegedCorrectionReason"
-              required
-              rows={3}
-            />
-            <FieldError field="privilegedCorrectionReason" state={state} />
-          </label>
-        </section>
-      )}
 
-      <div className="form-actions">
-        <Link className="button button-secondary" href="/app">
-          Cancel
-        </Link>
-        <SaveButton disabled={!hasProjects} mode={mode} />
-      </div>
+          {mode === 'edit' && requiresCorrectionReason && (
+            <section className="time-correction-field" aria-labelledby="correction-reason-heading">
+              <div>
+                <h2 id="correction-reason-heading">Correction reason</h2>
+                <p>Administrator corrections are recorded in the audit trail.</p>
+              </div>
+              <label className="field" htmlFor="privilegedCorrectionReason">
+                <span>Reason</span>
+                <textarea
+                  aria-invalid={Boolean(state.fieldErrors?.privilegedCorrectionReason)}
+                  id="privilegedCorrectionReason"
+                  maxLength={1_000}
+                  minLength={10}
+                  name="privilegedCorrectionReason"
+                  required
+                  rows={3}
+                />
+                <FieldError field="privilegedCorrectionReason" state={state} />
+              </label>
+            </section>
+          )}
+
+          <div className="time-form-actions">
+            <Link className="button button-secondary" href="/app">
+              Cancel
+            </Link>
+            <SaveButton disabled={!hasProjects} mode={mode} />
+          </div>
+        </div>
+      </section>
     </form>
   )
 }

@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { hasActiveRole } from '@/access/roles'
+import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import { environment } from '@/lib/env'
 import { requireAppSession } from '@/lib/member-app/session'
 import { getAccountingConnectionView } from '@/lib/xero/accounting/service'
@@ -121,40 +122,48 @@ export default async function OperationsPage() {
     : { docs: [] }
   const actorNames = new Map(actors.docs.map((user) => [String(user.id), user.displayName]))
 
-  const cards = [
-    ['Active users', activeUsers.totalDocs, '/app/settings/users'],
-    ['Unmapped customers', unmappedCustomers.totalDocs, '/app/settings/customers'],
-    ['Unbilled entries', unbilledEntries.totalDocs, '/app/billing'],
-    ['Queued or active exports', queuedExports.totalDocs, '/app/billing/exports'],
-    ['Action required', actionExports.totalDocs, '/app/billing/exports'],
-    ['Pending webhook work', pendingWebhooks.totalDocs, '/admin/collections/xero-webhook-receipts'],
+  const operationalCounts = [
+    ['Active users', activeUsers.totalDocs, '/app/settings/users', false],
+    ['Unmapped customers', unmappedCustomers.totalDocs, '/app/settings/customers', false],
+    ['Unbilled entries', unbilledEntries.totalDocs, '/app/billing', false],
+    ['Queued or active exports', queuedExports.totalDocs, '/app/billing/exports', false],
+    ['Action required', actionExports.totalDocs, '/app/billing/exports', false],
+    [
+      'Pending webhook work',
+      pendingWebhooks.totalDocs,
+      '/admin/collections/xero-webhook-receipts',
+      true,
+    ],
   ] as const
 
   return (
     <div className="wide-page page-stack">
-      <section className="page-heading compact">
-        <div>
-          <p className="eyebrow">Safe diagnostics</p>
-          <h1>Operations</h1>
-          <p>
-            Counts and health states only. Tokens, OAuth artifacts, and invoice payloads are never
-            shown here.
-          </p>
+      <PageHeader
+        breadcrumb={{ current: 'Operations', href: '/app/settings', label: 'Settings' }}
+        description="Review safe counts and health states without exposing tokens, OAuth artifacts, or invoice payloads."
+        title="Operations"
+      />
+
+      <section aria-labelledby="operational-counts-heading" className="operations-counts">
+        <div className="operations-section-heading">
+          <h2 id="operational-counts-heading">Current workload</h2>
+          <p>Open the relevant workflow for detail.</p>
         </div>
+        <ul className="operations-count-list">
+          {operationalCounts.map(([label, count, href, leavesApp]) => (
+            <li key={label}>
+              <Link href={href}>
+                <span>{label}</span>
+                <strong>{count}</strong>
+                <small>{leavesApp ? 'Open in Payload Admin ↗' : 'Open details'}</small>
+              </Link>
+            </li>
+          ))}
+        </ul>
       </section>
 
-      <section aria-label="Operational counts" className="summary-grid">
-        {cards.map(([label, count, href]) => (
-          <Link className="summary-card" href={href} key={label}>
-            <span>{label}</span>
-            <strong>{count}</strong>
-            <small>Open details</small>
-          </Link>
-        ))}
-      </section>
-
-      <section className="panel page-stack">
-        <div>
+      <section className="operations-section">
+        <div className="operations-section-heading">
           <h2>Independent integration health</h2>
           <p>An outage or kill switch in one boundary does not imply failure in the other.</p>
         </div>
@@ -208,21 +217,21 @@ export default async function OperationsPage() {
             Export diagnostics
           </Link>
           <Link className="button button-secondary" href="/admin/collections/audit-events">
-            Audit trail
+            Audit trail in Payload Admin ↗
           </Link>
         </div>
       </section>
 
-      <section className="panel page-stack">
-        <div>
+      <section className="operations-section">
+        <div className="operations-section-heading">
           <h2>Recent settings changes</h2>
           <p>Security-sensitive changes include the recorded actor and exact audit timestamp.</p>
         </div>
         {settingsAudits.docs.length === 0 ? (
           <p>No settings changes have been recorded yet.</p>
         ) : (
-          <div className="table-scroll">
-            <table>
+          <div className="table-wrap">
+            <table className="time-table">
               <thead>
                 <tr>
                   <th scope="col">Setting area</th>

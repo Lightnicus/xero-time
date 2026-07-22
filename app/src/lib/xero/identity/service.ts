@@ -8,6 +8,7 @@ import { findUsableInvitation } from '@/lib/account-lifecycle/service'
 import { recordAuditEvent } from '@/lib/audit/service'
 import { relationshipID } from '@/lib/domain/validation'
 import { environment, type XeroIdentityEnvironment } from '@/lib/env'
+import { defaultAppHome } from '@/lib/member-app/navigation'
 import type { AppSession } from '@/lib/member-app/session'
 import { requireMongoModel } from '@/lib/payload/mongo'
 import { withPayloadTransaction } from '@/lib/payload/withTransaction'
@@ -118,6 +119,11 @@ const safeAppPath = (value: string | undefined): string => {
   if (!value) return '/app'
   const valid = value === '/app' || value.startsWith('/app/') || value.startsWith('/app?')
   return valid && !value.startsWith('//') && !value.includes('\\') ? value : '/app'
+}
+
+const appDestinationForUser = (value: string | undefined, user: User): string => {
+  const destination = safeAppPath(value)
+  return destination === '/app' ? defaultAppHome(user.role) : destination
 }
 
 const settingsFor = async (
@@ -468,7 +474,11 @@ const completeReturningSignIn = async (
       req,
     )
     await markFlow(payload, flow.id, 'completed', undefined, req)
-    return { destination: safeAppPath(flow.returnPath ?? undefined), sessionToken, user }
+    return {
+      destination: appDestinationForUser(flow.returnPath ?? undefined, user),
+      sessionToken,
+      user,
+    }
   })
 
 const completeLink = async (
@@ -552,7 +562,11 @@ const completeLink = async (
       req,
     )
     await markFlow(payload, flow.id, 'completed', undefined, req)
-    return { destination: safeAppPath(flow.returnPath ?? undefined), sessionToken, user }
+    return {
+      destination: appDestinationForUser(flow.returnPath ?? undefined, user),
+      sessionToken,
+      user,
+    }
   })
 }
 
@@ -691,7 +705,7 @@ const completeInvitation = async (
         req,
       )
       await markFlow(payload, flow.id, 'completed', undefined, req)
-      return { destination: '/app', sessionToken, user }
+      return { destination: defaultAppHome(user.role), sessionToken, user }
     },
     { context: { [ACCOUNT_INVITATION_ACCEPTANCE_CONTEXT]: true } },
   )
