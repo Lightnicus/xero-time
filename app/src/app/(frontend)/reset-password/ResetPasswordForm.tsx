@@ -1,22 +1,13 @@
 'use client'
 
 import { useActionState } from 'react'
-import { useFormStatus } from 'react-dom'
 
+import { PendingSubmitButton } from '@/app/(frontend)/_components/PendingControls'
 import { MIN_PASSWORD_LENGTH } from '@/lib/account-lifecycle/password-policy'
 
 import { resetPasswordAction, type ResetPasswordState } from './actions'
 
 const initialState: ResetPasswordState = { message: null }
-
-function SubmitButton() {
-  const { pending } = useFormStatus()
-  return (
-    <button className="button button-primary button-wide" disabled={pending} type="submit">
-      {pending ? 'Resetting…' : 'Set new password'}
-    </button>
-  )
-}
 
 export function ResetPasswordForm({ token }: { token: string }) {
   const [state, action] = useActionState(resetPasswordAction, initialState)
@@ -47,7 +38,9 @@ export function ResetPasswordForm({ token }: { token: string }) {
       <div aria-live="polite" className="form-message form-message-error" role="status">
         {state.message}
       </div>
-      <SubmitButton />
+      <PendingSubmitButton className="button button-primary button-wide" pendingLabel="Resetting…">
+        Set new password
+      </PendingSubmitButton>
     </form>
   )
 }

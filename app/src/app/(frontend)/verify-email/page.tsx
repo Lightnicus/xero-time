@@ -1,5 +1,7 @@
 import Link from 'next/link'
 
+import { PendingSubmitButton } from '@/app/(frontend)/_components/PendingControls'
+
 import { verifyEmailAction } from './actions'
 
 import type { Metadata } from 'next'
@@ -30,9 +32,12 @@ export default async function VerifyEmailPage({
           <form action={verifyEmailAction} className="auth-form">
             <input name="token" type="hidden" value={token} />
             <p className="auth-intro">Confirm this email address before signing in.</p>
-            <button className="button button-primary button-wide" type="submit">
+            <PendingSubmitButton
+              className="button button-primary button-wide"
+              pendingLabel="Verifying…"
+            >
               Verify email address
-            </button>
+            </PendingSubmitButton>
           </form>
         ) : (
           <div className="page-stack">

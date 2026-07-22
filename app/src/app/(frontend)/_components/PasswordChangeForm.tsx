@@ -1,8 +1,8 @@
 'use client'
 
 import { useActionState } from 'react'
-import { useFormStatus } from 'react-dom'
 
+import { PendingSubmitButton } from '@/app/(frontend)/_components/PendingControls'
 import {
   changePasswordAction,
   type PasswordActionState,
@@ -10,15 +10,6 @@ import {
 import { MIN_PASSWORD_LENGTH } from '@/lib/account-lifecycle/password-policy'
 
 const initialState: PasswordActionState = { message: null }
-
-function SubmitButton() {
-  const { pending } = useFormStatus()
-  return (
-    <button className="button button-primary" disabled={pending} type="submit">
-      {pending ? 'Changing…' : 'Change password'}
-    </button>
-  )
-}
 
 export function PasswordChangeForm() {
   const [state, action] = useActionState(changePasswordAction, initialState)
@@ -58,7 +49,9 @@ export function PasswordChangeForm() {
         {state.message}
       </div>
       <div className="form-actions">
-        <SubmitButton />
+        <PendingSubmitButton className="button button-primary" pendingLabel="Changing…">
+          Change password
+        </PendingSubmitButton>
       </div>
     </form>
   )

@@ -7,6 +7,7 @@ import {
   InvitationRowActions,
 } from '@/app/(frontend)/_components/InvitationManagementForms'
 import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
+import { PendingSubmitButton } from '@/app/(frontend)/_components/PendingControls'
 import { getInvitationManagementView, type InviteRole } from '@/lib/account-lifecycle/service'
 import { getBusinessSettings } from '@/lib/member-app/data'
 import { timezoneOptionsIncluding } from '@/lib/member-app/date-time'
@@ -192,9 +193,12 @@ export default async function UserSettingsPage({
                   </label>
                 </div>
                 <div className="form-actions">
-                  <button className="button button-danger" type="submit">
+                  <PendingSubmitButton
+                    className="button button-danger"
+                    pendingLabel="Updating ownership…"
+                  >
                     Confirm ownership transition
-                  </button>
+                  </PendingSubmitButton>
                 </div>
               </form>
             </section>
@@ -235,13 +239,13 @@ export default async function UserSettingsPage({
                 </label>
               </div>
               <div className="form-actions">
-                <button
+                <PendingSubmitButton
                   className="button button-danger"
                   disabled={recoverableUsers.length === 0}
-                  type="submit"
+                  pendingLabel="Revoking access…"
                 >
                   Revoke identity and sessions
-                </button>
+                </PendingSubmitButton>
               </div>
             </form>
           </section>

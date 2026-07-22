@@ -69,6 +69,32 @@ test.describe.serial('Member time application', () => {
     await expect(page.getByText('The email or password is incorrect.')).toBeVisible()
   })
 
+  test('shows immediate progress while a server action is waiting', async ({ page }) => {
+    let continueRequest: (() => void) | undefined
+    const requestGate = new Promise<void>((resolve) => {
+      continueRequest = resolve
+    })
+    await page.route('**/login', async (route) => {
+      if (route.request().method() === 'POST' && route.request().headers()['next-action']) {
+        await requestGate
+      }
+      await route.continue()
+    })
+    await page.goto('/login')
+    await page.getByLabel('Email address').fill(memberAppUser.email)
+    await page.getByLabel('Password').fill('wrong-password-value')
+    const submit = page.locator('form button[type="submit"]')
+
+    const submission = submit.click()
+    await expect(submit).toHaveText('Signing in…')
+    await expect(submit).toBeDisabled()
+    await expect(submit).toHaveAttribute('aria-busy', 'true')
+
+    continueRequest?.()
+    await submission
+    await expect(page.getByText('The email or password is incorrect.')).toBeVisible()
+  })
+
   test('returns the same password-reset response for an unknown account', async ({ page }) => {
     await page.goto('/login')
     await page.getByRole('link', { name: 'Forgot your password?' }).click()

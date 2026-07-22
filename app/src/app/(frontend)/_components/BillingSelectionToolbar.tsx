@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { PendingSubmitButton } from '@/app/(frontend)/_components/PendingControls'
 import { formatScaledAmount } from '@/lib/domain/money'
 
 import type { ReactNode } from 'react'
@@ -264,12 +265,12 @@ export function BillingSelectionToolbar({
 
       <div className="billing-review-action">
         {actionDisabled && <p>{disabledReason}</p>}
-        <button
+        <PendingSubmitButton
           className="button button-primary"
           disabled={actionDisabled}
           formAction={scope === 'all-uninvoiced' ? allUninvoicedAction : undefined}
           name={scope === 'all-uninvoiced' ? undefined : 'selectionType'}
-          type="submit"
+          pendingLabel="Preparing preview…"
           value={
             scope === 'all-uninvoiced'
               ? undefined
@@ -279,7 +280,7 @@ export function BillingSelectionToolbar({
           }
         >
           Review draft invoices
-        </button>
+        </PendingSubmitButton>
       </div>
     </div>
   )

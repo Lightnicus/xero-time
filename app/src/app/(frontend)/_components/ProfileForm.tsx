@@ -1,8 +1,8 @@
 'use client'
 
 import { useActionState, useState } from 'react'
-import { useFormStatus } from 'react-dom'
 
+import { PendingSubmitButton } from './PendingControls'
 import {
   type ProfileActionState,
   type ProfileField,
@@ -25,16 +25,6 @@ const initialState: ProfileActionState = { message: null }
 function FieldError({ field, state }: { field: ProfileField; state: ProfileActionState }) {
   const message = state.fieldErrors?.[field]
   return message ? <small className="field-error">{message}</small> : null
-}
-
-function SaveButton() {
-  const { pending } = useFormStatus()
-
-  return (
-    <button className="button button-primary" disabled={pending} type="submit">
-      {pending ? 'Saving…' : 'Save profile'}
-    </button>
-  )
 }
 
 export function ProfileForm({ initialDisplayName, initialTimezone, timezones }: ProfileFormProps) {
@@ -99,7 +89,9 @@ export function ProfileForm({ initialDisplayName, initialTimezone, timezones }: 
       </div>
 
       <div className="form-actions">
-        <SaveButton />
+        <PendingSubmitButton className="button button-primary" pendingLabel="Saving…">
+          Save profile
+        </PendingSubmitButton>
       </div>
     </form>
   )

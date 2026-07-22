@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation'
 
 import { hasActiveRole } from '@/access/roles'
 import { ExportStatusPoller } from '@/app/(frontend)/_components/ExportStatusPoller'
+import { PendingSubmitButton } from '@/app/(frontend)/_components/PendingControls'
 import { exportDetailActionAvailability } from '@/lib/billing/export-detail'
 import { exportStateLabel, xeroInvoiceStatusLabel } from '@/lib/billing/export-presentation'
 import { normalizeBillingFilter } from '@/lib/billing/selection'
@@ -272,9 +273,9 @@ export default async function InvoiceExportDetailPage({
           </p>
           <form action={cancelExportAction}>
             <input name="exportID" type="hidden" value={id} />
-            <button className="button button-danger" type="submit">
+            <PendingSubmitButton className="button button-danger" pendingLabel="Cancelling…">
               Cancel export
-            </button>
+            </PendingSubmitButton>
           </form>
         </section>
       )}
@@ -288,9 +289,9 @@ export default async function InvoiceExportDetailPage({
           </p>
           <form action={refreshExportAction}>
             <input name="exportID" type="hidden" value={id} />
-            <button className="button button-secondary" type="submit">
+            <PendingSubmitButton className="button button-secondary" pendingLabel="Refreshing…">
               Refresh from Xero
-            </button>
+            </PendingSubmitButton>
           </form>
         </section>
       )}
@@ -308,9 +309,12 @@ export default async function InvoiceExportDetailPage({
           {actionAvailability.canDeleteDraft ? (
             <form action={deleteDraftAndReleaseExportAction}>
               <input name="exportID" type="hidden" value={id} />
-              <button className="button button-danger" type="submit">
+              <PendingSubmitButton
+                className="button button-danger"
+                pendingLabel="Deleting and releasing…"
+              >
                 Delete Xero draft and release time
-              </button>
+              </PendingSubmitButton>
             </form>
           ) : (
             <div className="notice notice-warning">
@@ -356,9 +360,9 @@ export default async function InvoiceExportDetailPage({
           )}
           <form action={reconcileExportAction}>
             <input name="exportID" type="hidden" value={id} />
-            <button className="button button-secondary" type="submit">
+            <PendingSubmitButton className="button button-secondary" pendingLabel="Checking Xero…">
               Check Xero again
-            </button>
+            </PendingSubmitButton>
           </form>
         </section>
       )}
@@ -373,9 +377,12 @@ export default async function InvoiceExportDetailPage({
           </p>
           <form action={authorizeReplacementAction}>
             <input name="exportID" type="hidden" value={id} />
-            <button className="button button-danger" type="submit">
+            <PendingSubmitButton
+              className="button button-danger"
+              pendingLabel="Creating replacement…"
+            >
               Create replacement draft
-            </button>
+            </PendingSubmitButton>
           </form>
         </section>
       )}
@@ -391,9 +398,9 @@ export default async function InvoiceExportDetailPage({
             </p>
             <form action={releaseExportAction}>
               <input name="exportID" type="hidden" value={id} />
-              <button className="button button-danger" type="submit">
+              <PendingSubmitButton className="button button-danger" pendingLabel="Releasing…">
                 Release all entries for rebilling
-              </button>
+              </PendingSubmitButton>
             </form>
           </section>
         )}

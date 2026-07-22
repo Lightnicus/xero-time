@@ -2,8 +2,8 @@
 
 import Link from 'next/link'
 import { useActionState } from 'react'
-import { useFormStatus } from 'react-dom'
 
+import { PendingSubmitButton } from '@/app/(frontend)/_components/PendingControls'
 import type { BillingDefaultOption } from '@/lib/billing/default-options'
 
 import { type BillingDefaultsActionState, updateBillingDefaultsAction } from './actions'
@@ -17,16 +17,6 @@ type BillingDefaultsFormProps = {
 }
 
 const initialState: BillingDefaultsActionState = { message: null }
-
-function SaveButton({ disabled }: { disabled: boolean }) {
-  const { pending } = useFormStatus()
-
-  return (
-    <button className="button button-primary" disabled={disabled || pending} type="submit">
-      {pending ? 'Saving…' : 'Save invoice defaults'}
-    </button>
-  )
-}
 
 export function BillingDefaultsForm({
   accountOptions,
@@ -114,7 +104,13 @@ export function BillingDefaultsForm({
         <Link className="button button-secondary" href="/app/billing">
           Back to billing
         </Link>
-        <SaveButton disabled={cannotSave} />
+        <PendingSubmitButton
+          className="button button-primary"
+          disabled={cannotSave}
+          pendingLabel="Saving…"
+        >
+          Save invoice defaults
+        </PendingSubmitButton>
       </div>
     </form>
   )

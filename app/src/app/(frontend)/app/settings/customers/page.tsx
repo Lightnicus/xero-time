@@ -3,6 +3,10 @@ import { redirect } from 'next/navigation'
 
 import { hasActiveRole } from '@/access/roles'
 import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
+import {
+  PendingNavigationForm,
+  PendingSubmitButton,
+} from '@/app/(frontend)/_components/PendingControls'
 import { getBusinessSettings } from '@/lib/member-app/data'
 import { requireAppSession } from '@/lib/member-app/session'
 import { searchXeroContacts, type XeroContactView } from '@/lib/xero/accounting/contacts'
@@ -198,9 +202,13 @@ export default async function CustomerMappingPage({
                       Start above any references already used for this customer in Xero.
                     </small>
                   </label>
-                  <button className="button button-secondary" disabled={locked} type="submit">
+                  <PendingSubmitButton
+                    className="button button-secondary"
+                    disabled={locked}
+                    pendingLabel="Saving invoice reference…"
+                  >
                     {locked ? 'Reference numbering started' : 'Save invoice reference'}
-                  </button>
+                  </PendingSubmitButton>
                 </form>
               </article>
             )
@@ -213,15 +221,15 @@ export default async function CustomerMappingPage({
           <h2>Search Xero contacts</h2>
           <p>Results include active and archived contacts and show any existing local mapping.</p>
         </div>
-        <form className="filter-bar" method="get">
+        <PendingNavigationForm action="/app/settings/customers" className="filter-bar" method="get">
           <label className="field">
             <span>Contact name, email, or number</span>
             <input defaultValue={query} maxLength={100} minLength={2} name="query" required />
           </label>
-          <button className="button button-primary" type="submit">
+          <PendingSubmitButton className="button button-primary" pendingLabel="Searching Xero…">
             Search Xero
-          </button>
-        </form>
+          </PendingSubmitButton>
+        </PendingNavigationForm>
         {searchFailed && (
           <div className="notice notice-warning" role="alert">
             Xero contact search is unavailable. Check the accounting connection and retry.
@@ -263,9 +271,12 @@ export default async function CustomerMappingPage({
                         ))}
                       </select>
                     </label>
-                    <button className="button button-secondary" type="submit">
+                    <PendingSubmitButton
+                      className="button button-secondary"
+                      pendingLabel="Linking customer…"
+                    >
                       Link this customer
-                    </button>
+                    </PendingSubmitButton>
                   </form>
                 )}
                 {mapped.length > 0 && (
@@ -291,18 +302,24 @@ export default async function CustomerMappingPage({
                         I understand historical invoices keep their original ContactID snapshot.
                       </span>
                     </label>
-                    <button className="button button-danger" type="submit">
+                    <PendingSubmitButton
+                      className="button button-danger"
+                      pendingLabel="Changing Xero link…"
+                    >
                       Change Xero link
-                    </button>
+                    </PendingSubmitButton>
                   </form>
                 )}
                 <form action={importContactAction} className="compact-form">
                   <input name="contactID" type="hidden" value={contact.contactID} />
                   <input name="localName" type="hidden" value={contact.name} />
                   <input name="currency" type="hidden" value={settings.baseCurrency} />
-                  <button className="button button-secondary" type="submit">
+                  <PendingSubmitButton
+                    className="button button-secondary"
+                    pendingLabel="Importing customer…"
+                  >
                     Import as new {settings.baseCurrency} customer
-                  </button>
+                  </PendingSubmitButton>
                 </form>
               </div>
             )}
@@ -331,9 +348,12 @@ export default async function CustomerMappingPage({
                     {customer.billingEmail ? ` (${customer.billingEmail})` : ''} in Xero.
                   </span>
                 </label>
-                <button className="button button-primary" type="submit">
+                <PendingSubmitButton
+                  className="button button-primary"
+                  pendingLabel="Creating contact…"
+                >
                   Create contact in Xero
-                </button>
+                </PendingSubmitButton>
               </form>
             </article>
           ))}
@@ -348,9 +368,12 @@ export default async function CustomerMappingPage({
               </div>
               <form action={refreshContactAction}>
                 <input name="customerID" type="hidden" value={customer.id} />
-                <button className="button button-secondary" type="submit">
+                <PendingSubmitButton
+                  className="button button-secondary"
+                  pendingLabel="Refreshing from Xero…"
+                >
                   Refresh from Xero
-                </button>
+                </PendingSubmitButton>
               </form>
             </article>
           ))}

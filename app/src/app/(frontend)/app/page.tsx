@@ -4,6 +4,10 @@ import { redirect } from 'next/navigation'
 import { FilterDisclosure } from '@/app/(frontend)/_components/FilterDisclosure'
 import { MetricStrip } from '@/app/(frontend)/_components/MetricStrip'
 import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
+import {
+  PendingNavigationForm,
+  PendingSubmitButton,
+} from '@/app/(frontend)/_components/PendingControls'
 import { TimeEntryList } from '@/app/(frontend)/_components/TimeEntryList'
 import { formatCalendarDateInTimezone } from '@/lib/domain/validation'
 import {
@@ -178,7 +182,7 @@ export default async function TimeEntriesPage({
           )}
         </div>
 
-        <form
+        <PendingNavigationForm
           action="/app"
           className="time-filter-form"
           key={searchParamsForFilters(filters).toString()}
@@ -252,11 +256,14 @@ export default async function TimeEntriesPage({
               </div>
             </FilterDisclosure>
 
-            <button className="button button-primary time-filter-apply" type="submit">
+            <PendingSubmitButton
+              className="button button-primary time-filter-apply"
+              pendingLabel="Applying…"
+            >
               Apply filters
-            </button>
+            </PendingSubmitButton>
           </div>
-        </form>
+        </PendingNavigationForm>
       </section>
 
       <MetricStrip

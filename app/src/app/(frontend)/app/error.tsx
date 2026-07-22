@@ -1,5 +1,7 @@
 'use client'
 
+import { PendingActionButton } from '@/app/(frontend)/_components/PendingControls'
+
 export default function ApplicationError({ reset }: { error: Error; reset: () => void }) {
   return (
     <div className="narrow-page page-stack">
@@ -11,9 +13,13 @@ export default function ApplicationError({ reset }: { error: Error; reset: () =>
           completed until its saved state is visible.
         </p>
         <div className="filter-actions">
-          <button className="button button-primary" onClick={reset} type="button">
+          <PendingActionButton
+            action={reset}
+            className="button button-primary"
+            pendingLabel="Retrying…"
+          >
             Try again
-          </button>
+          </PendingActionButton>
         </div>
       </section>
     </div>

@@ -1,8 +1,8 @@
 'use client'
 
 import { useActionState, useState } from 'react'
-import { useFormStatus } from 'react-dom'
 
+import { PendingSubmitButton } from '@/app/(frontend)/_components/PendingControls'
 import type { InvitationActionState } from '@/app/(frontend)/app/settings/users/actions'
 import {
   createInvitationAction,
@@ -14,15 +14,6 @@ import type { InvitationManagementItem, InviteRole } from '@/lib/account-lifecyc
 type TimezoneOption = { label: string; value: string }
 
 const initialState: InvitationActionState = { message: null }
-
-function SubmitButton({ label, pendingLabel }: { label: string; pendingLabel: string }) {
-  const { pending } = useFormStatus()
-  return (
-    <button className="button button-primary" disabled={pending} type="submit">
-      {pending ? pendingLabel : label}
-    </button>
-  )
-}
 
 function Result({ state }: { state: InvitationActionState }) {
   if (!state.message) return null
@@ -111,7 +102,9 @@ export function InvitationCreateForm({
         </label>
       </div>
       <div className="form-actions">
-        <SubmitButton label="Issue invitation" pendingLabel="Issuing…" />
+        <PendingSubmitButton className="button button-primary" pendingLabel="Issuing…">
+          Issue invitation
+        </PendingSubmitButton>
       </div>
     </form>
   )
@@ -126,7 +119,9 @@ export function InvitationRowActions({ invitation }: { invitation: InvitationMan
     <div className="invitation-actions">
       <form action={resendAction}>
         <input name="invitationID" type="hidden" value={invitation.id} />
-        <SubmitButton label="Rotate and resend" pendingLabel="Resending…" />
+        <PendingSubmitButton className="button button-primary" pendingLabel="Resending…">
+          Rotate and resend
+        </PendingSubmitButton>
         <Result state={resendState} />
       </form>
       <details>
@@ -137,7 +132,9 @@ export function InvitationRowActions({ invitation }: { invitation: InvitationMan
             <span>Reason</span>
             <textarea minLength={10} name="reason" required rows={2} />
           </label>
-          <SubmitButton label="Revoke" pendingLabel="Revoking…" />
+          <PendingSubmitButton className="button button-primary" pendingLabel="Revoking…">
+            Revoke
+          </PendingSubmitButton>
           <Result state={revokeState} />
         </form>
       </details>

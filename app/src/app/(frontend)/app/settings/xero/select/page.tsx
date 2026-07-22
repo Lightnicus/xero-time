@@ -4,6 +4,10 @@ import { redirect } from 'next/navigation'
 
 import { hasActiveRole } from '@/access/roles'
 import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
+import {
+  PendingNavigationForm,
+  PendingSubmitButton,
+} from '@/app/(frontend)/_components/PendingControls'
 import { requireAppSession } from '@/lib/member-app/session'
 import {
   ACCOUNTING_FLOW_COOKIE,
@@ -48,7 +52,7 @@ export default async function SelectXeroTenantPage({
         title="Select Xero organisation"
       />
 
-      <form
+      <PendingNavigationForm
         action="/api/integrations/xero/accounting/select"
         className="form-section tenant-selection-form"
         method="post"
@@ -74,11 +78,14 @@ export default async function SelectXeroTenantPage({
           <Link className="button button-secondary" href="/app/settings/xero">
             Cancel
           </Link>
-          <button className="button button-primary" type="submit">
+          <PendingSubmitButton
+            className="button button-primary"
+            pendingLabel="Pinning organisation…"
+          >
             Pin this organisation
-          </button>
+          </PendingSubmitButton>
         </div>
-      </form>
+      </PendingNavigationForm>
     </div>
   )
 }

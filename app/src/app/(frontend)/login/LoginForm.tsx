@@ -2,21 +2,12 @@
 
 import Link from 'next/link'
 import { useActionState } from 'react'
-import { useFormStatus } from 'react-dom'
+
+import { PendingSubmitButton } from '@/app/(frontend)/_components/PendingControls'
 
 import { loginAction, type LoginActionState } from './actions'
 
 const initialState: LoginActionState = { message: null }
-
-function LoginSubmitButton() {
-  const { pending } = useFormStatus()
-
-  return (
-    <button className="button button-primary button-wide" disabled={pending} type="submit">
-      {pending ? 'Signing in…' : 'Sign in'}
-    </button>
-  )
-}
 
 export function LoginForm({ nextPath }: { nextPath: string }) {
   const [state, formAction] = useActionState(loginAction, initialState)
@@ -48,7 +39,9 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
         {state.message}
       </div>
 
-      <LoginSubmitButton />
+      <PendingSubmitButton className="button button-primary button-wide" pendingLabel="Signing in…">
+        Sign in
+      </PendingSubmitButton>
       <Link className="auth-secondary-link" href="/forgot-password">
         Forgot your password?
       </Link>

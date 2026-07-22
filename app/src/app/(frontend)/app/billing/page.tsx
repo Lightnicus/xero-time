@@ -6,6 +6,10 @@ import { BillingSelectionToolbar } from '@/app/(frontend)/_components/BillingSel
 import { FilterDisclosure } from '@/app/(frontend)/_components/FilterDisclosure'
 import { MetricStrip } from '@/app/(frontend)/_components/MetricStrip'
 import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
+import {
+  PendingNavigationForm,
+  PendingSubmitButton,
+} from '@/app/(frontend)/_components/PendingControls'
 import { BILLING_BLOCKER_CODES, type BillingFilter } from '@/lib/billing/contracts'
 import { getBillingEligibility } from '@/lib/billing/eligibility'
 import {
@@ -280,9 +284,12 @@ export default async function BillingQueuePage({
                 </div>
                 {canManageBillingSetup && issue.action === 'refresh-xero' && (
                   <form action={refreshBillingReferenceDataAction}>
-                    <button className="button button-secondary" type="submit">
+                    <PendingSubmitButton
+                      className="button button-secondary"
+                      pendingLabel="Refreshing…"
+                    >
                       {issue.actionLabel}
-                    </button>
+                    </PendingSubmitButton>
                   </form>
                 )}
                 {canManageBillingSetup && issue.action === 'billing-settings' && (
@@ -307,7 +314,7 @@ export default async function BillingQueuePage({
       )}
 
       <section className="billing-filter-surface" aria-label="Billing filters">
-        <form className="billing-filter-form" method="get">
+        <PendingNavigationForm action="/app/billing" className="billing-filter-form" method="get">
           <div className="billing-common-filter-grid">
             <label className="field billing-filter-field">
               <span>From</span>
@@ -376,11 +383,14 @@ export default async function BillingQueuePage({
                 </label>
               </div>
             </FilterDisclosure>
-            <button className="button button-primary billing-filter-apply" type="submit">
+            <PendingSubmitButton
+              className="button button-primary billing-filter-apply"
+              pendingLabel="Applying…"
+            >
               Apply filters
-            </button>
+            </PendingSubmitButton>
           </div>
-        </form>
+        </PendingNavigationForm>
       </section>
 
       <MetricStrip

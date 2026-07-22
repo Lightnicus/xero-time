@@ -1,22 +1,13 @@
 'use client'
 
 import { useActionState } from 'react'
-import { useFormStatus } from 'react-dom'
 
+import { PendingSubmitButton } from '@/app/(frontend)/_components/PendingControls'
 import { MIN_PASSWORD_LENGTH } from '@/lib/account-lifecycle/password-policy'
 
 import { acceptInvitationAction, type AcceptInvitationState } from './actions'
 
 const initialState: AcceptInvitationState = { message: null }
-
-function SubmitButton() {
-  const { pending } = useFormStatus()
-  return (
-    <button className="button button-primary button-wide" disabled={pending} type="submit">
-      {pending ? 'Creating account…' : 'Create account'}
-    </button>
-  )
-}
 
 export function AcceptInvitationForm({ token }: { token: string }) {
   const [state, action] = useActionState(acceptInvitationAction, initialState)
@@ -47,7 +38,12 @@ export function AcceptInvitationForm({ token }: { token: string }) {
       <div aria-live="polite" className="form-message form-message-error" role="status">
         {state.message}
       </div>
-      <SubmitButton />
+      <PendingSubmitButton
+        className="button button-primary button-wide"
+        pendingLabel="Creating account…"
+      >
+        Create account
+      </PendingSubmitButton>
     </form>
   )
 }

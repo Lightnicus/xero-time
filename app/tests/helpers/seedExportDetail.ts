@@ -15,6 +15,7 @@ export type ExportDetailFixture = {
   manualReview: ExportDetailFixtureRecord
   reconciling: ExportDetailFixtureRecord
   releaseable: ExportDetailFixtureRecord
+  released: ExportDetailFixtureRecord
   replacement: ExportDetailFixtureRecord
   succeeded: ExportDetailFixtureRecord
 }
@@ -24,12 +25,16 @@ type ExportDetailScenario = {
   lastErrorMessage?: string
   reference: string
   remoteStatus?: 'AUTHORISED' | 'DELETED' | 'DRAFT'
-  state: 'action-required' | 'manual-review' | 'reconciling' | 'succeeded'
+  state: 'action-required' | 'manual-review' | 'reconciling' | 'released' | 'succeeded'
+  workDate?: string
   xeroInvoiceId?: string
   xeroInvoiceNumber?: string
 }
 
 type SeededTimeEntry = { id: string }
+
+const scenarioWorkDate = (scenario: ExportDetailScenario): string =>
+  scenario.workDate ?? '2026-07-22'
 
 const fixtureScenarios = [
   {
@@ -73,6 +78,14 @@ const fixtureScenarios = [
     lastErrorMessage: 'Xero confirmed that the original invoice is absent.',
     reference: 'E2E-DETAIL-REPLACEMENT',
     state: 'manual-review',
+  },
+  {
+    reference: 'E2E-DETAIL-RELEASED',
+    remoteStatus: 'DELETED',
+    state: 'released',
+    workDate: '2026-07-21',
+    xeroInvoiceId: '77777777-7777-4777-8777-777777777777',
+    xeroInvoiceNumber: 'E2E-DELETED-002',
   },
 ] as const satisfies readonly ExportDetailScenario[]
 
@@ -177,7 +190,7 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
           inputMode: 'duration',
           project: project.id,
           timezone: testUser.timezone,
-          workDate: '2026-07-22',
+          workDate: scenarioWorkDate(scenario),
         } as never,
         overrideAccess: false,
         req: ownerReq,
@@ -236,6 +249,7 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
         lastReconciledAt: scenario.remoteStatus ? seededAt : undefined,
         payloadHash: `e2e-${scenario.state}-payload`,
         remoteStatus: scenario.remoteStatus,
+        releasedAt: scenario.state === 'released' ? seededAt : undefined,
         requestPayload: {
           Contact: { ContactID: xeroContactID },
           Date: '2026-07-22',
@@ -297,7 +311,7 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
         tracking: [],
         user: owner.id,
         userName: testUser.displayName,
-        workDate: '2026-07-22',
+        workDate: scenarioWorkDate(scenario),
         xeroItemId: xeroItemID,
       },
       overrideAccess: true,
@@ -332,6 +346,20 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
         overrideAccess: true,
         req: ownerReq,
       })
+    } else if (scenario.state === 'released') {
+      await payload.update({
+        collection: 'time-entries',
+        context: { [TIME_ENTRY_BILLING_MUTATION_CONTEXT]: 'release' },
+        data: {
+          billingStatus: 'unbilled',
+          currentExport: null,
+          exportedAt: null,
+          reservedAt: null,
+        },
+        id: timeEntry.id,
+        overrideAccess: true,
+        req: ownerReq,
+      })
     }
 
     return {
@@ -347,8 +375,9 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
   const reconciling = await createExport(fixtureScenarios[3], timeEntries[3]!)
   const releaseable = await createExport(fixtureScenarios[4], timeEntries[4]!)
   const replacement = await createExport(fixtureScenarios[5], timeEntries[5]!)
+  const released = await createExport(fixtureScenarios[6], timeEntries[6]!)
 
-  return { completed, manualReview, reconciling, releaseable, replacement, succeeded }
+  return { completed, manualReview, reconciling, releaseable, released, replacement, succeeded }
 }
 
 /** Removes the isolated export-detail fixture and any browser-test side effects. */

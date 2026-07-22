@@ -1,20 +1,12 @@
 'use client'
 
 import { useActionState } from 'react'
-import { useFormStatus } from 'react-dom'
+
+import { PendingSubmitButton } from '@/app/(frontend)/_components/PendingControls'
 
 import { forgotPasswordAction, type ForgotPasswordState } from './actions'
 
 const initialState: ForgotPasswordState = { message: null }
-
-function SubmitButton() {
-  const { pending } = useFormStatus()
-  return (
-    <button className="button button-primary button-wide" disabled={pending} type="submit">
-      {pending ? 'Requesting…' : 'Send reset instructions'}
-    </button>
-  )
-}
 
 export function ForgotPasswordForm() {
   const [state, action] = useActionState(forgotPasswordAction, initialState)
@@ -40,7 +32,9 @@ export function ForgotPasswordForm() {
       >
         {state.message}
       </div>
-      <SubmitButton />
+      <PendingSubmitButton className="button button-primary button-wide" pendingLabel="Requesting…">
+        Send reset instructions
+      </PendingSubmitButton>
     </form>
   )
 }

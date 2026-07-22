@@ -142,6 +142,36 @@ textarea:focus-visible {
   opacity: 0.58;
 }
 
+button[data-pending='true'] {
+  cursor: progress;
+}
+
+.button[data-pending='true'] {
+  opacity: 0.78;
+}
+
+.button-spinner {
+  width: 0.9em;
+  height: 0.9em;
+  flex: 0 0 auto;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: button-spinner-rotation 700ms linear infinite;
+}
+
+@keyframes button-spinner-rotation {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button-spinner {
+    animation: none;
+  }
+}
+
 .button-primary {
   background: var(--brand);
   color: #fff;
@@ -1585,6 +1615,10 @@ textarea:focus-visible {
 
 .billing-table {
   min-width: 980px;
+}
+
+.export-history-table {
+  min-width: 720px;
 }
 
 .billing-description {

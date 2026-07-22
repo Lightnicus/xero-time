@@ -114,6 +114,25 @@ test.describe.serial('Invoice export detail recovery controls', () => {
     await expect(page.getByText('Already exported:', { exact: true })).toHaveCount(exported.length)
   })
 
+  test('hides completed deletions from the simplified export history by default', async ({
+    page,
+  }) => {
+    await signIn(page, testUser)
+    await page.goto('/app/billing/exports')
+
+    await expect(page.getByRole('columnheader', { name: 'Mode', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('columnheader', { name: 'Xero', exact: true })).toHaveCount(0)
+    await expect(page.getByText(fixture.released.reference, { exact: true })).toHaveCount(0)
+    await expect(page.getByText(fixture.releaseable.reference, { exact: true })).toBeVisible()
+    await expect(page.getByText(fixture.succeeded.reference, { exact: true })).toBeVisible()
+
+    await page.getByRole('link', { name: 'Show released exports' }).click()
+    await expect(page).toHaveURL(/\/app\/billing\/exports\?released=include$/)
+    await expect(page.getByText(fixture.released.reference, { exact: true })).toBeVisible()
+    await expect(page.getByText(fixture.releaseable.reference, { exact: true })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Hide released exports' })).toBeVisible()
+  })
+
   test('lets an owner delete a verified succeeded Xero draft', async ({ page }) => {
     await signIn(page, testUser)
     await openExport(page, fixture.succeeded)

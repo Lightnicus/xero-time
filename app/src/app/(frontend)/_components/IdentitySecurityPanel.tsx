@@ -1,5 +1,6 @@
 import type { IdentitySecurityView } from '@/lib/xero/identity/service'
 
+import { PendingNavigationForm, PendingSubmitButton } from './PendingControls'
 import { revokeExternalSessionAction, unlinkXeroIdentityAction } from '../app/profile/actions'
 
 export function IdentitySecurityPanel({
@@ -48,13 +49,17 @@ export function IdentitySecurityPanel({
               <span>Reason</span>
               <input maxLength={1_000} minLength={3} name="reason" required />
             </label>
-            <button className="button button-danger" type="submit">
+            <PendingSubmitButton className="button button-danger" pendingLabel="Unlinking…">
               Unlink Xero identity
-            </button>
+            </PendingSubmitButton>
           </form>
         </div>
       ) : configured && canLink ? (
-        <form action="/api/auth/xero/identity/start" className="compact-form" method="post">
+        <PendingNavigationForm
+          action="/api/auth/xero/identity/start"
+          className="compact-form"
+          method="post"
+        >
           <input name="purpose" type="hidden" value="identity-link" />
           <input name="returnPath" type="hidden" value="/app/profile?xero=linked" />
           <label className="field">
@@ -62,13 +67,13 @@ export function IdentitySecurityPanel({
             <input autoComplete="current-password" name="password" required type="password" />
             <small>Confirmation is required before leaving for Xero.</small>
           </label>
-          <button className="button button-xero" type="submit">
+          <PendingSubmitButton className="button button-xero" pendingLabel="Opening Xero…">
             <span aria-hidden="true" className="xero-wordmark">
               xero
             </span>
             Link Xero identity
-          </button>
-        </form>
+          </PendingSubmitButton>
+        </PendingNavigationForm>
       ) : (
         <p className="muted-copy">Xero identity linking is not currently available.</p>
       )}
@@ -92,9 +97,9 @@ export function IdentitySecurityPanel({
                 </div>
                 <form action={revokeExternalSessionAction}>
                   <input name="sessionID" type="hidden" value={item.id} />
-                  <button className="button button-secondary" type="submit">
+                  <PendingSubmitButton className="button button-secondary" pendingLabel="Revoking…">
                     Revoke
-                  </button>
+                  </PendingSubmitButton>
                 </form>
               </div>
             ))}

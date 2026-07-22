@@ -3,6 +3,10 @@ import { redirect } from 'next/navigation'
 
 import { hasActiveRole } from '@/access/roles'
 import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
+import {
+  PendingNavigationForm,
+  PendingSubmitButton,
+} from '@/app/(frontend)/_components/PendingControls'
 import { getBusinessSettings } from '@/lib/member-app/data'
 import { requireAppSession } from '@/lib/member-app/session'
 import { getAccountingConnectionView } from '@/lib/xero/accounting/service'
@@ -185,7 +189,7 @@ export default async function XeroAccountingPage({
             Disconnect the current organisation before replacing these application credentials.
           </div>
         ) : (
-          <form
+          <PendingNavigationForm
             action="/api/integrations/xero/accounting/configure"
             className="compact-form"
             method="post"
@@ -226,10 +230,15 @@ export default async function XeroAccountingPage({
               <span>Current account password</span>
               <input autoComplete="current-password" name="password" required type="password" />
             </label>
-            <button className="button button-secondary" type="submit">
+            <PendingSubmitButton
+              className="button button-secondary"
+              pendingLabel={
+                connection.configured ? 'Updating OAuth application…' : 'Saving OAuth application…'
+              }
+            >
               {connection.configured ? 'Update OAuth application' : 'Save OAuth application'}
-            </button>
-          </form>
+            </PendingSubmitButton>
+          </PendingNavigationForm>
         )}
       </section>
 
@@ -247,20 +256,29 @@ export default async function XeroAccountingPage({
               </div>
               {connection.status === 'connected' && (
                 <div className="button-row">
-                  <form action="/api/integrations/xero/accounting/health" method="post">
-                    <button className="button button-secondary" type="submit">
+                  <PendingNavigationForm
+                    action="/api/integrations/xero/accounting/health"
+                    method="post"
+                  >
+                    <PendingSubmitButton
+                      className="button button-secondary"
+                      pendingLabel="Checking connection…"
+                    >
                       Check connection
-                    </button>
-                  </form>
-                  <form
+                    </PendingSubmitButton>
+                  </PendingNavigationForm>
+                  <PendingNavigationForm
                     action="/api/integrations/xero/accounting/reference-data"
                     id="reference-data"
                     method="post"
                   >
-                    <button className="button button-secondary" type="submit">
+                    <PendingSubmitButton
+                      className="button button-secondary"
+                      pendingLabel="Refreshing reference data…"
+                    >
                       Refresh reference data
-                    </button>
-                  </form>
+                    </PendingSubmitButton>
+                  </PendingNavigationForm>
                 </div>
               )}
             </div>
@@ -314,7 +332,7 @@ export default async function XeroAccountingPage({
           </section>
 
           {connection.status !== 'connected' && (
-            <form
+            <PendingNavigationForm
               action="/api/integrations/xero/accounting/start"
               className="form-section integration-form"
               method="post"
@@ -347,11 +365,14 @@ export default async function XeroAccountingPage({
                 />
               </label>
               <div className="form-actions">
-                <button className="button button-primary" type="submit">
+                <PendingSubmitButton
+                  className="button button-primary"
+                  pendingLabel={connection.tenantId ? 'Reconnecting Xero…' : 'Connecting Xero…'}
+                >
                   {connectLabel}
-                </button>
+                </PendingSubmitButton>
               </div>
-            </form>
+            </PendingNavigationForm>
           )}
 
           {connection.status === 'connected' && (
@@ -361,7 +382,7 @@ export default async function XeroAccountingPage({
             >
               <summary>Advanced Xero controls</summary>
               <div className="settings-disclosure-content">
-                <form
+                <PendingNavigationForm
                   action="/api/integrations/xero/accounting/handover"
                   className="settings-disclosure-section integration-form"
                   method="post"
@@ -393,12 +414,15 @@ export default async function XeroAccountingPage({
                       I understand the new Xero login must authorize this same organisation.
                     </span>
                   </label>
-                  <button className="button button-secondary" type="submit">
+                  <PendingSubmitButton
+                    className="button button-secondary"
+                    pendingLabel="Starting authorizer handover…"
+                  >
                     Start authorizer handover
-                  </button>
-                </form>
+                  </PendingSubmitButton>
+                </PendingNavigationForm>
 
-                <form
+                <PendingNavigationForm
                   action="/api/integrations/xero/accounting/disconnect"
                   className="danger-zone integration-disconnect"
                   method="post"
@@ -435,11 +459,14 @@ export default async function XeroAccountingPage({
                       <input name="confirmation" required type="checkbox" value="disconnect" />
                       <span>I understand this stops Xero exports until reconnection.</span>
                     </label>
-                    <button className="button button-danger" type="submit">
+                    <PendingSubmitButton
+                      className="button button-danger"
+                      pendingLabel="Disconnecting Xero…"
+                    >
                       Disconnect Xero
-                    </button>
+                    </PendingSubmitButton>
                   </div>
-                </form>
+                </PendingNavigationForm>
               </div>
             </details>
           )}

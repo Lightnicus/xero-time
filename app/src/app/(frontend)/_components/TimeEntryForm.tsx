@@ -2,11 +2,11 @@
 
 import Link from 'next/link'
 import { useActionState, useState } from 'react'
-import { useFormStatus } from 'react-dom'
 
 import type { ProjectOption } from '@/lib/member-app/data'
 import { localDateTimeToISOString } from '@/lib/member-app/date-time'
 
+import { PendingSubmitButton } from './PendingControls'
 import {
   createTimeEntryAction,
   type TimeEntryActionState,
@@ -47,16 +47,6 @@ function FieldError({ field, state }: { field: TimeEntryField; state: TimeEntryA
   const message = state.fieldErrors?.[field]
 
   return message ? <small className="field-error">{message}</small> : null
-}
-
-function SaveButton({ disabled, mode }: { disabled: boolean; mode: 'create' | 'edit' }) {
-  const { pending } = useFormStatus()
-
-  return (
-    <button className="button button-primary" disabled={disabled || pending} type="submit">
-      {pending ? 'Saving…' : mode === 'create' ? 'Add time' : 'Save changes'}
-    </button>
-  )
 }
 
 export function TimeEntryForm({
@@ -370,7 +360,13 @@ export function TimeEntryForm({
             <Link className="button button-secondary" href="/app">
               Cancel
             </Link>
-            <SaveButton disabled={!hasProjects} mode={mode} />
+            <PendingSubmitButton
+              className="button button-primary"
+              disabled={!hasProjects}
+              pendingLabel="Saving…"
+            >
+              {mode === 'create' ? 'Add time' : 'Save changes'}
+            </PendingSubmitButton>
           </div>
         </div>
       </section>

@@ -1,8 +1,8 @@
 'use client'
 
 import { useActionState } from 'react'
-import { useFormStatus } from 'react-dom'
 
+import { PendingSubmitButton } from '@/app/(frontend)/_components/PendingControls'
 import type { ProjectXeroItemOption } from '@/lib/projects/xero-items'
 
 import { type ProjectXeroItemActionState, updateProjectXeroItemAction } from './actions'
@@ -18,16 +18,6 @@ type ProjectXeroItemFormProps = {
 }
 
 const initialState: ProjectXeroItemActionState = { message: null }
-
-function SaveButton({ disabled, label }: { disabled: boolean; label: string }) {
-  const { pending } = useFormStatus()
-
-  return (
-    <button className="button button-secondary" disabled={disabled || pending} type="submit">
-      {pending ? 'Saving…' : label}
-    </button>
-  )
-}
 
 export function ProjectXeroItemForm({
   configuredCode,
@@ -130,10 +120,13 @@ export function ProjectXeroItemForm({
         )}
       </label>
 
-      <SaveButton
+      <PendingSubmitButton
+        className="button button-secondary"
         disabled={disabled}
-        label={mappingIsUnavailable && hasSelectableItems ? 'Replace Xero item' : 'Save Xero item'}
-      />
+        pendingLabel="Saving…"
+      >
+        {mappingIsUnavailable && hasSelectableItems ? 'Replace Xero item' : 'Save Xero item'}
+      </PendingSubmitButton>
     </form>
   )
 }

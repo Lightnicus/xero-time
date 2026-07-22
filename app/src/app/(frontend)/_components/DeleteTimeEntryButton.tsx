@@ -1,21 +1,11 @@
 'use client'
 
 import { useActionState } from 'react'
-import { useFormStatus } from 'react-dom'
 
+import { PendingSubmitButton } from './PendingControls'
 import { deleteTimeEntryAction, type TimeEntryActionState } from '../app/time/actions'
 
 const initialState: TimeEntryActionState = { message: null }
-
-function DeleteSubmitButton() {
-  const { pending } = useFormStatus()
-
-  return (
-    <button className="button button-danger" disabled={pending} type="submit">
-      {pending ? 'Deleting…' : 'Delete entry'}
-    </button>
-  )
-}
 
 export function DeleteTimeEntryButton({
   entryID,
@@ -50,7 +40,9 @@ export function DeleteTimeEntryButton({
           />
         </label>
       )}
-      <DeleteSubmitButton />
+      <PendingSubmitButton className="button button-danger" pendingLabel="Deleting…">
+        Delete entry
+      </PendingSubmitButton>
       <div aria-live="polite" className="form-message form-message-error" role="status">
         {state.message}
       </div>

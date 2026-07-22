@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation'
 import { hasActiveRole } from '@/access/roles'
 import { MetricStrip } from '@/app/(frontend)/_components/MetricStrip'
 import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
+import { PendingSubmitButton } from '@/app/(frontend)/_components/PendingControls'
 import { createBillingPreview } from '@/lib/billing/reservation'
 import { readSelectionToken } from '@/lib/billing/selection-token'
 import { formatScaledAmount } from '@/lib/domain/money'
@@ -309,13 +310,13 @@ export default async function BillingPreviewPage({
           <Link className="button button-secondary" href="/app/billing">
             Cancel preview
           </Link>
-          <button
+          <PendingSubmitButton
             className="button button-primary"
             disabled={settings.acceptingNewExports !== true}
-            type="submit"
+            pendingLabel="Creating drafts…"
           >
             Create draft invoices
-          </button>
+          </PendingSubmitButton>
         </div>
       </form>
     </div>

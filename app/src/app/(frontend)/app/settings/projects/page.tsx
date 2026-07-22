@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 
 import { hasActiveRole } from '@/access/roles'
 import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
+import { PendingSubmitButton } from '@/app/(frontend)/_components/PendingControls'
 import { formatScaledAmount } from '@/lib/domain/money'
 import { requireAppSession } from '@/lib/member-app/session'
 import { previewProjectRateRecalculation } from '@/lib/projects/rate-recalculation'
@@ -295,9 +296,9 @@ export default async function ProjectSettingsPage({
                 <span>Type RECALCULATE</span>
                 <input autoComplete="off" name="confirmation" pattern="RECALCULATE" required />
               </label>
-              <button className="button button-danger" type="submit">
+              <PendingSubmitButton className="button button-danger" pendingLabel="Recalculating…">
                 Recalculate unbilled snapshots
-              </button>
+              </PendingSubmitButton>
             </form>
           ) : (
             <div className="notice">No unbilled entries need recalculation.</div>
