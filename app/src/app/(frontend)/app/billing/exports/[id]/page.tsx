@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation'
 
 import { hasActiveRole } from '@/access/roles'
 import { ExportStatusPoller } from '@/app/(frontend)/_components/ExportStatusPoller'
+import { exportDetailActionAvailability } from '@/lib/billing/export-detail'
 import { normalizeBillingFilter } from '@/lib/billing/selection'
 import { createSelectionToken } from '@/lib/billing/selection-token'
 import { formatScaledAmount } from '@/lib/domain/money'
@@ -10,7 +11,6 @@ import { formatCalendarDateInTimezone, relationshipID } from '@/lib/domain/valid
 import { requireAppSession } from '@/lib/member-app/session'
 
 import {
-  acceptExistingInvoiceAction,
   authorizeReplacementAction,
   cancelExportAction,
   deleteDraftAndReleaseExportAction,
@@ -66,6 +66,12 @@ export default async function InvoiceExportDetailPage({
     where: { invoiceExport: { equals: id } },
   })
   const isOwnerAdmin = hasActiveRole(session.user, ['owner', 'admin'])
+  const actionAvailability = exportDetailActionAvailability(document, session.user.role)
+  const xeroInvoiceHref =
+    document.xeroInvoiceUrl ??
+    (document.xeroInvoiceId
+      ? `https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID=${encodeURIComponent(document.xeroInvoiceId)}`
+      : null)
   const entryIDs = allocations.docs
     .map((line) => String(relationshipID(line.timeEntry)))
     .filter(Boolean)
@@ -94,7 +100,7 @@ export default async function InvoiceExportDetailPage({
         <div>
           <p className="eyebrow">Invoice export</p>
           <h1>{document.applicationReference}</h1>
-          <p>Immutable request, line allocation, attempts, remote status, and release lineage.</p>
+          <p>Review what was sent to Xero, its current status, and any action needed.</p>
         </div>
         <span className={`status-pill status-export-${document.state}`}>{document.state}</span>
       </section>
@@ -109,14 +115,18 @@ export default async function InvoiceExportDetailPage({
             ? 'The Xero draft was deleted and all mapped time entries were returned to unbilled.'
             : commandStatus === 'draft-delete-release-failed'
               ? 'The delete-and-release command did not complete. Time remains locked unless Xero deletion and the local release were both verified; refresh from Xero and retry safely.'
-              : commandStatus.includes('failed')
-                ? 'The command was blocked or failed safely. Review the current state and guidance before retrying.'
-                : `Export ${commandStatus}.`}
+              : commandStatus === 'reconciling'
+                ? 'Project Time is checking Xero again. This page will refresh automatically.'
+                : commandStatus === 'refreshed'
+                  ? 'The invoice status was refreshed from Xero.'
+                  : commandStatus.includes('failed')
+                    ? 'The command was blocked or failed safely. Review the current state and guidance before retrying.'
+                    : `Export ${commandStatus}.`}
         </div>
       )}
       {document.lastErrorMessage && (
         <div className="notice notice-warning">
-          <strong>{document.lastErrorCode}</strong>
+          <strong>{document.state === 'manual-review' ? 'Review needed' : 'Action needed'}</strong>
           <p>{document.lastErrorMessage}</p>
         </div>
       )}
@@ -151,8 +161,8 @@ export default async function InvoiceExportDetailPage({
           <div>
             <span>Xero invoice</span>
             <strong>{document.xeroInvoiceNumber ?? 'Not created'}</strong>
-            {document.xeroInvoiceUrl && (
-              <a href={document.xeroInvoiceUrl} rel="noreferrer" target="_blank">
+            {xeroInvoiceHref && (
+              <a href={xeroInvoiceHref} rel="noreferrer" target="_blank">
                 Open in Xero
               </a>
             )}
@@ -192,7 +202,7 @@ export default async function InvoiceExportDetailPage({
       <section className="panel page-stack">
         <div>
           <h2>Mapped invoice lines</h2>
-          <p>Each immutable allocation maps one source time entry to one Xero line ordinal.</p>
+          <p>These time entries and amounts were included in the Xero invoice.</p>
         </div>
         <div className="table-wrap">
           <table className="time-table billing-table">
@@ -248,16 +258,6 @@ export default async function InvoiceExportDetailPage({
         </div>
       </section>
 
-      <section className="panel page-stack">
-        <div>
-          <h2>State history</h2>
-          <p>
-            Committed transition metadata is retained without tokens or full provider responses.
-          </p>
-        </div>
-        <pre className="diagnostic-json">{JSON.stringify(document.stateHistory, null, 2)}</pre>
-      </section>
-
       {(document.state === 'preparing' || document.state === 'queued') && (
         <section className="panel page-stack">
           <h2>Cancel before send</h2>
@@ -278,12 +278,12 @@ export default async function InvoiceExportDetailPage({
         </section>
       )}
 
-      {isOwnerAdmin && document.xeroInvoiceId && (
+      {actionAvailability.canRefresh && (
         <section className="panel page-stack">
-          <h2>Authoritative Xero refresh</h2>
+          <h2>Refresh invoice status</h2>
           <p>
-            Fetch the invoice by saved InvoiceID, compare material lines, and update local remote
-            status. This never releases time automatically.
+            Check the saved invoice in Xero and update the status shown here. This does not create
+            an invoice or release any time.
           </p>
           <form action={refreshExportAction}>
             <input name="exportID" type="hidden" value={id} />
@@ -294,104 +294,110 @@ export default async function InvoiceExportDetailPage({
         </section>
       )}
 
-      {isOwnerAdmin &&
-        document.xeroInvoiceId &&
-        document.state === 'succeeded' &&
-        document.remoteStatus === 'DRAFT' && (
-          <section className="panel page-stack">
+      {actionAvailability.showDraftRecovery && (
+        <section className="panel page-stack">
+          <div>
             <h2>Delete Xero draft and release time</h2>
             <p>
-              This permanently changes the saved Xero draft to DELETED, verifies that exact
-              InvoiceID in Xero, and then returns all {document.entryCount} mapped time entries to
-              unbilled in one local transaction. It never voids an authorised invoice, and the
-              original export history remains intact.
+              Delete this draft in Xero and return all {document.entryCount} mapped time entries to
+              the billing queue. Project Time checks the saved invoice again before changing
+              anything and never deletes an authorised invoice.
             </p>
+          </div>
+          {actionAvailability.canDeleteDraft ? (
             <form action={deleteDraftAndReleaseExportAction} className="entry-form">
               <input name="exportID" type="hidden" value={id} />
               <label className="field">
-                <span>Reason</span>
+                <span>Reason for deleting this draft</span>
                 <textarea maxLength={1_000} minLength={10} name="reason" required />
               </label>
               <label className="field">
-                <span>Type {document.applicationReference}</span>
+                <span>Type {document.applicationReference} to confirm</span>
                 <input name="confirmation" required />
               </label>
               <button className="button button-danger" type="submit">
                 Delete Xero draft and release time
               </button>
             </form>
-          </section>
-        )}
+          ) : (
+            <div className="notice notice-warning">
+              <strong>Draft deletion is not available yet.</strong>
+              <p>
+                Xero reports a draft, but Project Time could not verify that it exactly matches this
+                export. Review the draft in Xero, then check again. If you delete it in Xero,
+                refresh the status here and Project Time will offer to release the time safely.
+              </p>
+              {xeroInvoiceHref && (
+                <a href={xeroInvoiceHref} rel="noreferrer" target="_blank">
+                  Open draft in Xero
+                </a>
+              )}
+            </div>
+          )}
+        </section>
+      )}
 
-      {isOwnerAdmin &&
-        ['action-required', 'manual-review', 'reconciling'].includes(document.state) && (
-          <section className="panel page-stack">
-            <h2>Targeted reconciliation</h2>
-            <p>
-              Run the same targeted read service used for ambiguous outcomes. There is no generic
-              mark-succeeded control.
-            </p>
-            <form action={reconcileExportAction} className="entry-form">
-              <input name="exportID" type="hidden" value={id} />
-              <label className="field">
-                <span>Reason</span>
-                <textarea maxLength={1_000} minLength={10} name="reason" required />
-              </label>
-              <button className="button button-secondary" type="submit">
-                Queue reconciliation
-              </button>
-            </form>
-          </section>
-        )}
-
-      {isOwnerAdmin && document.state === 'manual-review' && (
+      {actionAvailability.recoveryInProgress && (
         <section className="panel page-stack">
-          <h2>Accept one verified existing invoice</h2>
+          <h2>Checking Xero</h2>
           <p>
-            The InvoiceID is fetched and every material value must exactly match the immutable
-            snapshot.
+            Project Time is looking for invoice reference {document.applicationReference}. This page
+            refreshes automatically. Do not create another invoice while this check runs.
           </p>
-          <form action={acceptExistingInvoiceAction} className="entry-form">
+        </section>
+      )}
+
+      {actionAvailability.canRequestRecovery && (
+        <section className="panel page-stack">
+          <h2>Check Xero and resume export</h2>
+          <p>
+            Project Time will look for invoice reference {document.applicationReference}. If no
+            invoice exists and it is safe to continue, the original export can resume without
+            starting an unrelated replacement.
+          </p>
+          {document.lastErrorCode === 'multiple-invoice-matches' && (
+            <div className="notice notice-warning">
+              More than one Xero invoice matches this reference. Resolve the duplicates in Xero,
+              then check again here.
+            </div>
+          )}
+          <form action={reconcileExportAction} className="entry-form">
             <input name="exportID" type="hidden" value={id} />
             <label className="field">
-              <span>Xero InvoiceID</span>
-              <input name="invoiceID" pattern="[0-9a-fA-F-]{36}" required />
-            </label>
-            <label className="field">
-              <span>Reason</span>
+              <span>Reason for checking again</span>
               <textarea maxLength={1_000} minLength={10} name="reason" required />
             </label>
             <button className="button button-secondary" type="submit">
-              Verify and accept invoice
+              Check Xero again
             </button>
           </form>
         </section>
       )}
 
-      {isOwnerAdmin &&
-        document.lastErrorCode === 'confirmed-absent-replacement-approval-required' && (
-          <section className="panel page-stack">
-            <h2>Authorize linked replacement attempt</h2>
-            <p>
-              A targeted read confirmed absence after the original idempotency window. This creates
-              a new immutable attempt and key linked to the original.
-            </p>
-            <form action={authorizeReplacementAction} className="entry-form">
-              <input name="exportID" type="hidden" value={id} />
-              <label className="field">
-                <span>Reason</span>
-                <textarea maxLength={1_000} minLength={10} name="reason" required />
-              </label>
-              <label className="field">
-                <span>Type {document.applicationReference}</span>
-                <input name="confirmation" required />
-              </label>
-              <button className="button button-danger" type="submit">
-                Authorize replacement POST
-              </button>
-            </form>
-          </section>
-        )}
+      {actionAvailability.canAuthorizeReplacement && (
+        <section className="panel page-stack">
+          <h2>Create a replacement draft</h2>
+          <p>
+            Project Time could not find an invoice after the original safe retry period. Check Xero
+            for reference {document.applicationReference} first. This action then starts a linked
+            replacement without changing the original export history.
+          </p>
+          <form action={authorizeReplacementAction} className="entry-form">
+            <input name="exportID" type="hidden" value={id} />
+            <label className="field">
+              <span>Reason for creating a replacement</span>
+              <textarea maxLength={1_000} minLength={10} name="reason" required />
+            </label>
+            <label className="field">
+              <span>Type {document.applicationReference} to confirm</span>
+              <input name="confirmation" required />
+            </label>
+            <button className="button button-danger" type="submit">
+              Create replacement draft
+            </button>
+          </form>
+        </section>
+      )}
 
       {isOwnerAdmin &&
         (document.remoteStatus === 'DELETED' || document.remoteStatus === 'VOIDED') &&
@@ -434,6 +440,14 @@ export default async function InvoiceExportDetailPage({
           </Link>
         </section>
       )}
+
+      <details className="panel export-technical-history">
+        <summary>Technical history</summary>
+        <div className="export-technical-history-content">
+          <p>Recorded status changes for support and audit review.</p>
+          <pre className="diagnostic-json">{JSON.stringify(document.stateHistory, null, 2)}</pre>
+        </div>
+      </details>
     </div>
   )
 }
