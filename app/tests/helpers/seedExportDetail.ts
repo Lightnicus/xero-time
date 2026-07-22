@@ -13,6 +13,8 @@ export type ExportDetailFixtureRecord = {
 export type ExportDetailFixture = {
   manualReview: ExportDetailFixtureRecord
   reconciling: ExportDetailFixtureRecord
+  releaseable: ExportDetailFixtureRecord
+  replacement: ExportDetailFixtureRecord
   succeeded: ExportDetailFixtureRecord
 }
 
@@ -20,8 +22,8 @@ type ExportDetailScenario = {
   lastErrorCode?: string
   lastErrorMessage?: string
   reference: string
-  remoteStatus?: 'DRAFT'
-  state: 'manual-review' | 'reconciling' | 'succeeded'
+  remoteStatus?: 'DELETED' | 'DRAFT'
+  state: 'action-required' | 'manual-review' | 'reconciling' | 'succeeded'
   xeroInvoiceId?: string
   xeroInvoiceNumber?: string
 }
@@ -48,6 +50,21 @@ const fixtureScenarios = [
   {
     reference: 'E2E-DETAIL-RECONCILING',
     state: 'reconciling',
+  },
+  {
+    lastErrorCode: 'remote-invoice-requires-action',
+    lastErrorMessage: 'The Xero invoice is DELETED; review release eligibility.',
+    reference: 'E2E-DETAIL-DELETED',
+    remoteStatus: 'DELETED',
+    state: 'action-required',
+    xeroInvoiceId: '55555555-eeee-4555-8555-555555555555',
+    xeroInvoiceNumber: 'E2E-DELETED-001',
+  },
+  {
+    lastErrorCode: 'confirmed-absent-replacement-approval-required',
+    lastErrorMessage: 'Xero confirmed that the original invoice is absent.',
+    reference: 'E2E-DETAIL-REPLACEMENT',
+    state: 'manual-review',
   },
 ] as const satisfies readonly ExportDetailScenario[]
 
@@ -168,7 +185,7 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
     data: {
       actualMode: 'background',
       applicationReference: 'BATCH-E2E-EXPORT-DETAIL',
-      durationSeconds: 10_800,
+      durationSeconds: 3_600 * fixtureScenarios.length,
       entryCount: fixtureScenarios.length,
       explicitEntryIds: timeEntries.map((entry) => String(entry.id)),
       invoiceCount: fixtureScenarios.length,
@@ -317,8 +334,10 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
   const succeeded = await createExport(fixtureScenarios[0], timeEntries[0]!)
   const manualReview = await createExport(fixtureScenarios[1], timeEntries[1]!)
   const reconciling = await createExport(fixtureScenarios[2], timeEntries[2]!)
+  const releaseable = await createExport(fixtureScenarios[3], timeEntries[3]!)
+  const replacement = await createExport(fixtureScenarios[4], timeEntries[4]!)
 
-  return { manualReview, reconciling, succeeded }
+  return { manualReview, reconciling, releaseable, replacement, succeeded }
 }
 
 /** Removes the isolated export-detail fixture and any browser-test side effects. */

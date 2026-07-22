@@ -26,7 +26,7 @@ Run the queue dispatcher and inspect the export/attempt timeline. A pre-send pre
 
 ## Release and rebill
 
-Refresh from Xero. Release the complete export only if the authoritative status is `DELETED` or `VOIDED`; type the exact application reference and a reason. Confirm all entries return to unbilled, then open the normal preselected rebill preview. Never edit original snapshots or release a draft/authorised/paid/inconclusive invoice.
+Refresh from Xero. Release the complete export only if the authoritative status is `DELETED` or `VOIDED`; the command checks Xero again before changing any time. Confirm all entries return to unbilled, then open the normal preselected rebill preview. Never edit original snapshots or release a draft/authorised/paid/inconclusive invoice.
 
 ## Safe pause and resume
 

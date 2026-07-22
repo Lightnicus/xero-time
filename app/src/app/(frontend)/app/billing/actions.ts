@@ -140,7 +140,7 @@ export async function cancelExportAction(formData: FormData): Promise<void> {
   const session = await commandSession()
   const exportID = value(formData, 'exportID')
   try {
-    await cancelInvoiceExport(session, { exportID, reason: value(formData, 'reason') })
+    await cancelInvoiceExport(session, { exportID })
   } catch {
     redirect(`/app/billing/exports/${encodeURIComponent(exportID)}?status=cancel-failed`)
   }
@@ -164,10 +164,7 @@ export async function reconcileExportAction(formData: FormData): Promise<void> {
   const session = await commandSession(['owner', 'admin'])
   const exportID = value(formData, 'exportID')
   try {
-    await requestInvoiceReconciliation(session, {
-      exportID,
-      reason: value(formData, 'reason'),
-    })
+    await requestInvoiceReconciliation(session, { exportID })
   } catch {
     redirect(`/app/billing/exports/${encodeURIComponent(exportID)}?status=reconcile-failed`)
   }
@@ -179,11 +176,7 @@ export async function releaseExportAction(formData: FormData): Promise<void> {
   const session = await commandSession(['owner', 'admin'])
   const exportID = value(formData, 'exportID')
   try {
-    await releaseInvoiceExport(session, {
-      confirmation: value(formData, 'confirmation'),
-      exportID,
-      reason: value(formData, 'reason'),
-    })
+    await releaseInvoiceExport(session, { exportID })
   } catch {
     redirect(`/app/billing/exports/${encodeURIComponent(exportID)}?status=release-failed`)
   }
@@ -195,11 +188,7 @@ export async function deleteDraftAndReleaseExportAction(formData: FormData): Pro
   const session = await commandSession(['owner', 'admin'])
   const exportID = value(formData, 'exportID')
   try {
-    await deleteDraftInvoiceAndRelease(session, {
-      confirmation: value(formData, 'confirmation'),
-      exportID,
-      reason: value(formData, 'reason'),
-    })
+    await deleteDraftInvoiceAndRelease(session, { exportID })
   } catch {
     redirect(
       `/app/billing/exports/${encodeURIComponent(exportID)}?status=draft-delete-release-failed`,
@@ -214,11 +203,7 @@ export async function authorizeReplacementAction(formData: FormData): Promise<vo
   const session = await commandSession(['owner', 'admin'])
   const exportID = value(formData, 'exportID')
   try {
-    await authorizeReplacementAttempt(session, {
-      confirmation: value(formData, 'confirmation'),
-      exportID,
-      reason: value(formData, 'reason'),
-    })
+    await authorizeReplacementAttempt(session, { exportID })
   } catch {
     redirect(`/app/billing/exports/${encodeURIComponent(exportID)}?status=replacement-failed`)
   }

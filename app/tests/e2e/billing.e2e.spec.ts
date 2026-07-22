@@ -26,8 +26,12 @@ const openAndCancelOnlyExport = async (
   await expect(page.getByRole('heading', { name: expectedReference, exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Mapped invoice lines' })).toBeVisible()
   await expect(page.getByText('TIME — Professional services').first()).toBeVisible()
-  await page.getByLabel('Reason').fill('Cancelled safely by the billing browser test.')
-  await page.getByRole('button', { name: 'Cancel export' }).click()
+  const cancelSection = page.locator('section').filter({
+    has: page.getByRole('heading', { name: 'Cancel before send', exact: true }),
+  })
+  await expect(cancelSection.getByLabel('Reason', { exact: true })).toHaveCount(0)
+  await expect(cancelSection.locator('[name="reason"]')).toHaveCount(0)
+  await cancelSection.getByRole('button', { name: 'Cancel export' }).click()
   await expect(page).toHaveURL(/status=cancelled/)
   await expect(page.getByRole('status')).toContainText('cancelled')
 }

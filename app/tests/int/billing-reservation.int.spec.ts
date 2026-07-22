@@ -472,10 +472,7 @@ describe.sequential('billing reservation saga', () => {
       }),
     ).rejects.toMatchObject({ status: 403 })
 
-    await cancelInvoiceExport(billerSession, {
-      exportID,
-      reason: 'Integration test cancellation before any worker send.',
-    })
+    await cancelInvoiceExport(billerSession, { exportID })
     const released = await payload.find({
       collection: 'time-entries',
       depth: 0,
@@ -621,11 +618,7 @@ describe.sequential('billing reservation saga', () => {
       },
       response: { data: {} } as never,
     })
-    const releaseInput = {
-      confirmation: originalExport.applicationReference,
-      exportID: originalExportID,
-      reason: 'Release the remotely voided integration invoice for rebilling.',
-    }
+    const releaseInput = { exportID: originalExportID }
     const ownerTwo = { ...ownerSession, req: await reqFor(ownerSession.user) }
     const releases = await Promise.allSettled([
       releaseInvoiceExport(ownerSession, releaseInput, { fetchRemote }),

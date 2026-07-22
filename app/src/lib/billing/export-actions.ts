@@ -40,6 +40,9 @@ const reason = (value: string): string => {
   return result
 }
 
+const operationReason = (value: string | undefined, fallback: string): string =>
+  value?.trim() ? reason(value) : fallback
+
 const history = (
   document: InvoiceExport,
   to: InvoiceExport['state'],
@@ -126,14 +129,13 @@ const assertDeleteDraftCapability = async (
 
 export async function releaseInvoiceExport(
   session: AppSession,
-  input: { confirmation: string; exportID: string; reason: string },
+  input: { exportID: string },
   overrides: {
     client?: XeroAccountingClient
     fetchRemote?: typeof fetchRemoteInvoiceForExport
   } = {},
 ): Promise<{ entryIDs: string[]; releaseID: string }> {
   assertOwnerAdmin(session)
-  const releaseReason = reason(input.reason)
   const document = await session.payload.findByID({
     collection: 'invoice-exports',
     depth: 0,
@@ -141,9 +143,6 @@ export async function releaseInvoiceExport(
     overrideAccess: true,
     req: session.req,
   })
-  if (input.confirmation.trim() !== document.applicationReference) {
-    throw new Error('Type the exact application reference to confirm release.')
-  }
   if (document.state === 'released') throw new Error('This export was already released.')
   const { remote } = await (overrides.fetchRemote ?? fetchRemoteInvoiceForExport)(
     session,
@@ -156,6 +155,7 @@ export async function releaseInvoiceExport(
     )
   }
   const verifiedRemoteStatus: 'DELETED' | 'VOIDED' = remote.status
+  const releaseReason = `Released mapped time after Xero confirmed the invoice was ${verifiedRemoteStatus}.`
 
   return withPayloadTransaction(
     session.payload,
@@ -166,9 +166,13 @@ export async function releaseInvoiceExport(
         id: input.exportID,
         overrideAccess: true,
         req,
+        showHiddenFields: true,
       })
       if (current.state === 'released' || current.releaseAction) {
         throw new Error('This export was already released.')
+      }
+      if (current.processingLeaseId || current.processingLeaseExpiresAt) {
+        throw new Error('This export is still being processed; release remains blocked.')
       }
       if (current.xeroInvoiceId !== remote.invoiceID) {
         throw new Error('The verified remote invoice no longer matches this export.')
@@ -190,6 +194,7 @@ export async function releaseInvoiceExport(
       }
       const entryIDs = allocations.docs.map((allocation) => relation(allocation.timeEntry))
       if (entryIDs.some((entryID) => !entryID)) throw new Error('An export allocation is invalid.')
+      const priorBillingStatusCounts = { exported: 0, reserved: 0 }
       for (const entryID of entryIDs as string[]) {
         const entry = await session.payload.findByID({
           collection: 'time-entries',
@@ -199,13 +204,25 @@ export async function releaseInvoiceExport(
           req,
         })
         if (
-          entry.billingStatus !== 'exported' ||
+          (entry.billingStatus !== 'exported' && entry.billingStatus !== 'reserved') ||
           relation(entry.currentExport) !== input.exportID
         ) {
           throw new Error(
-            'Every entry must still be exported by this exact invoice before release.',
+            'Every entry must still be reserved or exported by this exact invoice before release.',
           )
         }
+        priorBillingStatusCounts[entry.billingStatus] += 1
+      }
+      const priorBillingStatus =
+        priorBillingStatusCounts.reserved === 0
+          ? 'exported'
+          : priorBillingStatusCounts.exported === 0
+            ? 'reserved'
+            : 'mixed'
+      if (priorBillingStatusCounts.reserved > 0 && current.state !== 'action-required') {
+        throw new Error(
+          'Reserved entries can only be released after a refreshed Xero deletion or void moves the export to action-required.',
+        )
       }
       const now = new Date().toISOString()
       const release = await session.payload.create({
@@ -214,7 +231,11 @@ export async function releaseInvoiceExport(
           actor: session.user.id,
           after: { billingStatus: 'unbilled', currentExport: null },
           amountScaled: current.totalScaled,
-          before: { billingStatus: 'exported', currentExport: input.exportID },
+          before: {
+            billingStatus: priorBillingStatus,
+            billingStatusCounts: priorBillingStatusCounts,
+            currentExport: input.exportID,
+          },
           durationSeconds: current.durationSeconds,
           entryCount: current.entryCount,
           entryIds: entryIDs,
@@ -259,12 +280,17 @@ export async function releaseInvoiceExport(
         collection: 'invoice-exports',
         id: input.exportID,
         data: {
+          lastErrorCode: null,
+          lastErrorMessage: null,
           lastRemoteUpdateAt: now,
+          processingLeaseExpiresAt: null,
+          processingLeaseId: null,
           releaseAction: release.id,
           releasedAt: now,
           remoteStatus: remote.status,
           state: 'released',
           stateHistory: history(current, 'released', String(session.user.id), {
+            priorBillingStatus,
             releaseAction: String(release.id),
           }),
         },
@@ -278,7 +304,12 @@ export async function releaseInvoiceExport(
           actor: session.user.id,
           eventType: 'export.released',
           exportId: input.exportID,
-          metadata: { entryCount: entryIDs.length, remoteStatus: remote.status },
+          metadata: {
+            entryCount: entryIDs.length,
+            priorBillingStatus,
+            priorBillingStatusCounts,
+            remoteStatus: remote.status,
+          },
           reason: releaseReason,
           targetCollection: 'invoice-exports',
           targetId: input.exportID,
@@ -294,14 +325,17 @@ export async function releaseInvoiceExport(
 
 export async function deleteDraftInvoiceAndRelease(
   session: AppSession,
-  input: { confirmation: string; exportID: string; reason: string },
+  input: { exportID: string; reason?: string },
   overrides: {
     client?: XeroAccountingClient
     token?: Awaited<ReturnType<typeof getValidAccountingAccessToken>>
   } = {},
 ): Promise<{ entryIDs: string[]; releaseID: string }> {
   assertOwnerAdmin(session)
-  const deletionReason = reason(input.reason)
+  const deletionReason = operationReason(
+    input.reason,
+    'Requested deletion of a verified Xero draft and release of its mapped time entries.',
+  )
   const document = await session.payload.findByID({
     collection: 'invoice-exports',
     depth: 0,
@@ -310,10 +344,6 @@ export async function deleteDraftInvoiceAndRelease(
     req: session.req,
     showHiddenFields: true,
   })
-  if (input.confirmation !== document.applicationReference) {
-    throw new Error('Type the exact application reference to confirm deletion and release.')
-  }
-
   const allocations = await loadExportAllocations(session, input.exportID)
   await assertLocallyReleasable(session, document, allocations)
 
@@ -473,18 +503,21 @@ export async function deleteDraftInvoiceAndRelease(
 
   return releaseInvoiceExport(
     session,
-    { ...input, reason: deletionReason },
+    { exportID: input.exportID },
     { client, fetchRemote: verifiedFetch },
   )
 }
 
 export async function cancelInvoiceExport(
   session: AppSession,
-  input: { exportID: string; reason: string },
+  input: { exportID: string; reason?: string },
 ): Promise<void> {
   if (!hasActiveRole(session.user, ['owner', 'admin', 'biller']))
     throw new Error('Billing access is required.')
-  const cancellationReason = reason(input.reason)
+  const cancellationReason = operationReason(
+    input.reason,
+    'Cancelled the export before any Xero request was sent.',
+  )
   const document = await session.payload.findByID({
     collection: 'invoice-exports',
     depth: 0,
@@ -629,10 +662,13 @@ type QueueTask = (args: {
 
 export async function requestInvoiceReconciliation(
   session: AppSession,
-  input: { exportID: string; reason: string },
+  input: { exportID: string; reason?: string },
 ): Promise<string> {
   assertOwnerAdmin(session)
-  const reconciliationReason = reason(input.reason)
+  const reconciliationReason = operationReason(
+    input.reason,
+    'Requested an authoritative Xero reconciliation for this export.',
+  )
   const document = await session.payload.findByID({
     collection: 'invoice-exports',
     depth: 0,
@@ -687,10 +723,13 @@ export async function requestInvoiceReconciliation(
 
 export async function authorizeReplacementAttempt(
   session: AppSession,
-  input: { confirmation: string; exportID: string; reason: string },
+  input: { exportID: string; reason?: string },
 ): Promise<string> {
   assertOwnerAdmin(session)
-  const replacementReason = reason(input.reason)
+  const replacementReason = operationReason(
+    input.reason,
+    'Authorized a linked replacement attempt after Xero confirmed the original invoice was absent.',
+  )
   const document = await session.payload.findByID({
     collection: 'invoice-exports',
     depth: 0,
@@ -701,8 +740,7 @@ export async function authorizeReplacementAttempt(
   })
   if (
     document.state !== 'manual-review' ||
-    document.lastErrorCode !== 'confirmed-absent-replacement-approval-required' ||
-    input.confirmation !== document.applicationReference
+    document.lastErrorCode !== 'confirmed-absent-replacement-approval-required'
   ) {
     throw new Error('A replacement attempt is not authorized for this export.')
   }

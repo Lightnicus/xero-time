@@ -115,13 +115,15 @@ export default async function InvoiceExportDetailPage({
             ? 'The Xero draft was deleted and all mapped time entries were returned to unbilled.'
             : commandStatus === 'draft-delete-release-failed'
               ? 'The delete-and-release command did not complete. Time remains locked unless Xero deletion and the local release were both verified; refresh from Xero and retry safely.'
-              : commandStatus === 'reconciling'
-                ? 'Project Time is checking Xero again. This page will refresh automatically.'
-                : commandStatus === 'refreshed'
-                  ? 'The invoice status was refreshed from Xero.'
-                  : commandStatus.includes('failed')
-                    ? 'The command was blocked or failed safely. Review the current state and guidance before retrying.'
-                    : `Export ${commandStatus}.`}
+              : commandStatus === 'release-failed'
+                ? 'The entries could not be released safely and remain locked. Refresh from Xero and review the current status before trying again.'
+                : commandStatus === 'reconciling'
+                  ? 'Project Time is checking Xero again. This page will refresh automatically.'
+                  : commandStatus === 'refreshed'
+                    ? 'The invoice status was refreshed from Xero.'
+                    : commandStatus.includes('failed')
+                      ? 'The command was blocked or failed safely. Review the current state and guidance before retrying.'
+                      : `Export ${commandStatus}.`}
         </div>
       )}
       {document.lastErrorMessage && (
@@ -262,15 +264,11 @@ export default async function InvoiceExportDetailPage({
         <section className="panel page-stack">
           <h2>Cancel before send</h2>
           <p>
-            Cancellation is accepted only if the immutable attempt proves no request has started.
-            Reservations are released atomically.
+            Cancel this export before sending to Xero starts. Any reserved time returns to the
+            billing queue automatically.
           </p>
-          <form action={cancelExportAction} className="entry-form">
+          <form action={cancelExportAction}>
             <input name="exportID" type="hidden" value={id} />
-            <label className="field">
-              <span>Reason</span>
-              <textarea maxLength={1_000} minLength={10} name="reason" required />
-            </label>
             <button className="button button-danger" type="submit">
               Cancel export
             </button>
@@ -305,16 +303,8 @@ export default async function InvoiceExportDetailPage({
             </p>
           </div>
           {actionAvailability.canDeleteDraft ? (
-            <form action={deleteDraftAndReleaseExportAction} className="entry-form">
+            <form action={deleteDraftAndReleaseExportAction}>
               <input name="exportID" type="hidden" value={id} />
-              <label className="field">
-                <span>Reason for deleting this draft</span>
-                <textarea maxLength={1_000} minLength={10} name="reason" required />
-              </label>
-              <label className="field">
-                <span>Type {document.applicationReference} to confirm</span>
-                <input name="confirmation" required />
-              </label>
               <button className="button button-danger" type="submit">
                 Delete Xero draft and release time
               </button>
@@ -361,12 +351,8 @@ export default async function InvoiceExportDetailPage({
               then check again here.
             </div>
           )}
-          <form action={reconcileExportAction} className="entry-form">
+          <form action={reconcileExportAction}>
             <input name="exportID" type="hidden" value={id} />
-            <label className="field">
-              <span>Reason for checking again</span>
-              <textarea maxLength={1_000} minLength={10} name="reason" required />
-            </label>
             <button className="button button-secondary" type="submit">
               Check Xero again
             </button>
@@ -382,16 +368,8 @@ export default async function InvoiceExportDetailPage({
             for reference {document.applicationReference} first. This action then starts a linked
             replacement without changing the original export history.
           </p>
-          <form action={authorizeReplacementAction} className="entry-form">
+          <form action={authorizeReplacementAction}>
             <input name="exportID" type="hidden" value={id} />
-            <label className="field">
-              <span>Reason for creating a replacement</span>
-              <textarea maxLength={1_000} minLength={10} name="reason" required />
-            </label>
-            <label className="field">
-              <span>Type {document.applicationReference} to confirm</span>
-              <input name="confirmation" required />
-            </label>
             <button className="button button-danger" type="submit">
               Create replacement draft
             </button>
@@ -405,21 +383,13 @@ export default async function InvoiceExportDetailPage({
           <section className="panel page-stack">
             <h2>Release all entries for rebilling</h2>
             <p>
-              This command immediately re-fetches Xero, requires DELETED or VOIDED, and returns all{' '}
-              {document.entryCount} mapped entries to unbilled in one transaction.
+              Project Time checks Xero again, then returns all {document.entryCount} mapped entries
+              to the billing queue only if the invoice is still deleted or voided.
             </p>
-            <form action={releaseExportAction} className="entry-form">
+            <form action={releaseExportAction}>
               <input name="exportID" type="hidden" value={id} />
-              <label className="field">
-                <span>Reason</span>
-                <textarea maxLength={1_000} minLength={10} name="reason" required />
-              </label>
-              <label className="field">
-                <span>Type {document.applicationReference}</span>
-                <input name="confirmation" required />
-              </label>
               <button className="button button-danger" type="submit">
-                Verify and release all entries
+                Release all entries for rebilling
               </button>
             </form>
           </section>

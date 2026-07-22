@@ -9,15 +9,19 @@ import {
 } from 'payload'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
-import { deleteDraftInvoiceAndRelease } from '@/lib/billing/export-actions'
+import { deleteDraftInvoiceAndRelease, releaseInvoiceExport } from '@/lib/billing/export-actions'
 import { confirmBillingPreview, createBillingPreview } from '@/lib/billing/reservation'
 import { normalizeBillingFilter } from '@/lib/billing/selection'
 import type { AppSession } from '@/lib/member-app/session'
 import { prepareXeroQueue } from '@/lib/xero/export/maintenance'
 import { processInvoiceExport } from '@/lib/xero/export/processor'
-import { reconcileInvoiceExport } from '@/lib/xero/export/reconciliation'
+import {
+  fetchRemoteInvoiceForExport,
+  reconcileInvoiceExport,
+  refreshInvoiceExportStatus,
+} from '@/lib/xero/export/reconciliation'
 import { persistXeroWebhook, processWebhookReceipt } from '@/lib/xero/export/webhooks'
-import type { XeroConnection } from '@/payload-types'
+import type { InvoiceExport, XeroConnection } from '@/payload-types'
 import config from '@/payload.config'
 
 import { FakeXeroAccountingServer } from '../fakes/xero-accounting'
@@ -386,9 +390,7 @@ describe.sequential('Xero export and webhook recovery', () => {
     const result = await deleteDraftInvoiceAndRelease(
       ownerSession,
       {
-        confirmation: draft.applicationReference,
         exportID: draft.exportID,
-        reason: 'Delete the verified integration draft and release its time.',
       },
       { client: draft.fake.client(), token: token() },
     )
@@ -431,7 +433,16 @@ describe.sequential('Xero export and webhook recovery', () => {
     expect(allocations.docs).toHaveLength(1)
     expect(allocations.docs[0]?.releasedAt).toBeTruthy()
     expect(releases.docs).toHaveLength(1)
-    expect(releases.docs[0]).toMatchObject({ remoteStatus: 'DELETED' })
+    expect(releases.docs[0]).toMatchObject({
+      before: {
+        billingStatus: 'exported',
+        billingStatusCounts: { exported: 1, reserved: 0 },
+        currentExport: draft.exportID,
+      },
+      reason: 'Released mapped time after Xero confirmed the invoice was DELETED.',
+      remoteStatus: 'DELETED',
+      schemaVersion: 1,
+    })
     expect(
       draft.fake.requests.filter(
         (request) => request.operation === 'post' && request.path === `Invoices/${draft.invoiceID}`,
@@ -453,7 +464,6 @@ describe.sequential('Xero export and webhook recovery', () => {
       deleteDraftInvoiceAndRelease(
         ownerSession,
         {
-          confirmation: draft.applicationReference,
           exportID: draft.exportID,
           reason: 'This authorised invoice must remain untouched in Xero.',
         },
@@ -487,7 +497,6 @@ describe.sequential('Xero export and webhook recovery', () => {
       deleteDraftInvoiceAndRelease(
         ownerSession,
         {
-          confirmation: draft.applicationReference,
           exportID: draft.exportID,
           reason: 'Confirm the lost Xero response before releasing this time.',
         },
@@ -521,7 +530,6 @@ describe.sequential('Xero export and webhook recovery', () => {
       deleteDraftInvoiceAndRelease(
         ownerSession,
         {
-          confirmation: draft.applicationReference,
           exportID: draft.exportID,
           reason: 'Do not release this time unless Xero confirms deletion.',
         },
@@ -561,7 +569,6 @@ describe.sequential('Xero export and webhook recovery', () => {
       deleteDraftInvoiceAndRelease(
         ownerSession,
         {
-          confirmation: draft.applicationReference,
           exportID: draft.exportID,
           reason: 'Complete the local release after verified Xero deletion.',
         },
@@ -593,7 +600,6 @@ describe.sequential('Xero export and webhook recovery', () => {
       req: await createLocalReq({ user: ownerSession.user }, payload),
     }
     const input = {
-      confirmation: draft.applicationReference,
       exportID: draft.exportID,
       reason: 'Only one concurrent draft release may commit locally.',
     }
@@ -620,7 +626,7 @@ describe.sequential('Xero export and webhook recovery', () => {
     expect(draft.fake.invoice(draft.invoiceID)?.Status).toBe('DELETED')
   })
 
-  it('requires the remote ItemCode to match the immutable line snapshot', async () => {
+  it('releases reserved time only after a mismatched remote invoice is deleted', async () => {
     const reserved = await reserveOneEntry(
       'Item code mismatch recovery',
       'ACACACAC-ACAC-4CAC-8CAC-ACACACACACAC',
@@ -650,14 +656,162 @@ describe.sequential('Xero export and webhook recovery', () => {
         token: token(),
       }),
     ).resolves.toEqual({ state: 'manual-review' })
-    await expect(
+    const [manualReviewExport, reservedEntry] = await Promise.all([
       payload.findByID({
         collection: 'invoice-exports',
         depth: 0,
         id: reserved.exportID,
         overrideAccess: true,
       }),
-    ).resolves.toMatchObject({ lastErrorCode: 'reconciliation-mismatch', state: 'manual-review' })
+      payload.findByID({
+        collection: 'time-entries',
+        depth: 0,
+        id: reserved.entryID,
+        overrideAccess: true,
+      }),
+    ])
+    expect(manualReviewExport).toMatchObject({
+      lastErrorCode: 'reconciliation-mismatch',
+      state: 'manual-review',
+      xeroInvoiceId: invoiceID,
+    })
+    expect(reservedEntry).toMatchObject({
+      billingStatus: 'reserved',
+      currentExport: reserved.exportID,
+    })
+
+    await expect(
+      deleteDraftInvoiceAndRelease(
+        ownerSession,
+        { exportID: reserved.exportID },
+        { client: fake.client(), token: token() },
+      ),
+    ).rejects.toThrow(/still be exported/)
+    expect(fake.invoice(invoiceID)?.Status).toBe('DRAFT')
+
+    const mismatchedInvoice = fake.invoice(invoiceID)
+    if (!mismatchedInvoice) throw new Error('The mismatched Xero invoice was not found.')
+    fake.setInvoice({ ...mismatchedInvoice, Status: 'DELETED' })
+    const fetchDeletedInvoice = (session: AppSession, document: InvoiceExport) =>
+      fetchRemoteInvoiceForExport(session, document, fake.client(), token())
+    const processingLeaseID = 'active-release-race-lease'
+    await payload.update({
+      collection: 'invoice-exports',
+      data: {
+        processingLeaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+        processingLeaseId: processingLeaseID,
+        state: 'reconciling',
+      },
+      depth: 0,
+      id: reserved.exportID,
+      overrideAccess: true,
+    })
+    await expect(
+      refreshInvoiceExportStatus(ownerSession.req, reserved.exportID, {
+        client: fake.client(),
+        token: token(),
+      }),
+    ).resolves.toEqual({ remoteStatus: 'DELETED', state: 'action-required' })
+    await expect(
+      payload.findByID({
+        collection: 'time-entries',
+        depth: 0,
+        id: reserved.entryID,
+        overrideAccess: true,
+      }),
+    ).resolves.toMatchObject({
+      billingStatus: 'reserved',
+      currentExport: reserved.exportID,
+    })
+    await expect(
+      payload.findByID({
+        collection: 'invoice-exports',
+        depth: 0,
+        id: reserved.exportID,
+        overrideAccess: true,
+        showHiddenFields: true,
+      }),
+    ).resolves.toMatchObject({
+      lastErrorCode: 'remote-invoice-mismatch',
+      processingLeaseId: processingLeaseID,
+      state: 'action-required',
+    })
+    await expect(
+      releaseInvoiceExport(
+        ownerSession,
+        { exportID: reserved.exportID },
+        { fetchRemote: fetchDeletedInvoice },
+      ),
+    ).rejects.toThrow(/still being processed/)
+    await expect(
+      payload.findByID({
+        collection: 'time-entries',
+        depth: 0,
+        id: reserved.entryID,
+        overrideAccess: true,
+      }),
+    ).resolves.toMatchObject({
+      billingStatus: 'reserved',
+      currentExport: reserved.exportID,
+    })
+    await payload.update({
+      collection: 'invoice-exports',
+      data: { processingLeaseExpiresAt: null, processingLeaseId: null },
+      depth: 0,
+      id: reserved.exportID,
+      overrideAccess: true,
+    })
+
+    await expect(
+      releaseInvoiceExport(
+        ownerSession,
+        { exportID: reserved.exportID },
+        { fetchRemote: fetchDeletedInvoice },
+      ),
+    ).resolves.toMatchObject({ entryIDs: [reserved.entryID] })
+
+    const [releasedEntry, releasedExport, releases] = await Promise.all([
+      payload.findByID({
+        collection: 'time-entries',
+        depth: 0,
+        id: reserved.entryID,
+        overrideAccess: true,
+      }),
+      payload.findByID({
+        collection: 'invoice-exports',
+        depth: 0,
+        id: reserved.exportID,
+        overrideAccess: true,
+      }),
+      payload.find({
+        collection: 'release-actions',
+        depth: 0,
+        overrideAccess: true,
+        where: { sourceExport: { equals: reserved.exportID } },
+      }),
+    ])
+    expect(releasedEntry).toMatchObject({
+      billingStatus: 'unbilled',
+      currentExport: null,
+      exportedAt: null,
+      reservedAt: null,
+    })
+    expect(releasedExport).toMatchObject({
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      remoteStatus: 'DELETED',
+      state: 'released',
+    })
+    expect(releases.docs).toHaveLength(1)
+    expect(releases.docs[0]).toMatchObject({
+      before: {
+        billingStatus: 'reserved',
+        billingStatusCounts: { exported: 0, reserved: 1 },
+        currentExport: reserved.exportID,
+      },
+      reason: 'Released mapped time after Xero confirmed the invoice was DELETED.',
+      remoteStatus: 'DELETED',
+    })
   })
 
   it('routes an unknown exception after the send marker to reconciliation', async () => {

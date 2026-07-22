@@ -8,7 +8,7 @@ import {
 } from '../helpers/seedExportDetail'
 import { billerAppUser, resetE2ERateLimits, testUser } from '../helpers/seedUser'
 
-import type { Page } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 
 type ExportDetailUser = Pick<typeof testUser, 'email' | 'password' | 'role'> | typeof billerAppUser
 
@@ -31,6 +31,11 @@ const sectionWithHeading = (page: Page, name: string) =>
   page.locator('section').filter({
     has: page.getByRole('heading', { name, exact: true }),
   })
+
+const expectNoManualConfirmationFields = async (section: Locator): Promise<void> => {
+  await expect(section.locator('[name="reason"]')).toHaveCount(0)
+  await expect(section.locator('[name="confirmation"]')).toHaveCount(0)
+}
 
 test.describe.serial('Invoice export detail recovery controls', () => {
   test.setTimeout(90_000)
@@ -61,6 +66,7 @@ test.describe.serial('Invoice export detail recovery controls', () => {
     await expect(
       draftRecovery.getByRole('button', { name: 'Delete Xero draft and release time' }),
     ).toBeEnabled()
+    await expectNoManualConfirmationFields(draftRecovery)
   })
 
   test('guides an owner through manual review without accepting an entered InvoiceID', async ({
@@ -76,10 +82,12 @@ test.describe.serial('Invoice export detail recovery controls', () => {
       draftRecovery.getByRole('button', { name: 'Delete Xero draft and release time' }),
     ).toHaveCount(0)
     await expect(draftRecovery.getByRole('link', { name: 'Open draft in Xero' })).toBeVisible()
+    await expectNoManualConfirmationFields(draftRecovery)
 
     const recoveryRequest = sectionWithHeading(page, 'Check Xero and resume export')
     await expect(recoveryRequest).toBeVisible()
     await expect(recoveryRequest.getByRole('button', { name: 'Check Xero again' })).toBeVisible()
+    await expectNoManualConfirmationFields(recoveryRequest)
     await expect(page.getByLabel('Xero InvoiceID', { exact: true })).toHaveCount(0)
     await expect(
       page.getByRole('heading', { name: 'Accept one verified existing invoice', exact: true }),
@@ -87,6 +95,33 @@ test.describe.serial('Invoice export detail recovery controls', () => {
     await expect(
       page.getByRole('heading', { name: 'Targeted reconciliation', exact: true }),
     ).toHaveCount(0)
+  })
+
+  test('offers an owner one release action for a remotely deleted export', async ({ page }) => {
+    await signIn(page, testUser)
+    await openExport(page, fixture.releaseable)
+
+    const release = sectionWithHeading(page, 'Release all entries for rebilling')
+    await expect(release).toBeVisible()
+    await expect(release.getByRole('button')).toHaveCount(1)
+    await expect(
+      release.getByRole('button', { name: 'Release all entries for rebilling', exact: true }),
+    ).toBeVisible()
+    await expectNoManualConfirmationFields(release)
+  })
+
+  test('offers a replacement without asking for an audit reason or typed reference', async ({
+    page,
+  }) => {
+    await signIn(page, testUser)
+    await openExport(page, fixture.replacement)
+
+    const replacement = sectionWithHeading(page, 'Create a replacement draft')
+    await expect(replacement).toBeVisible()
+    await expect(
+      replacement.getByRole('button', { name: 'Create replacement draft', exact: true }),
+    ).toBeVisible()
+    await expectNoManualConfirmationFields(replacement)
   })
 
   test('shows reconciliation progress without a duplicate recovery submission', async ({
@@ -131,7 +166,7 @@ test.describe.serial('Invoice export detail recovery controls', () => {
       'Delete Xero draft and release time',
       'Check Xero again',
       'Create replacement draft',
-      'Verify and release all entries',
+      'Release all entries for rebilling',
     ]) {
       await expect(page.getByRole('button', { name: button, exact: true })).toHaveCount(0)
     }
