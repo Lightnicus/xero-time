@@ -1,10 +1,29 @@
 # Testing, dependency upgrades, and release checklist
 
-Pull requests run formatting/lint/type checks, generated freshness, secret/license checks, unit tests, real replica-set integration tests, index verification, production build, and protected-branch browser tests. Do not accept retries as a remedy for concurrency or timezone failures.
+GitHub Actions CI is intentionally disabled. Dependabot is limited to security updates: a `dependabot/**` branch and pull request is a proposed remediation for a GitHub vulnerability alert, not proof that the update is compatible. Vercel preview deployments are disabled for those branches, nothing is auto-merged, and routine dependency upgrades are prepared manually.
 
-Payload packages must be upgraded together at the same exact version. Upgrade Next/React as one reviewed compatibility change. Read upstream migration/security notes, update one group, regenerate types/import map, run all gates and a Payload Admin/member/Xero fake smoke test, then deploy to staging before production. Dependabot groups these packages accordingly.
+For every dependency update, review the advisory plus upstream release and migration notes. Keep `payload` and all `@payloadcms/*` packages pinned to the same exact version, and review Next/React as one compatibility change. From `app/`, using Node 24 and the local environment described in the README, run:
 
-`pnpm check:compat` enforces exact Payload/Next/React pins and imports the configured Payload schema. CI uses the distinct fake OIDC and fake accounting servers plus redacted fixtures under `tests/`; neither fake shares tokens or state across trust boundaries. Coverage thresholds are a required regression floor for domain, access, and state-machine code.
+```sh
+corepack pnpm install --frozen-lockfile
+pnpm db:start
+pnpm verify:secrets
+pnpm verify:licenses
+pnpm verify:generated
+pnpm check
+pnpm check:compat
+pnpm test:coverage
+pnpm test:perf
+pnpm verify:indexes
+pnpm build
+pnpm exec playwright install chromium
+pnpm test:e2e
+pnpm db:stop
+```
+
+The Playwright install is needed only initially and after browser-version changes. Stop the local database when validation is complete, including after an earlier command fails. If generated types or the import map are stale, regenerate and review them, then rerun the checks. Merge only after every command passes and the relevant Payload Admin, member, and Xero fake flows have been smoke-tested; deploy to staging before production. Do not accept retries as a remedy for concurrency or timezone failures.
+
+`pnpm check:compat` enforces exact Payload/Next/React pins and imports the configured Payload schema. Tests use distinct fake OIDC and fake accounting servers plus redacted fixtures under `tests/`; neither fake shares tokens or state across trust boundaries. Coverage thresholds are the regression floor for domain, access, and state-machine code.
 
 `pnpm test:perf` exercises a 20,000-row member summary, 5,000-row billing eligibility pass, the maximum 1,000-line invoice preview, and the hard 100-export dispatcher bound. Its deliberately generous local ceiling catches accidental unbounded or quadratic regressions without treating shared-runner jitter as a product benchmark.
 

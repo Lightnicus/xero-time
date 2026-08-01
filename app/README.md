@@ -151,6 +151,7 @@ When creating the Vercel project:
 - Use Node.js 24.
 - Confirm the MongoDB integration supplies `MONGODB_URI`, then copy the other required values from `.env.example` into the appropriate Vercel environment; use distinct secrets and databases for staging and production.
 - Never expose the production MongoDB URI or Xero secrets to unrestricted preview deployments.
+- Automatic Vercel deployments are disabled for `dependabot/**` branches; validate dependency pull requests locally before merging them.
 - While deployment protection is enabled, create the first owner through Payload Admin or the optional controlled seed before sending public traffic.
 - Payload media uploads are intentionally disabled until persistent object storage is configured; Vercel's application filesystem is not durable storage.
 

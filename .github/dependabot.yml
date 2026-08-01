@@ -4,14 +4,6 @@ updates:
     directory: /app
     schedule:
       interval: weekly
-    groups:
-      payload:
-        patterns:
-          - payload
-          - "@payloadcms/*"
-      next-react:
-        patterns:
-          - next
-          - react
-          - react-dom
-    open-pull-requests-limit: 10
+    # Routine version updates are handled manually. Repository-level
+    # Dependabot security updates remain independent of this limit.
+    open-pull-requests-limit: 0
