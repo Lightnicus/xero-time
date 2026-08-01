@@ -29,7 +29,7 @@
     "start": "cross-env NODE_OPTIONS=--no-deprecation next start",
     "test": "pnpm run test:unit && pnpm run test:int && pnpm run test:e2e",
     "test:coverage": "cross-env NODE_OPTIONS=--no-deprecation vitest run --coverage --config ./vitest.config.mts tests/unit tests/int",
-    "test:e2e": "cross-env NODE_OPTIONS=\"--no-deprecation --import=tsx/esm\" playwright test --config=playwright.config.ts",
+    "test:e2e": "cross-env NODE_OPTIONS=--no-deprecation playwright test --config=playwright.config.ts",
     "test:int": "cross-env NODE_OPTIONS=--no-deprecation vitest run --config ./vitest.config.mts tests/int",
     "test:perf": "cross-env NODE_OPTIONS=--no-deprecation vitest run --config ./vitest.config.mts tests/performance",
     "test:unit": "cross-env NODE_OPTIONS=--no-deprecation vitest run --config ./vitest.config.mts tests/unit",
@@ -54,8 +54,7 @@
     "openid-client": "6.8.4",
     "payload": "3.86.0",
     "react": "19.2.7",
-    "react-dom": "19.2.7",
-    "sharp": "0.34.5"
+    "react-dom": "19.2.7"
   },
   "devDependencies": {
     "@playwright/test": "1.61.1",
@@ -82,11 +81,13 @@
   "packageManager": "pnpm@10.28.1",
   "pnpm": {
     "overrides": {
-      "dompurify": "3.4.11",
-      "postcss": "8.5.10"
+      "@payloadcms/db-mongodb>mongoose": "8.24.1",
+      "dompurify": "3.4.12",
+      "fast-uri": "3.1.5",
+      "next>sharp": "-",
+      "postcss": "8.5.25"
     },
     "onlyBuiltDependencies": [
-      "sharp",
       "esbuild",
       "unrs-resolver"
     ]

@@ -7,6 +7,7 @@ For every dependency update, review the advisory plus upstream release and migra
 ```sh
 corepack pnpm install --frozen-lockfile
 pnpm db:start
+pnpm migrate
 pnpm verify:secrets
 pnpm verify:licenses
 pnpm verify:generated
@@ -15,6 +16,7 @@ pnpm check:compat
 pnpm test:coverage
 pnpm test:perf
 pnpm verify:indexes
+pnpm audit --prod --audit-level high
 pnpm build
 pnpm exec playwright install chromium
 pnpm test:e2e
