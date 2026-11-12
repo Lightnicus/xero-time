@@ -2,6 +2,7 @@ import 'server-only'
 
 import { dispatchPreparingExports } from '@/lib/billing/dispatch'
 import { requireMongoModel } from '@/lib/payload/mongo'
+import { refreshLinkedContacts } from '@/lib/xero/accounting/contacts'
 import { refreshXeroReferenceData } from '@/lib/xero/accounting/reference-data'
 import {
   checkAccountingConnectionHealth,
@@ -366,6 +367,7 @@ export async function maintainXeroAccountingConnection(
   const session = await createAccountingSystemSession(req.payload)
   await checkAccountingConnectionHealth(session)
   await refreshXeroReferenceData(session, { machineActor: 'xero-maintenance-worker' })
+  await refreshLinkedContacts(session)
   return { state: 'healthy' }
 }
 

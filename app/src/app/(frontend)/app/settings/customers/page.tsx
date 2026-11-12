@@ -40,6 +40,14 @@ const customerReferenceFields = (customer: unknown): CustomerReferenceFields =>
 
 const referenceNumber = (value: number): string => String(value).padStart(4, '0')
 
+const MAPPING_STATUS_LABELS: Record<string, string> = {
+  active: 'Linked',
+  archived: 'Archived in Xero',
+  invalid: 'Not found in Xero',
+  'needs-review': 'Needs a re-check',
+  unmapped: 'Not linked',
+}
+
 export default async function CustomerMappingPage({
   searchParams,
 }: {
@@ -351,13 +359,24 @@ export default async function CustomerMappingPage({
             </article>
           ))}
           {mapped.map((customer) => (
-            <article className="mapping-row" key={customer.id}>
-              <div>
+            <article className="mapping-row" id={`customer-${customer.id}`} key={customer.id}>
+              <div className="mapping-row-details">
                 <strong>{customer.name}</strong>
                 <p>
-                  {customer.xeroContactNameSnapshot} · {customer.xeroMappingStatus}
+                  Xero contact: {customer.xeroContactNameSnapshot}{' '}
+                  <span
+                    className={`status ${customer.xeroMappingStatus === 'active' ? 'status-xero-connected' : 'status-xero-action-required'}`}
+                  >
+                    {MAPPING_STATUS_LABELS[customer.xeroMappingStatus ?? ''] ??
+                      customer.xeroMappingStatus}
+                  </span>
                 </p>
-                <small>ContactID {customer.xeroContactId}</small>
+                <small>
+                  {customer.xeroLastValidatedAt
+                    ? `Checked ${new Date(customer.xeroLastValidatedAt).toLocaleDateString(settings.locale, { dateStyle: 'medium', timeZone: session.user.timezone })}`
+                    : 'Not checked yet'}
+                </small>
+                <small className="mapping-row-id">ContactID {customer.xeroContactId}</small>
               </div>
               <form action={refreshContactAction}>
                 <input name="customerID" type="hidden" value={customer.id} />

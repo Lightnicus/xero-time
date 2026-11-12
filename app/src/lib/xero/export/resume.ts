@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { requireMongoModel } from '@/lib/payload/mongo'
 import { XERO_RECONNECT_EXPORT_CODE } from '@/lib/xero/accounting/recovery'
 
 import type { Payload } from 'payload'
@@ -57,4 +58,26 @@ export async function resumeExportsAwaitingReconnect(payload: Payload): Promise<
     resumed += 1
   }
   return resumed
+}
+
+/**
+ * Queues the maintenance job right after a reconnect so reference data and any contact links
+ * flagged while Xero was unreachable are re-checked on the next queue run, not the next day.
+ */
+export async function queueMaintenanceAfterReconnect(payload: Payload): Promise<boolean> {
+  const pending = await requireMongoModel(payload, 'payload-jobs').findOne({
+    completedAt: { $in: [null, undefined] },
+    hasError: { $ne: true },
+    queue: 'xero',
+    taskSlug: 'maintain-xero-accounting',
+  })
+  if (pending) return false
+  await (
+    payload.jobs.queue as unknown as (args: {
+      input: { reason: string }
+      queue: string
+      task: 'maintain-xero-accounting'
+    }) => Promise<unknown>
+  )({ input: { reason: 'reconnected' }, queue: 'xero', task: 'maintain-xero-accounting' })
+  return true
 }

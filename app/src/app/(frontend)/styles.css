@@ -415,6 +415,17 @@ button[data-pending='true'] {
   color: var(--ink-soft);
 }
 
+.mapping-row-details {
+  display: grid;
+  min-width: 0;
+  gap: 0.15rem;
+}
+
+.mapping-row-id {
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
 .muted-copy {
   color: var(--ink-soft);
 }
@@ -1894,6 +1905,16 @@ button[data-pending='true'] {
 }
 
 @media (max-width: 620px) {
+  .mapping-row {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .mapping-row form,
+  .mapping-row .button {
+    width: 100%;
+  }
+
   .app-main {
     width: min(100% - 1.25rem, 1180px);
     padding: 2rem 0 3rem;

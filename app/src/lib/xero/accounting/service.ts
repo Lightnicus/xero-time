@@ -8,7 +8,10 @@ import { environment } from '@/lib/env'
 import type { AppSession } from '@/lib/member-app/session'
 import { requireMongoModel } from '@/lib/payload/mongo'
 import { withPayloadTransaction } from '@/lib/payload/withTransaction'
-import { resumeExportsAwaitingReconnect } from '@/lib/xero/export/resume'
+import {
+  queueMaintenanceAfterReconnect,
+  resumeExportsAwaitingReconnect,
+} from '@/lib/xero/export/resume'
 import type { XeroConnection, XeroOauthState } from '@/payload-types'
 
 import { createXeroAccountingClient, type XeroAccountingClient } from './client'
@@ -659,6 +662,11 @@ const persistConnectionAndCompleteState = async (
     await resumeExportsAwaitingReconnect(session.payload)
   } catch {
     // Parked exports also recheck the connection on their own schedule.
+  }
+  try {
+    await queueMaintenanceAfterReconnect(session.payload)
+  } catch {
+    // The daily maintenance run re-checks the same things.
   }
   return connection
 }
