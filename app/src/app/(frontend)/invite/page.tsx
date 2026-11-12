@@ -33,6 +33,13 @@ export default async function InvitationPage({
     getInvitationPreview(payload, token),
     identityFeatureView(payload),
   ])
+  // The callback enforces the rollout too; hiding the button avoids a dead-end Xero round trip.
+  const offerXero =
+    Boolean(preview) &&
+    identity.configured &&
+    identity.loginEnabled &&
+    identity.inviteAcceptanceEnabled &&
+    identity.rolloutRoles.some((role) => role === preview?.role)
 
   return (
     <main className="auth-page">
@@ -54,7 +61,7 @@ export default async function InvitationPage({
               </div>
             )}
             <AcceptInvitationForm token={token} />
-            {identity.configured && identity.loginEnabled && identity.inviteAcceptanceEnabled && (
+            {offerXero && (
               <>
                 <div className="auth-separator">
                   <span>or</span>

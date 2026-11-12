@@ -5,7 +5,11 @@ import { hasActiveRole } from '@/access/roles'
 import { ExportStatusPoller } from '@/app/(frontend)/_components/ExportStatusPoller'
 import { PendingSubmitButton } from '@/app/(frontend)/_components/PendingControls'
 import { exportDetailActionAvailability } from '@/lib/billing/export-detail'
-import { exportStateLabel, xeroInvoiceStatusLabel } from '@/lib/billing/export-presentation'
+import {
+  exportStateLabel,
+  isAwaitingXeroReconnect,
+  xeroInvoiceStatusLabel,
+} from '@/lib/billing/export-presentation'
 import { normalizeBillingFilter } from '@/lib/billing/selection'
 import { createSelectionToken } from '@/lib/billing/selection-token'
 import { formatScaledAmount } from '@/lib/domain/money'
@@ -69,6 +73,7 @@ export default async function InvoiceExportDetailPage({
   })
   const isOwnerAdmin = hasActiveRole(session.user, ['owner', 'admin'])
   const actionAvailability = exportDetailActionAvailability(document, session.user.role)
+  const awaitingXeroReconnect = isAwaitingXeroReconnect(document)
   const xeroInvoiceHref =
     document.xeroInvoiceUrl ??
     (document.xeroInvoiceId
@@ -92,7 +97,7 @@ export default async function InvoiceExportDetailPage({
 
   return (
     <div className="wide-page page-stack">
-      <ExportStatusPoller active={activeStates.has(document.state)} />
+      <ExportStatusPoller active={activeStates.has(document.state) && !awaitingXeroReconnect} />
       <div className="breadcrumb">
         <Link href="/app/billing/exports">Export history</Link>
         <span aria-hidden="true">/</span>
@@ -105,7 +110,7 @@ export default async function InvoiceExportDetailPage({
           <p>Review what was sent to Xero, its current status, and any action needed.</p>
         </div>
         <span className={`status-pill status-export-${document.state}`}>
-          {exportStateLabel(document.state)}
+          {exportStateLabel(document.state, document.lastErrorCode)}
         </span>
       </section>
       {commandStatus && (
@@ -130,11 +135,30 @@ export default async function InvoiceExportDetailPage({
                       : `Export ${commandStatus}.`}
         </div>
       )}
-      {document.lastErrorMessage && (
+      {awaitingXeroReconnect ? (
         <div className="notice notice-warning">
-          <strong>{document.state === 'manual-review' ? 'Review needed' : 'Action needed'}</strong>
-          <p>{document.lastErrorMessage}</p>
+          <strong>Waiting for Xero to be reconnected</strong>
+          <p>
+            Xero stopped accepting this app&apos;s connection, so this export is paused. Its time
+            stays reserved and it resumes automatically once Xero is reconnected.
+          </p>
+          {isOwnerAdmin ? (
+            <Link className="button button-secondary" href="/app/settings/xero">
+              Reconnect Xero
+            </Link>
+          ) : (
+            <p>Ask an owner or admin to reconnect Xero in Settings.</p>
+          )}
         </div>
+      ) : (
+        document.lastErrorMessage && (
+          <div className="notice notice-warning">
+            <strong>
+              {document.state === 'manual-review' ? 'Review needed' : 'Action needed'}
+            </strong>
+            <p>{document.lastErrorMessage}</p>
+          </div>
+        )
       )}
 
       <section className="summary-grid">

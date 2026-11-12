@@ -118,7 +118,9 @@ export default async function ExportHistoryPage({
               ? 'The dispatcher and bounded Xero queue run completed.'
               : params.status === 'queue-failed'
                 ? 'The queue run failed safely; durable work remains available for the next runner.'
-                : 'Export history updated.'}
+                : params.status === 'dispatch-pending'
+                  ? 'The entries are reserved. Sending to Xero will start automatically within a minute or two.'
+                  : 'Export history updated.'}
         </div>
       )}
       <section className="panel page-stack">
@@ -149,7 +151,7 @@ export default async function ExportHistoryPage({
                     <td>{customerName ?? `Customer ${customerID ?? 'unavailable'}`}</td>
                     <td>
                       <span className={`status-pill status-export-${item.state}`}>
-                        {exportStateLabel(item.state)}
+                        {exportStateLabel(item.state, item.lastErrorCode)}
                       </span>
                       {item.lastErrorMessage && <small>{item.lastErrorMessage}</small>}
                     </td>

@@ -9,6 +9,7 @@ import { environment } from '@/lib/env'
 import type { AppSession } from '@/lib/member-app/session'
 import { requireMongoModel } from '@/lib/payload/mongo'
 import { withPayloadTransaction } from '@/lib/payload/withTransaction'
+import { resumeExportsAwaitingReconnect } from '@/lib/xero/export/resume'
 import type { XeroConnection, XeroOauthState } from '@/payload-types'
 
 import { createXeroAccountingClient, type XeroAccountingClient } from './client'
@@ -30,6 +31,7 @@ import {
   randomOpaqueValue,
   type EncryptionKey,
 } from './crypto'
+import { connectionFailureMessage } from './recovery'
 import { validateAccountingAccessToken, type AccountingAccessTokenMetadata } from './token'
 
 export const ACCOUNTING_FLOW_COOKIE = 'xero-accounting-flow'
@@ -443,10 +445,10 @@ export async function createAccountingAuthorization(
   }
 
   if (flow.purpose === 'authorizer-handover') {
-    if (!connection || connection.status !== 'connected' || !connection.tenantId) {
+    if (!connection?.tenantId) {
       throw new AccountingIntegrationError(
         'not-connected',
-        'A connected Xero organisation is required for authorizer handover.',
+        'A pinned Xero organisation is required for authorizer handover.',
       )
     }
     const reason = flow.handoverReason?.trim() ?? ''
@@ -456,6 +458,11 @@ export async function createAccountingAuthorization(
         'Enter a handover reason of at least 10 characters.',
       )
     }
+  }
+  // While the connection works, in-flight exports must settle before the authorizer changes.
+  // Once it has stopped working those exports cannot settle without Xero, so requiring them to
+  // would leave no way to recover when the original authorizer has lost access.
+  if (flow.purpose === 'authorizer-handover' && connection?.status === 'connected') {
     const unsafe = await session.payload.find({
       collection: 'invoice-exports',
       depth: 0,
@@ -762,6 +769,22 @@ const persistConnection = async (
 }
 
 const persistConnectionAndCompleteState = async (
+  session: AppSession,
+  state: XeroOauthState,
+  candidate: XeroConnectionCandidate,
+  grant: PendingGrant,
+  config: ConfiguredAccountingEnvironment,
+): Promise<XeroConnection> => {
+  const connection = await commitConnectionAndState(session, state, candidate, grant, config)
+  try {
+    await resumeExportsAwaitingReconnect(session.payload)
+  } catch {
+    // Parked exports also recheck the connection on their own schedule.
+  }
+  return connection
+}
+
+const commitConnectionAndState = async (
   session: AppSession,
   state: XeroOauthState,
   candidate: XeroConnectionCandidate,
@@ -1164,7 +1187,7 @@ const updateRefreshFailure = async (
             : null,
         lastErrorCode: error.code.slice(0, 100),
         lastErrorMessage: terminal
-          ? 'Xero requires the accounting organisation to be reconnected.'
+          ? connectionFailureMessage(error.code)
           : 'The Xero token refresh did not complete and can be retried.',
         refreshLockExpiresAt: null,
         refreshLockId: null,
@@ -1199,9 +1222,10 @@ export async function getValidAccountingAccessToken(
   overrides: ServiceDependencies = {},
 ): Promise<{ accessToken: string; connection: XeroConnection }> {
   assertAccountingAdministrator(session)
-  const resolved = await dependencies(session, overrides)
   let connection = await findConnection(session)
 
+  // Check the connection first so a broken connection is reported as needing a reconnect even
+  // when its application credentials are also unusable.
   if (
     !connection ||
     connection.status !== 'connected' ||
@@ -1209,11 +1233,19 @@ export async function getValidAccountingAccessToken(
     !connection.refreshTokenEnvelope ||
     !connection.accessTokenExpiresAt
   ) {
-    throw new AccountingIntegrationError(
-      'not-connected',
-      'The Xero accounting organisation is not connected.',
-    )
+    throw connection?.status === 'action-required'
+      ? new AccountingIntegrationError(
+          'reconnect-required',
+          'Xero needs to be reconnected before this can continue.',
+          { reconnectRequired: true },
+        )
+      : new AccountingIntegrationError(
+          'not-connected',
+          'The Xero accounting organisation is not connected.',
+          { reconnectRequired: true },
+        )
   }
+  const resolved = await dependencies(session, overrides)
 
   if (new Date(connection.accessTokenExpiresAt).getTime() > Date.now() + ACCESS_REFRESH_SKEW_MS) {
     return {
@@ -1229,6 +1261,13 @@ export async function getValidAccountingAccessToken(
   const lockID = randomOpaqueValue()
   if (!(await acquireRefreshLock(session, connection, lockID))) {
     connection = await waitForConcurrentRefresh(session, connection.tokenVersion)
+    if (connection.status === 'action-required') {
+      throw new AccountingIntegrationError(
+        'reconnect-required',
+        'Xero needs to be reconnected before this can continue.',
+        { reconnectRequired: true },
+      )
+    }
     if (
       connection.status !== 'connected' ||
       !connection.accessTokenEnvelope ||
@@ -1324,6 +1363,7 @@ export async function getValidAccountingAccessToken(
             retryable: true,
           })
     await updateRefreshFailure(session, connection, lockID, safeError)
+    if (!safeError.retryable) safeError.reconnectRequired = true
     throw safeError
   }
 }

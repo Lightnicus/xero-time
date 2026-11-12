@@ -21,3 +21,16 @@ Owners/admins/billers filter eligible and blocked time, select rows/page/all mat
 Background returns after durable dispatch. **Wait for Xero** uses the same job and may continue in background. Export detail shows state/history and supports safe cancel, status refresh, guided Xero recovery, or a linked replacement. For a verified app-created Xero DRAFT, an owner/admin can delete the exact draft and atomically release all mapped time back to unbilled. A draft that does not match the saved export remains locked; the page explains how to resolve it in Xero and check again. Mapping/configuration blockers must be corrected and previewed again.
 
 Only owner/admin can release a remotely verified deleted/voided invoice. The full invoice's entries return to the normal queue and replacement preserves lineage.
+
+## When the Xero connection stops working
+
+Xero can stop accepting the saved connection: someone disconnects the app from Xero's Connected Apps page, the Xero user who connected it loses access, the connection goes unused for 60 days, or the accounting app's client secret is regenerated. When that happens, the connection shows **Action required** and every owner, admin, and biller sees a banner saying Xero needs to be reconnected.
+
+Nothing is lost. Exports that were waiting to go to Xero show **Waiting for Xero**, keep their time reserved, and resume automatically once Xero is reconnected. New exports are blocked with a **Reconnect Xero** setup issue until then.
+
+An owner or admin fixes it from **Settings → Xero accounting**, which explains the cause and the steps:
+
+1. If Xero rejected the client ID or secret, generate a new secret for the accounting app in the Xero developer portal and save it under **Accounting OAuth application**.
+2. Sign in to Xero as a user who can create invoices in the pinned organisation.
+3. Select **Reconnect Xero**, confirm your password, and choose the same organisation in Xero.
+4. If the Xero user who connected it before has left, tick **I am reconnecting as a different Xero user** and give a reason. This is recorded as an authorizer handover.

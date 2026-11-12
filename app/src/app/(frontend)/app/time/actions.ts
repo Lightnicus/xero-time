@@ -15,7 +15,10 @@ import { findMyTimeEntry } from '@/lib/member-app/data'
 import { localDateTimeToISOString } from '@/lib/member-app/date-time'
 import { canLogTime, requireAppSession } from '@/lib/member-app/session'
 import { enforceRateLimit, rateLimitKey } from '@/lib/security/rate-limit'
-import { deleteUnbilledTimeEntryAsAdministrator } from '@/lib/time-entry/administration'
+import {
+  deleteUnbilledTimeEntryAsAdministrator,
+  TimeEntryAdministrationError,
+} from '@/lib/time-entry/administration'
 
 import type { Where } from 'payload'
 
@@ -182,6 +185,13 @@ const stateFromError = (error: unknown): TimeEntryActionState => {
       fieldErrors,
       message: error.data.errors[0]?.message ?? 'The time entry could not be saved.',
     }
+  }
+
+  if (error instanceof TimeEntryAdministrationError) {
+    // These are expected, user-correctable refusals (short reason, locked entry), not failures.
+    return error.code === 'invalid-reason'
+      ? { fieldErrors: { privilegedCorrectionReason: error.message }, message: error.message }
+      : { message: error.message }
   }
 
   return { message: 'The time entry could not be saved. Please try again.' }

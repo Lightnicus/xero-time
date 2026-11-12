@@ -108,6 +108,24 @@ describe('billing selection semantics', () => {
     ).toThrow(/no longer eligible/)
   })
 
+  it('keeps explicit selections in the eligibility sort order, not ID order', () => {
+    const sorted = {
+      ...eligibility,
+      eligible: [
+        entry({ entryID: 'z-entry', workDate: '2026-07-17' }),
+        entry({ entryID: 'a-entry', workDate: '2026-07-18' }),
+        entry({ entryID: 'm-entry', workDate: '2026-07-19' }),
+      ],
+    }
+    const selected = selectEligibleEntries(sorted, {
+      excludedEntryIDs: [],
+      explicitEntryIDs: ['m-entry', 'a-entry', 'z-entry'],
+      filter: normalizeBillingFilter({}),
+      type: 'explicit',
+    })
+    expect(selected.map((item) => item.entryID)).toEqual(['z-entry', 'a-entry', 'm-entry'])
+  })
+
   it('applies all-matching exclusions to the complete resolved set', () => {
     const selected = selectEligibleEntries(eligibility, {
       excludedEntryIDs: ['entry-1'],

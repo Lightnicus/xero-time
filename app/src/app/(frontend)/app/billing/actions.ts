@@ -114,10 +114,12 @@ export async function refreshBillingReferenceDataAction(): Promise<void> {
 
 export async function confirmBillingExportAction(formData: FormData): Promise<void> {
   const session = await commandSession()
-  let batchID: string
+  let result: Awaited<ReturnType<typeof confirmBillingPreview>>
   try {
     const envelope = readSelectionToken(value(formData, 'selectionToken'))
-    const result = await confirmBillingPreview(session, {
+    // Throws only before or during the reservation transaction (nothing was saved); failures after
+    // the commit are reported through `result.status` instead.
+    result = await confirmBillingPreview(session, {
       batchReference: value(formData, 'batchReference'),
       checksum: value(formData, 'checksum'),
       invoiceDate: envelope.invoiceDate,
@@ -126,14 +128,15 @@ export async function confirmBillingExportAction(formData: FormData): Promise<vo
         value(formData, 'requestedMode') === 'wait-for-result' ? 'wait-for-result' : 'background',
       selection: envelope.selection,
     })
-    batchID = result.batchID
   } catch {
     redirect(
       `/app/billing/preview?selection=${encodeURIComponent(value(formData, 'selectionToken'))}&status=stale-or-failed`,
     )
   }
   revalidatePath('/app/billing')
-  redirect(`/app/billing/exports?batch=${encodeURIComponent(batchID)}&status=created`)
+  revalidatePath('/app/billing/exports')
+  const status = result.status === 'dispatch-pending' ? 'dispatch-pending' : 'created'
+  redirect(`/app/billing/exports?batch=${encodeURIComponent(result.batchID)}&status=${status}`)
 }
 
 export async function cancelExportAction(formData: FormData): Promise<void> {

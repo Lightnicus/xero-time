@@ -89,6 +89,27 @@ const statusNotice = (status: string): { message: string; tone: 'success' | 'war
       tone: 'warning',
     }
   }
+  if (status === 'stale-selection') {
+    return {
+      message:
+        'Some selected entries are no longer eligible: they were billed, changed, or blocked after you selected them. Review the refreshed queue and select again.',
+      tone: 'warning',
+    }
+  }
+  if (status === 'preview-line-too-long') {
+    return {
+      message:
+        "A selected entry's invoice line is longer than Xero allows. Shorten that entry's description, then preview again.",
+      tone: 'warning',
+    }
+  }
+  if (status === 'preview-too-many-lines') {
+    return {
+      message:
+        'One invoice would have more lines than Xero allows. Narrow the selection (for example by date range), then preview again.',
+      tone: 'warning',
+    }
+  }
   if (status === 'references-refreshed') {
     return {
       message:

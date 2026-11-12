@@ -21,12 +21,30 @@ const readCookie = (header: string | null, name: string): string | null => {
   return null
 }
 
+/** Reads the opaque external-session token from a request's cookies, if present. */
+export const readExternalSessionCookie = (headers: Headers | null | undefined): string | null => {
+  const rawToken = readCookie(headers?.get('cookie') ?? null, EXTERNAL_SESSION_COOKIE)
+  return rawToken && rawToken.length >= 40 && rawToken.length <= 500 ? rawToken : null
+}
+
+/** A Set-Cookie value that expires the external-session cookie (same attributes as when set). */
+export const expiredExternalSessionCookieHeader = (): string =>
+  [
+    `${EXTERNAL_SESSION_COOKIE}=`,
+    'Path=/',
+    'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+    'Max-Age=0',
+    'HttpOnly',
+    'SameSite=Lax',
+    ...(process.env.NODE_ENV === 'production' ? ['Secure'] : []),
+  ].join('; ')
+
 /** Authenticates only the application's opaque cookie; no Xero token reaches this strategy. */
 export const xeroExternalSessionStrategy: AuthStrategy = {
   name: 'xero-external-session',
   async authenticate({ headers, payload }) {
-    const rawToken = readCookie(headers.get('cookie'), EXTERNAL_SESSION_COOKIE)
-    if (!rawToken || rawToken.length < 40 || rawToken.length > 500) return { user: null }
+    const rawToken = readExternalSessionCookie(headers)
+    if (!rawToken) return { user: null }
 
     const sessions = await payload.find({
       collection: 'external-auth-sessions',

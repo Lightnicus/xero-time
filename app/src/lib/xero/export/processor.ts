@@ -11,6 +11,11 @@ import { withPayloadTransaction } from '@/lib/payload/withTransaction'
 import type { XeroAccountingClient } from '@/lib/xero/accounting/client'
 import { AccountingIntegrationError } from '@/lib/xero/accounting/contracts'
 import {
+  XERO_RECONNECT_EXPORT_CODE,
+  XERO_RECONNECT_EXPORT_MESSAGE,
+  XERO_RECONNECT_RECHECK_SECONDS,
+} from '@/lib/xero/accounting/recovery'
+import {
   createAccountingSystemSession,
   getValidAccountingAccessToken,
   resolveAccountingRuntime,
@@ -665,14 +670,27 @@ const queueFollowUp = async (
   return String(job.id)
 }
 
+export const consecutiveRetryWaits = (exportDocument: Pick<InvoiceExport, 'stateHistory'>) => {
+  const history = Array.isArray(exportDocument.stateHistory) ? exportDocument.stateHistory : []
+  let count = 0
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const entry = history[index]
+    if (!isRecord(entry) || entry.to !== 'retry-wait') break
+    count += 1
+  }
+  return count
+}
+
 const retryDelaySeconds = (
   exportDocument: InvoiceExport,
   error: AccountingIntegrationError,
 ): number => {
   if (error.retryAfterSeconds && error.retryAfterSeconds >= 0)
     return Math.min(error.retryAfterSeconds, 3_600)
-  const exponent = Math.min(Math.max(exportDocument.currentAttemptNumber ?? 1, 1), 6)
-  return BASE_RETRY_SECONDS * 2 ** (exponent - 1) + Math.floor(Math.random() * 10)
+  // Back off by how many retries in a row this export has already waited through; the attempt
+  // number only changes when an owner authorizes a replacement, so it never grew on its own.
+  const exponent = Math.min(consecutiveRetryWaits(exportDocument), 5)
+  return BASE_RETRY_SECONDS * 2 ** exponent + Math.floor(Math.random() * 10)
 }
 
 const deferExport = async (
@@ -682,8 +700,10 @@ const deferExport = async (
   attempt: XeroAttempt,
   error: AccountingIntegrationError,
   state: 'reconciling' | 'retry-wait',
+  delaySeconds?: number,
 ): Promise<void> => {
-  const delay = state === 'reconciling' ? 30 : retryDelaySeconds(exportDocument, error)
+  const delay =
+    delaySeconds ?? (state === 'reconciling' ? 30 : retryDelaySeconds(exportDocument, error))
   const nextAttemptAt = new Date(Date.now() + delay * 1_000)
   const jobID = await queueFollowUp(
     payload,
@@ -935,6 +955,23 @@ export async function processInvoiceExport(
               retryable: true,
             },
           )
+    if (error.reconnectRequired) {
+      // The connection, not this invoice, is the problem: keep the reservation and wait for an
+      // owner or admin to reconnect Xero rather than failing the export.
+      const state = requestMayHaveBeenSent ? 'reconciling' : 'retry-wait'
+      await deferExport(
+        payload,
+        req,
+        claimed,
+        attempt,
+        new AccountingIntegrationError(XERO_RECONNECT_EXPORT_CODE, XERO_RECONNECT_EXPORT_MESSAGE, {
+          requestMayHaveBeenSent: error.requestMayHaveBeenSent,
+        }),
+        state,
+        XERO_RECONNECT_RECHECK_SECONDS,
+      )
+      return { state }
+    }
     const failureState = classifyExportFailure(error, requestMayHaveBeenSent)
     if (failureState === 'action-required') {
       await releaseAfterDefiniteFailure(payload, req, claimed, attempt, error)

@@ -15,6 +15,7 @@ type QueueTask = (args: {
   meta?: Record<string, unknown>
   queue: string
   task:
+    | 'create-xero-invoice'
     | 'maintain-xero-accounting'
     | 'process-xero-webhook-receipt'
     | 'reconcile-xero-invoice'
@@ -23,17 +24,25 @@ type QueueTask = (args: {
 
 const queue = (payload: Payload): QueueTask => payload.jobs.queue as unknown as QueueTask
 
+/** A receipt that keeps failing stops being retried; it stays visible as failed for review. */
+const MAX_WEBHOOK_RECEIPT_RETRIES = 10
+
+/**
+ * Finds a queued or running job by its input. Job `meta` is not persisted unless Payload's job
+ * stats are enabled, so deduplication has to use the task input. Jobs that exhausted their
+ * retries keep `completedAt` empty but set `hasError`, and must not block rescheduling.
+ */
 const hasPendingJob = async (
   payload: Payload,
-  metadataField: string,
-  value: string,
-  taskSlug?: string,
+  taskSlug: string,
+  input?: { field: string; value: string },
 ): Promise<boolean> => {
   const query: Record<string, unknown> = {
     completedAt: { $in: [null, undefined] },
-    [`meta.${metadataField}`]: value,
+    hasError: { $ne: true },
+    taskSlug,
   }
-  if (taskSlug) query.taskSlug = taskSlug
+  if (input) query[`input.${input.field}`] = input.value
   return Boolean(await requireMongoModel(payload, 'payload-jobs').findOne(query))
 }
 
@@ -85,7 +94,10 @@ const recoverStaleExports = async (payload: Payload, req: PayloadRequest): Promi
         req,
       })
       if (
-        !(await hasPendingJob(payload, 'exportID', String(document.id), 'reconcile-xero-invoice'))
+        !(await hasPendingJob(payload, 'reconcile-xero-invoice', {
+          field: 'exportID',
+          value: String(document.id),
+        }))
       ) {
         const job = await queue(payload)({
           input: { exportID: String(document.id) },
@@ -124,6 +136,66 @@ const recoverStaleExports = async (payload: Payload, req: PayloadRequest): Promi
   return recovered
 }
 
+/**
+ * Re-queues exports that are waiting to retry or reconcile but have no job left to run them, for
+ * example because a job failed outside its own error handling or returned early while processing
+ * was paused. The workers' claims still decide whether anything actually runs.
+ */
+const requeueOrphanedExports = async (payload: Payload, req: PayloadRequest): Promise<number> => {
+  const overdue = new Date(Date.now() - 2 * 60_000).toISOString()
+  const waiting = await payload.find({
+    collection: 'invoice-exports',
+    depth: 0,
+    limit: 25,
+    overrideAccess: true,
+    req,
+    sort: 'nextAttemptAt',
+    where: {
+      and: [
+        { state: { in: ['retry-wait', 'reconciling'] } },
+        {
+          or: [
+            { nextAttemptAt: { less_than_equal: overdue } },
+            {
+              and: [
+                { nextAttemptAt: { exists: false } },
+                { updatedAt: { less_than_equal: overdue } },
+              ],
+            },
+          ],
+        },
+        {
+          or: [
+            { processingLeaseExpiresAt: { exists: false } },
+            { processingLeaseExpiresAt: { less_than_equal: new Date().toISOString() } },
+          ],
+        },
+      ],
+    },
+  })
+  let requeued = 0
+  for (const document of waiting.docs) {
+    const exportID = String(document.id)
+    const task = document.state === 'reconciling' ? 'reconcile-xero-invoice' : 'create-xero-invoice'
+    if (await hasPendingJob(payload, task, { field: 'exportID', value: exportID })) continue
+    const job = await queue(payload)({
+      input: { exportID },
+      meta: { exportID, reason: 'orphaned-export-sweeper' },
+      queue: 'xero',
+      task,
+    })
+    await payload.update({
+      collection: 'invoice-exports',
+      id: exportID,
+      data: { jobId: String(job.id) },
+      overrideAccess: true,
+      req,
+    })
+    requeued += 1
+  }
+  return requeued
+}
+
 const schedulePendingWebhookReceipts = async (
   payload: Payload,
   req: PayloadRequest,
@@ -138,6 +210,12 @@ const schedulePendingWebhookReceipts = async (
       and: [
         { status: { in: ['pending', 'failed'] } },
         { or: [{ jobId: { exists: false } }, { jobId: { equals: null } }] },
+        {
+          or: [
+            { retryCount: { exists: false } },
+            { retryCount: { less_than: MAX_WEBHOOK_RECEIPT_RETRIES } },
+          ],
+        },
       ],
     },
   })
@@ -184,7 +262,10 @@ const scheduleStatusRefresh = async (payload: Payload, req: PayloadRequest): Pro
   let queued = 0
   for (const document of exports.docs) {
     if (
-      await hasPendingJob(payload, 'exportID', String(document.id), 'refresh-xero-invoice-status')
+      await hasPendingJob(payload, 'refresh-xero-invoice-status', {
+        field: 'exportID',
+        value: String(document.id),
+      })
     )
       continue
     await queue(payload)({
@@ -214,7 +295,7 @@ const scheduleConnectionMaintenance = async (
   if (!connection || connection.status !== 'connected') return 0
   const last = Date.parse(connection.lastHealthCheckAt ?? connection.lastRefreshedAt ?? '')
   if (Number.isFinite(last) && last > Date.now() - 24 * 60 * 60 * 1_000) return 0
-  if (await hasPendingJob(payload, 'maintenanceKey', 'daily', 'maintain-xero-accounting')) return 0
+  if (await hasPendingJob(payload, 'maintain-xero-accounting')) return 0
   await queue(payload)({
     input: { reason: 'scheduled-daily' },
     meta: { maintenanceKey: 'daily' },
@@ -246,6 +327,7 @@ export async function prepareXeroQueue(
   })
   if (settings.processingEnabled !== true) return { state: 'processing-paused' }
   const recovered = await recoverStaleExports(payload, req)
+  const requeued = await requeueOrphanedExports(payload, req)
   const dispatched = await dispatchPreparingExports(payload, req)
   const webhookReceipts = await schedulePendingWebhookReceipts(payload, req)
   const statusRefreshes = await scheduleStatusRefresh(payload, req)
@@ -255,6 +337,7 @@ export async function prepareXeroQueue(
     dispatchErrors: dispatched.errors,
     maintenanceJobs,
     recovered,
+    requeued,
     state: 'ready',
     statusRefreshes,
     webhookReceipts,

@@ -9,11 +9,17 @@ import {
 } from 'payload'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
-import { deleteDraftInvoiceAndRelease, releaseInvoiceExport } from '@/lib/billing/export-actions'
+import {
+  acceptExistingInvoice,
+  deleteDraftInvoiceAndRelease,
+  releaseInvoiceExport,
+  requestInvoiceReconciliation,
+} from '@/lib/billing/export-actions'
 import { confirmBillingPreview, createBillingPreview } from '@/lib/billing/reservation'
 import { normalizeBillingFilter } from '@/lib/billing/selection'
 import { isRecord, relationshipID } from '@/lib/domain/validation'
 import type { AppSession } from '@/lib/member-app/session'
+import { requireMongoModel } from '@/lib/payload/mongo'
 import { prepareXeroQueue } from '@/lib/xero/export/maintenance'
 import {
   parseRemoteInvoices,
@@ -25,6 +31,7 @@ import {
   reconcileInvoiceExport,
   refreshInvoiceExportStatus,
 } from '@/lib/xero/export/reconciliation'
+import { resumeExportsAwaitingReconnect } from '@/lib/xero/export/resume'
 import { persistXeroWebhook, processWebhookReceipt } from '@/lib/xero/export/webhooks'
 import type { InvoiceExport, XeroConnection } from '@/payload-types'
 import config from '@/payload.config'
@@ -1070,6 +1077,74 @@ describe.sequential('Xero export and webhook recovery', () => {
     expect(allocations.docs).toHaveLength(1)
   })
 
+  it('pauses an export while Xero needs reconnecting and resumes it after reconnection', async () => {
+    const reserved = await reserveOneEntry(
+      'Paused for Xero reconnection',
+      'FAFAFAFA-FAFA-4AFA-8AFA-FAFAFAFAFAFA',
+    )
+    const fake = new FakeXeroAccountingServer()
+    fake.setInvoiceSequence(900)
+    await payload.update({
+      collection: 'xero-connections',
+      id: connection.id,
+      data: { status: 'action-required' },
+      overrideAccess: true,
+    })
+    try {
+      await expect(
+        processInvoiceExport(ownerSession.req, reserved.exportID, { client: fake.client() }),
+      ).resolves.toEqual({ state: 'retry-wait' })
+      const [entry, paused] = await Promise.all([
+        payload.findByID({
+          collection: 'time-entries',
+          depth: 0,
+          id: reserved.entryID,
+          overrideAccess: true,
+        }),
+        payload.findByID({
+          collection: 'invoice-exports',
+          depth: 0,
+          id: reserved.exportID,
+          overrideAccess: true,
+        }),
+      ])
+      expect(entry).toMatchObject({ billingStatus: 'reserved' })
+      expect(paused).toMatchObject({
+        lastErrorCode: 'xero-reconnect-required',
+        state: 'retry-wait',
+      })
+      expect(Date.parse(paused.nextAttemptAt ?? '')).toBeGreaterThan(Date.now() + 60 * 60_000)
+      expect(fake.requests.filter((request) => request.operation === 'post')).toHaveLength(0)
+    } finally {
+      await payload.update({
+        collection: 'xero-connections',
+        id: connection.id,
+        data: { status: 'connected' },
+        overrideAccess: true,
+      })
+    }
+
+    const jobsModel = requireMongoModel(payload, 'payload-jobs')
+    const immediateJobs = { 'input.exportID': reserved.exportID, waitUntil: { $exists: false } }
+    const immediateBefore = await jobsModel.countDocuments(immediateJobs)
+    await expect(resumeExportsAwaitingReconnect(payload)).resolves.toBe(1)
+    await expect(jobsModel.countDocuments(immediateJobs)).resolves.toBe(immediateBefore + 1)
+    const resumed = await payload.findByID({
+      collection: 'invoice-exports',
+      depth: 0,
+      id: reserved.exportID,
+      overrideAccess: true,
+    })
+    expect(Date.parse(resumed.nextAttemptAt ?? '')).toBeLessThanOrEqual(Date.now())
+
+    await expect(
+      processInvoiceExport(ownerSession.req, reserved.exportID, {
+        client: fake.client(),
+        token: token(),
+      }),
+    ).resolves.toEqual({ state: 'succeeded' })
+  })
+
   it('recovers stale workers differently before and after the send boundary', async () => {
     const beforeSend = await reserveOneEntry(
       'Stale before send',
@@ -1263,5 +1338,98 @@ describe.sequential('Xero export and webhook recovery', () => {
         overrideAccess: true,
       }),
     ).resolves.toMatchObject({ failureCode: 'wrong-tenant', status: 'ignored' })
+  })
+
+  it('refuses a manual reconciliation while a reconcile worker holds a live lease', async () => {
+    const draft = await createSucceededDraft(
+      'Manual reconciliation lease guard',
+      'CACACACA-CACA-4ACA-8ACA-CACACACACAC1',
+      610,
+    )
+    const exports = requireMongoModel(payload, 'invoice-exports')
+    await exports.updateOne(
+      { _id: draft.exportID },
+      {
+        $set: {
+          processingLeaseExpiresAt: new Date(Date.now() + 60_000),
+          processingLeaseId: 'live-worker-lease',
+          state: 'reconciling',
+        },
+      },
+    )
+    await expect(
+      requestInvoiceReconciliation(ownerSession, { exportID: draft.exportID }),
+    ).rejects.toThrow(/already running/)
+    const leased = (await exports.findOne({ _id: draft.exportID }))?.toObject() as
+      Record<string, unknown> | undefined
+    expect(leased?.processingLeaseId).toBe('live-worker-lease')
+
+    await exports.updateOne(
+      { _id: draft.exportID },
+      { $set: { processingLeaseExpiresAt: new Date(Date.now() - 1_000) } },
+    )
+    const jobID = await requestInvoiceReconciliation(ownerSession, { exportID: draft.exportID })
+    const requeued = (await exports.findOne({ _id: draft.exportID }))?.toObject() as
+      Record<string, unknown> | undefined
+    expect(requeued).toMatchObject({
+      jobId: jobID,
+      processingLeaseId: null,
+      state: 'reconciling',
+    })
+    await payload.delete({ collection: 'payload-jobs', id: jobID, overrideAccess: true })
+  })
+
+  it('refuses to accept a deleted or voided Xero invoice as the export result', async () => {
+    const draft = await createSucceededDraft(
+      'Accept existing invoice status guard',
+      'CACACACA-CACA-4ACA-8ACA-CACACACACAC2',
+      620,
+    )
+    // Recreate the manual-review shape: the outcome is unknown, so the time is still reserved.
+    await payload.update({
+      collection: 'invoice-exports',
+      data: { state: 'manual-review' },
+      id: draft.exportID,
+      overrideAccess: true,
+    })
+    await requireMongoModel(payload, 'time-entries').updateOne(
+      { _id: draft.entryID },
+      { $set: { billingStatus: 'reserved', exportedAt: null } },
+    )
+    const invoice = draft.fake.invoice(draft.invoiceID)
+    if (!invoice) throw new Error('The fake Xero draft was not found.')
+    const accept = () =>
+      acceptExistingInvoice(
+        ownerSession,
+        {
+          exportID: draft.exportID,
+          invoiceID: draft.invoiceID,
+          reason: 'Accept the matching invoice found in Xero.',
+        },
+        { client: draft.fake.client(), token: token() },
+      )
+    for (const status of ['VOIDED', 'DELETED']) {
+      draft.fake.setInvoice({ ...invoice, Status: status })
+      await expect(accept()).rejects.toThrow(/only a live invoice can be accepted/)
+    }
+    await expect(
+      payload.findByID({
+        collection: 'invoice-exports',
+        depth: 0,
+        id: draft.exportID,
+        overrideAccess: true,
+      }),
+    ).resolves.toMatchObject({ state: 'manual-review' })
+
+    draft.fake.setInvoice({ ...invoice, Status: 'DRAFT' })
+    await accept()
+    await expect(
+      payload.findByID({
+        collection: 'invoice-exports',
+        depth: 0,
+        id: draft.exportID,
+        overrideAccess: true,
+      }),
+    ).resolves.toMatchObject({ state: 'succeeded', xeroInvoiceId: draft.invoiceID })
   })
 })

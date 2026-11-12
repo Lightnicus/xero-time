@@ -3,6 +3,7 @@
 import {
   createLocalReq,
   getPayload,
+  handleEndpoints,
   registerFirstUserOperation,
   type Payload,
   type PayloadRequest,
@@ -12,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { issueInvitation } from '@/lib/account-lifecycle/service'
 import type { AppSession } from '@/lib/member-app/session'
 import type { XeroIdentityClient } from '@/lib/xero/identity/client'
+import { EXTERNAL_SESSION_COOKIE } from '@/lib/xero/identity/constants'
 import { XERO_IDENTITY_ISSUER, type XeroIdentityClaims } from '@/lib/xero/identity/contracts'
 import {
   completeIdentityCallback,
@@ -129,6 +131,28 @@ const startFlow = async (
   if (!state) throw new Error('The identity authorization did not include state.')
   return { ...authorization, state }
 }
+
+const activeExternalSessions = async (userID: string) =>
+  (
+    await payload.count({
+      collection: 'external-auth-sessions',
+      overrideAccess: true,
+      where: { and: [{ user: { equals: userID } }, { status: { equals: 'active' } }] },
+    })
+  ).totalDocs
+
+const restRequest = (
+  path: string,
+  init: { body?: unknown; headers?: Record<string, string>; method: string },
+): Promise<Response> =>
+  handleEndpoints({
+    config,
+    request: new Request(`http://localhost:3000/api${path}`, {
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      headers: { 'Content-Type': 'application/json', ...init.headers },
+      method: init.method,
+    }),
+  })
 
 const callbackURL = (state: string): URL => {
   const url = new URL(identityConfig.redirectURI)
@@ -418,5 +442,201 @@ describe.sequential('Xero identity flow and trust separation', () => {
       where: { eventType: { equals: 'authentication.identity-recovered' } },
     })
     expect(recoveryAudit.docs).toHaveLength(1)
+  })
+
+  it('ends Xero sessions on Payload logout, password reset, and any password change', async () => {
+    const linkFlow = await startFlow('identity-link', {
+      recentlyReauthenticated: true,
+      session: memberSession,
+    })
+    const linked = await completeIdentityCallback(
+      payload,
+      {
+        browserBinding: linkFlow.browserBinding,
+        callbackURL: callbackURL(linkFlow.state),
+        currentSession: memberSession,
+      },
+      { client, config: identityConfig },
+    )
+    expect(await activeExternalSessions(memberID)).toBe(1)
+
+    // Payload Admin logs out through REST; the Xero cookie authenticates that request.
+    const logout = await restRequest('/users/logout', {
+      headers: { cookie: `${EXTERNAL_SESSION_COOKIE}=${linked.sessionToken}` },
+      method: 'POST',
+    })
+    expect(logout.status).toBe(200)
+    expect(logout.headers.getSetCookie()).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(new RegExp(`^${EXTERNAL_SESSION_COOKIE}=;.*Max-Age=0`)),
+      ]),
+    )
+    expect(await activeExternalSessions(memberID)).toBe(0)
+    const loggedOut = await payload.find({
+      collection: 'external-auth-sessions',
+      depth: 0,
+      overrideAccess: true,
+      where: { user: { equals: memberID } },
+      sort: '-updatedAt',
+      limit: 1,
+    })
+    expect(loggedOut.docs[0]).toMatchObject({ revocationReason: 'logout', status: 'revoked' })
+    const afterLogout = await restRequest('/users/me', {
+      headers: { cookie: `${EXTERNAL_SESSION_COOKIE}=${linked.sessionToken}` },
+      method: 'GET',
+    })
+    expect((await afterLogout.json()).user).toBeNull()
+
+    const signIn = async () => {
+      const flow = await startFlow('sign-in')
+      await completeIdentityCallback(
+        payload,
+        { browserBinding: flow.browserBinding, callbackURL: callbackURL(flow.state) },
+        { client, config: identityConfig },
+      )
+      expect(await activeExternalSessions(memberID)).toBe(1)
+    }
+
+    // Payload's own reset-password operation (REST or Local API) ends Xero sessions too.
+    await signIn()
+    const resetToken = await payload.forgotPassword({
+      collection: 'users',
+      data: { email: 'identity-invite@example.test' },
+      disableEmail: true,
+    })
+    await payload.resetPassword({
+      collection: 'users',
+      data: { password: PASSWORD, token: resetToken },
+      overrideAccess: true,
+    })
+    expect(await activeExternalSessions(memberID)).toBe(0)
+
+    // An owner setting another user's password ends that user's Payload and Xero sessions.
+    await signIn()
+    await payload.login({
+      collection: 'users',
+      data: { email: 'identity-invite@example.test', password: PASSWORD },
+    })
+    await payload.update({
+      collection: 'users',
+      data: { password: `${PASSWORD}-owner-set` },
+      depth: 0,
+      id: memberID,
+      overrideAccess: false,
+      req: ownerSession.req,
+    })
+    expect(await activeExternalSessions(memberID)).toBe(0)
+    const afterOwnerChange = await payload.findByID({
+      collection: 'users',
+      depth: 0,
+      id: memberID,
+      overrideAccess: true,
+      showHiddenFields: true,
+    })
+    expect(afterOwnerChange.sessions ?? []).toHaveLength(0)
+  })
+
+  it('rejects own password or email changes through the generic REST API', async () => {
+    const memberPassword = `${PASSWORD}-owner-set`
+    const login = await payload.login({
+      collection: 'users',
+      data: { email: 'identity-invite@example.test', password: memberPassword },
+    })
+    if (!login.token) throw new Error('The member login did not return a token.')
+    const auth = { Authorization: `JWT ${login.token}` }
+
+    const passwordChange = await restRequest(`/users/${memberID}`, {
+      body: { password: 'taken-over-password-123' },
+      headers: auth,
+      method: 'PATCH',
+    })
+    expect(passwordChange.status).toBe(400)
+    const emailChange = await restRequest(`/users/${memberID}`, {
+      body: { email: 'attacker@example.test' },
+      headers: auth,
+      method: 'PATCH',
+    })
+    expect(emailChange.status).toBe(400)
+    const profileChange = await restRequest(`/users/${memberID}`, {
+      body: { displayName: 'REST Profile Edit', email: 'Identity-Invite@example.test' },
+      headers: auth,
+      method: 'PATCH',
+    })
+    expect(profileChange.status).toBe(200)
+
+    const stored = await payload.findByID({
+      collection: 'users',
+      depth: 0,
+      id: memberID,
+      overrideAccess: true,
+    })
+    expect(stored).toMatchObject({
+      displayName: 'REST Profile Edit',
+      email: 'identity-invite@example.test',
+    })
+    // The old password still works, so the rejected REST change did not save a hash.
+    await expect(
+      payload.login({
+        collection: 'users',
+        data: { email: 'identity-invite@example.test', password: memberPassword },
+      }),
+    ).resolves.toMatchObject({ user: { id: memberID } })
+  })
+
+  it('applies the Xero rollout roles to invitation acceptance at start and callback', async () => {
+    const rolloutClaims: XeroIdentityClaims = {
+      displayName: 'Rollout Member',
+      email: 'rollout-member@example.test',
+      issuer: XERO_IDENTITY_ISSUER,
+      subject: 'identity-subject-rollout',
+    }
+    claims = rolloutClaims
+    const invitation = await issueInvitation(ownerSession, {
+      displayName: 'Rollout Member',
+      email: rolloutClaims.email,
+      role: 'member',
+      timezone: 'Pacific/Auckland',
+    })
+    const rolloutToken = new URL(invitation.setupURL).searchParams.get('token') ?? ''
+    const setRolloutRoles = (roles: Array<'admin' | 'biller' | 'member' | 'owner'>) =>
+      payload.updateGlobal({
+        slug: 'authentication-settings',
+        data: { xeroIdentityRolloutRoles: roles },
+        overrideAccess: false,
+        req: ownerSession.req,
+      })
+    const usersBefore = (await payload.count({ collection: 'users', overrideAccess: true }))
+      .totalDocs
+
+    try {
+      await setRolloutRoles(['owner', 'admin'])
+      await expect(
+        startFlow('invite-acceptance', { invitationToken: rolloutToken }),
+      ).rejects.toMatchObject({ code: 'rollout-restricted' })
+
+      // A rollout narrowed after the flow started is enforced again at the callback.
+      await setRolloutRoles(['owner', 'admin', 'biller', 'member'])
+      const flow = await startFlow('invite-acceptance', { invitationToken: rolloutToken })
+      await setRolloutRoles(['owner', 'admin'])
+      await expect(
+        completeIdentityCallback(
+          payload,
+          { browserBinding: flow.browserBinding, callbackURL: callbackURL(flow.state) },
+          { client, config: identityConfig },
+        ),
+      ).rejects.toMatchObject({ code: 'rollout-restricted' })
+      expect((await payload.count({ collection: 'users', overrideAccess: true })).totalDocs).toBe(
+        usersBefore,
+      )
+      const pending = await payload.find({
+        collection: 'invitations',
+        depth: 0,
+        overrideAccess: true,
+        where: { email: { equals: rolloutClaims.email } },
+      })
+      expect(pending.docs[0]?.status).toBe('pending')
+    } finally {
+      await setRolloutRoles(['owner', 'admin', 'biller', 'member'])
+    }
   })
 })

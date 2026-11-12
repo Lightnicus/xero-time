@@ -23,6 +23,8 @@ export class AccountingIntegrationError extends Error {
   correlationID?: string
   code: string
   rateLimitRemaining?: number
+  /** The stored connection cannot be used until an owner or admin reconnects Xero. */
+  reconnectRequired: boolean
   requestMayHaveBeenSent: boolean
   retryAfterSeconds?: number
   retryable: boolean
@@ -35,6 +37,7 @@ export class AccountingIntegrationError extends Error {
       cause?: unknown
       correlationID?: string
       rateLimitRemaining?: number
+      reconnectRequired?: boolean
       requestMayHaveBeenSent?: boolean
       retryAfterSeconds?: number
       retryable?: boolean
@@ -46,6 +49,7 @@ export class AccountingIntegrationError extends Error {
     this.code = code
     this.correlationID = options.correlationID
     this.rateLimitRemaining = options.rateLimitRemaining
+    this.reconnectRequired = options.reconnectRequired ?? false
     this.requestMayHaveBeenSent = options.requestMayHaveBeenSent ?? false
     this.retryAfterSeconds = options.retryAfterSeconds
     this.retryable = options.retryable ?? false

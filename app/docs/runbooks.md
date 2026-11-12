@@ -14,7 +14,7 @@ Use password reset through the verified sender. If the only owner's mailbox is i
 
 ## Accounting secret, token, disconnect, or authorizer departure
 
-Pause new exports and processing. Resolve `processing`, `reconciling`, `action-required`, or `manual-review` cases first. For token failure, use health/reconnect against the pinned tenant. For departure, use authorizer handover with password, reason, and exact same-tenant confirmation; the old grant remains until validation succeeds. For compromise, revoke remotely, protected-disconnect locally, rotate client/encryption material as applicable, and reconnect.
+Pause new exports and processing. Resolve `processing`, `reconciling`, `action-required`, or `manual-review` cases first. For token failure, use health/reconnect against the pinned tenant: Settings → Xero accounting shows the cause and steps, exports that hit the failure are parked as `retry-wait`/`reconciling` with `lastErrorCode: xero-reconnect-required` (time stays reserved), and a successful reconnect re-queues them immediately (they also recheck every 6 hours). If the original authorizer has lost access, reconnect with "different Xero user" ticked; while the connection is broken this handover is allowed even with `reconciling` or `manual-review` exports, because those cannot settle without Xero. For departure, use authorizer handover with password, reason, and exact same-tenant confirmation; the old grant remains until validation succeeds. For compromise, revoke remotely, protected-disconnect locally, rotate client/encryption material as applicable, and reconnect.
 
 ## Webhook failure
 

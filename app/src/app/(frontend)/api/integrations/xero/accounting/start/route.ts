@@ -12,6 +12,7 @@ import {
 } from '@/lib/xero/accounting/route-helpers'
 import {
   createAccountingAuthorization,
+  createAccountingHandoverAuthorization,
   verifyAccountingPassword,
 } from '@/lib/xero/accounting/service'
 
@@ -28,13 +29,25 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   try {
-    const formData = await guardAccountingCommand(request, session, 'start', ['password'])
+    const formData = await guardAccountingCommand(request, session, 'start', [
+      'differentAuthorizer',
+      'password',
+      'reason',
+    ])
     const password = formData.get('password')
+    const reason = formData.get('reason')
     const confirmedToken = await verifyAccountingPassword(
       session,
       typeof password === 'string' ? password : '',
     )
-    const authorization = await createAccountingAuthorization(session)
+    // Reconnecting as a different Xero user is an authorizer handover for the pinned organisation.
+    const authorization =
+      formData.get('differentAuthorizer') === 'yes'
+        ? await createAccountingHandoverAuthorization(
+            session,
+            typeof reason === 'string' ? reason : '',
+          )
+        : await createAccountingAuthorization(session)
     const response = NextResponse.redirect(authorization.authorizationURL, 303)
     setAccountingFlowCookie(response, authorization.browserBinding)
     setReauthenticatedPayloadCookie(response, session, confirmedToken)

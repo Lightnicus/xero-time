@@ -558,14 +558,9 @@ export async function cancelInvoiceExport(
   if (attempt.requestMayHaveBeenSent || attempt.requestStartedAt) {
     throw new Error('Cancellation is blocked because a Xero request may already have started.')
   }
-  if (document.jobId && !document.jobId.startsWith('attaching:')) {
-    await session.payload.jobs.cancelByID({
-      id: document.jobId,
-      overrideAccess: true,
-      req: session.req,
-    })
-  }
-  await withPayloadTransaction(
+  // The job is cancelled only after the transaction commits: cancelling first would strand an
+  // export whose state changed meanwhile (for example, a send started) without its job.
+  const cancelledJobID = await withPayloadTransaction(
     session.payload,
     async (req) => {
       const current = await session.payload.findByID({
@@ -665,9 +660,26 @@ export async function cancelInvoiceExport(
         },
         req,
       )
+      return current.jobId ?? null
     },
     { user: session.user },
   )
+  if (cancelledJobID && !cancelledJobID.startsWith('attaching:')) {
+    try {
+      await session.payload.jobs.cancelByID({
+        id: cancelledJobID,
+        overrideAccess: true,
+        req: session.req,
+      })
+    } catch (error) {
+      // The export is already cancelled; a job that still runs finds it cancelled and stops.
+      session.payload.logger.warn({
+        err: error,
+        exportID: input.exportID,
+        msg: 'The export was cancelled but its queued job could not be cancelled.',
+      })
+    }
+  }
 }
 
 type QueueTask = (args: {
@@ -697,19 +709,49 @@ export async function requestInvoiceReconciliation(
   if (!['action-required', 'manual-review', 'reconciling'].includes(document.state)) {
     throw new Error('This export is not eligible for reconciliation.')
   }
-  await session.payload.update({
-    collection: 'invoice-exports',
-    id: input.exportID,
-    data: {
-      nextAttemptAt: new Date().toISOString(),
-      processingLeaseExpiresAt: null,
-      processingLeaseId: null,
-      state: 'reconciling',
-      stateHistory: history(document, 'reconciling', String(session.user.id), { manual: true }),
+  const reconcilingNow = (): Error =>
+    new Error('A reconciliation is already running for this export. Wait for it to finish.')
+  if (
+    document.state === 'reconciling' &&
+    document.processingLeaseExpiresAt &&
+    new Date(document.processingLeaseExpiresAt).getTime() > Date.now()
+  ) {
+    throw reconcilingNow()
+  }
+  // Conditional claim: the state must be unchanged and no reconcile worker may hold a live lease,
+  // so clearing the lease can never let a second worker run alongside the first.
+  const now = new Date()
+  const claimed = await requireMongoModel(session.payload, 'invoice-exports').findOneAndUpdate(
+    {
+      _id: input.exportID,
+      state: document.state,
+      ...(document.state === 'reconciling'
+        ? {
+            $or: [
+              { processingLeaseExpiresAt: null },
+              { processingLeaseExpiresAt: { $exists: false } },
+              { processingLeaseExpiresAt: { $lte: now } },
+            ],
+          }
+        : {}),
     },
-    overrideAccess: true,
-    req: session.req,
-  })
+    {
+      $set: {
+        nextAttemptAt: now,
+        processingLeaseExpiresAt: null,
+        processingLeaseId: null,
+        state: 'reconciling',
+        stateHistory: history(document, 'reconciling', String(session.user.id), { manual: true }),
+        updatedAt: now,
+      },
+    },
+    { new: true },
+  )
+  if (!claimed) {
+    throw document.state === 'reconciling'
+      ? reconcilingNow()
+      : new Error('The export changed while reconciliation was requested. Refresh and try again.')
+  }
   const job = await (session.payload.jobs.queue as unknown as QueueTask)({
     input: { exportID: input.exportID },
     meta: { exportID: input.exportID, reason: 'manual-reconciliation' },
@@ -829,7 +871,10 @@ export async function authorizeReplacementAttempt(
 export async function acceptExistingInvoice(
   session: AppSession,
   input: { exportID: string; invoiceID: string; reason: string },
-  overrides: { client?: XeroAccountingClient } = {},
+  overrides: {
+    client?: XeroAccountingClient
+    token?: Awaited<ReturnType<typeof getValidAccountingAccessToken>>
+  } = {},
 ): Promise<void> {
   assertOwnerAdmin(session)
   const acceptanceReason = reason(input.reason)
@@ -847,12 +892,14 @@ export async function acceptExistingInvoice(
   const runtime = overrides.client ? null : await resolveAccountingRuntime(session)
   const client = overrides.client ?? runtime?.client
   if (!client) throw new Error('Xero accounting is not configured.')
-  const token = await getValidAccountingAccessToken(
-    session,
-    runtime ?? {
-      client,
-    },
-  )
+  const token =
+    overrides.token ??
+    (await getValidAccountingAccessToken(
+      session,
+      runtime ?? {
+        client,
+      },
+    ))
   if (!token.connection.tenantId) throw new Error('The Xero tenant is unavailable.')
   const response = await client.accountingGet(
     token.accessToken,
@@ -874,6 +921,11 @@ export async function acceptExistingInvoice(
       where: { invoiceExport: { equals: input.exportID } },
     })
   ).docs
+  if (remote && (remote.status === 'DELETED' || remote.status === 'VOIDED')) {
+    throw new Error(
+      `The selected Xero invoice is ${remote.status.toLowerCase()}; only a live invoice can be accepted.`,
+    )
+  }
   if (!remote || !materiallyMatches(document, remote, allocations))
     throw new Error(
       'The selected Xero invoice does not exactly match the immutable export snapshot.',

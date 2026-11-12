@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { AppSession } from '@/lib/member-app/session'
 import type { XeroAccountingClient } from '@/lib/xero/accounting/client'
 import {
+  AccountingIntegrationError,
   REQUIRED_ACCOUNTING_SCOPES,
   type XeroConnectionCandidate,
   type XeroTokenSet,
@@ -14,6 +15,7 @@ import {
   completeAccountingCallback,
   createAccountingAuthorization,
   createAccountingHandoverAuthorization,
+  getValidAccountingAccessToken,
 } from '@/lib/xero/accounting/service'
 import type { AccountingAccessTokenMetadata } from '@/lib/xero/accounting/token'
 import type { XeroConnection } from '@/payload-types'
@@ -354,5 +356,96 @@ describe.sequential('Xero accounting authorizer handover', () => {
       tokenVersion: (current.tokenVersion ?? 0) + 1,
     })
     expect(reconnect.revokeRefreshToken).toHaveBeenCalledWith('replacement-refresh-token')
+  })
+  it('marks the connection for reconnection when Xero refuses the saved refresh token', async () => {
+    const current = await readConnection()
+    await payload.update({
+      collection: 'xero-connections',
+      id: current.id,
+      data: { accessTokenExpiresAt: new Date(0).toISOString() },
+      overrideAccess: true,
+      req: session.req,
+    })
+    const refused = provider({
+      accessToken: 'unused-access-token',
+      refreshToken: 'unused-refresh-token',
+      xeroUserId: current.authorizingXeroUserId ?? '',
+    })
+    refused.client.refreshTokens = vi.fn(async () => {
+      throw new AccountingIntegrationError(
+        'token-refresh-invalid-grant',
+        'Xero rejected the accounting request.',
+        { status: 400 },
+      )
+    })
+
+    await expect(
+      getValidAccountingAccessToken(session, {
+        client: refused.client,
+        config: accountingConfig,
+        validateAccessToken: refused.validateAccessToken,
+      }),
+    ).rejects.toMatchObject({ code: 'token-refresh-invalid-grant', reconnectRequired: true })
+    const broken = await readConnection()
+    expect(broken).toMatchObject({
+      accessTokenEnvelope: null,
+      lastErrorCode: 'token-refresh-invalid-grant',
+      refreshTokenEnvelope: null,
+      status: 'action-required',
+      tenantId: TENANT_ID,
+    })
+    expect(broken.lastErrorMessage).toContain('Reconnect Xero')
+
+    await expect(
+      getValidAccountingAccessToken(session, {
+        client: refused.client,
+        config: accountingConfig,
+      }),
+    ).rejects.toMatchObject({ code: 'reconnect-required', reconnectRequired: true })
+  })
+
+  it('lets a different Xero user recover a broken connection through an explicit handover', async () => {
+    const broken = await readConnection()
+    expect(broken.status).toBe('action-required')
+    const replacementUser = '66666666-6666-4666-8666-666666666666'
+
+    // A plain reconnect by someone else still requires the explicit handover.
+    const plain = await createAccountingAuthorization(session, { config: accountingConfig })
+    const plainProvider = provider({
+      accessToken: 'plain-access-token',
+      refreshToken: 'plain-refresh-token',
+      xeroUserId: replacementUser,
+    })
+    await expect(
+      completeAccountingCallback(session, callbackInput(plain, 'plain-code'), {
+        client: plainProvider.client,
+        config: accountingConfig,
+        validateAccessToken: plainProvider.validateAccessToken,
+      }),
+    ).rejects.toMatchObject({ code: 'handover-required' })
+
+    const authorization = await createAccountingHandoverAuthorization(
+      session,
+      'The original Xero user left; the new finance lead takes over.',
+      { config: accountingConfig },
+    )
+    const recovery = provider({
+      accessToken: 'recovery-access-token',
+      refreshToken: 'recovery-refresh-token',
+      xeroUserId: replacementUser,
+    })
+    await expect(
+      completeAccountingCallback(session, callbackInput(authorization, 'recovery-code'), {
+        client: recovery.client,
+        config: accountingConfig,
+        validateAccessToken: recovery.validateAccessToken,
+      }),
+    ).resolves.toEqual({ status: 'connected' })
+    expect(await readConnection()).toMatchObject({
+      authorizingXeroUserId: replacementUser,
+      lastErrorCode: null,
+      status: 'connected',
+      tenantId: TENANT_ID,
+    })
   })
 })

@@ -36,6 +36,7 @@ export async function enqueueStaleAccountingHealthCheck(
 
   const pending = await requireMongoModel(payload, 'payload-jobs').findOne({
     completedAt: { $in: [null, undefined] },
+    hasError: { $ne: true },
     queue: 'xero',
     taskSlug: 'maintain-xero-accounting',
   })

@@ -155,9 +155,19 @@ const assertFeatureEnabled = (
   }
 }
 
-const assertRolloutRole = (settings: AuthenticationSetting, user: User): void => {
-  const roles = settings.xeroIdentityRolloutRoles ?? []
-  if (!user.role || !roles.includes(user.role)) {
+type RolloutRole = NonNullable<AuthenticationSetting['xeroIdentityRolloutRoles']>[number]
+
+const roleIsInRollout = (
+  settings: Pick<AuthenticationSetting, 'xeroIdentityRolloutRoles'>,
+  role: null | RolloutRole | undefined,
+): boolean => Boolean(role && (settings.xeroIdentityRolloutRoles ?? []).includes(role))
+
+/** Applies the rollout to a local user or to the role an invitation will assign. */
+const assertRolloutRole = (
+  settings: AuthenticationSetting,
+  role: null | RolloutRole | undefined,
+): void => {
+  if (!roleIsInRollout(settings, role)) {
     throw new IdentityIntegrationError(
       'rollout-restricted',
       'Xero identity sign-in is not enabled for this account.',
@@ -433,7 +443,7 @@ const completeReturningSignIn = async (
       throw new IdentityIntegrationError('unknown-identity', 'The local account is unavailable.')
     }
     const user = await loadUser(payload, userID, req)
-    assertRolloutRole(settings, user)
+    assertRolloutRole(settings, user.role)
 
     const updatedIdentity = await payload.update({
       collection: 'auth-identities',
@@ -496,7 +506,7 @@ const completeLink = async (
 
   return withPayloadTransaction(payload, async (req) => {
     const user = await loadUser(payload, currentSession.user.id, req)
-    assertRolloutRole(settings, user)
+    assertRolloutRole(settings, user.role)
     const identityByClaims = await findIdentityByClaims(payload, claims, req)
     const userIdentity = await findUserIdentity(payload, String(user.id), req)
     const canReactivate =
@@ -608,6 +618,8 @@ const completeInvitation = async (
           'The Xero identity does not match this invitation.',
         )
       }
+      // Settings are re-read at callback time, so a rollout narrowed mid-flow still applies.
+      assertRolloutRole(settings, invitation.role)
       if (await findIdentityByClaims(payload, claims, req)) {
         throw new IdentityIntegrationError(
           'identity-collision',
@@ -729,12 +741,14 @@ export async function createIdentityAuthorization(
     ) {
       throw new IdentityIntegrationError('authentication-required', 'Sign in before linking Xero.')
     }
-    assertRolloutRole(settings, input.session.user)
+    assertRolloutRole(settings, input.session.user.role)
   } else if (input.purpose === 'invite-acceptance') {
     invitation = await findUsableInvitation(payload, input.invitationToken ?? '')
     if (!invitation) {
       throw new IdentityIntegrationError('invalid-invitation', 'The invitation is unavailable.')
     }
+    // A user created outside the rollout could not sign in with Xero afterwards.
+    assertRolloutRole(settings, invitation.role)
   }
 
   const values = await resolved.createFlowValues()
@@ -965,7 +979,8 @@ const revokeSessionDocument = async (
 
 export async function revokeCurrentExternalSession(
   payload: Payload,
-  rawToken: string | undefined,
+  rawToken: null | string | undefined,
+  req?: PayloadRequest,
 ): Promise<void> {
   if (!rawToken || rawToken.length > 500) return
   const result = await payload.find({
@@ -974,11 +989,12 @@ export async function revokeCurrentExternalSession(
     limit: 1,
     overrideAccess: true,
     pagination: false,
+    req,
     showHiddenFields: true,
     where: { tokenHash: { equals: hashOpaqueValue(rawToken) } },
   })
   const session = result.docs[0]
-  if (session?.status === 'active') await revokeSessionDocument(payload, session, 'logout')
+  if (session?.status === 'active') await revokeSessionDocument(payload, session, 'logout', req)
 }
 
 export async function revokeExternalSession(session: AppSession, sessionID: string): Promise<void> {
@@ -1257,6 +1273,7 @@ export const identityFeatureView = async (
   inviteAcceptanceEnabled: boolean
   linkingEnabled: boolean
   loginEnabled: boolean
+  rolloutRoles: RolloutRole[]
 }> => {
   const settings = await settingsFor(payload)
   return {
@@ -1264,6 +1281,7 @@ export const identityFeatureView = async (
     inviteAcceptanceEnabled: Boolean(settings.xeroIdentityInviteAcceptanceEnabled),
     linkingEnabled: Boolean(settings.xeroIdentityLinkingEnabled),
     loginEnabled: Boolean(settings.xeroIdentityLoginEnabled),
+    rolloutRoles: [...(settings.xeroIdentityRolloutRoles ?? [])],
   }
 }
 

@@ -18,11 +18,16 @@ import { OWNER_TRANSITION_CONTEXT } from '../lib/account-lifecycle/context'
 import { MIN_PASSWORD_LENGTH } from '../lib/account-lifecycle/password-policy'
 import { isRecord, validateIanaTimezone } from '../lib/domain/validation'
 import { environment } from '../lib/env'
-import { xeroExternalSessionStrategy } from '../lib/xero/identity/strategy'
+import {
+  expiredExternalSessionCookieHeader,
+  readExternalSessionCookie,
+  xeroExternalSessionStrategy,
+} from '../lib/xero/identity/strategy'
 
 import type {
   CollectionAfterOperationHook,
   CollectionAfterChangeHook,
+  CollectionAfterLogoutHook,
   CollectionAfterReadHook,
   CollectionBeforeChangeHook,
   CollectionBeforeLoginHook,
@@ -53,6 +58,97 @@ const revokeSessionsWhenDeactivated: CollectionBeforeChangeHook = ({ data, opera
     resetPasswordToken: null,
     sessions: [],
   }
+}
+
+const normalizedEmail = (value: unknown): null | string =>
+  typeof value === 'string' ? value.trim().toLowerCase() : null
+
+/**
+ * Payload's generic REST/GraphQL update accepts `password` and `email` on the caller's own
+ * record with no current-password check, session revocation, or re-verification. The app's
+ * own flows (password change, reset, invitation acceptance, seeding) use the Local API, so
+ * only external API requests by the account holder are rejected here. Owners and admins
+ * editing other accounts through Payload Admin are unaffected.
+ */
+export const rejectGenericOwnCredentialChanges: CollectionBeforeChangeHook = ({
+  data,
+  operation,
+  originalDoc,
+  req,
+}) => {
+  if (operation !== 'update' || req.payloadAPI === 'local') return data
+  if (!req.user || !originalDoc || String(req.user.id) !== String(originalDoc.id)) return data
+
+  const errors: Array<{ message: string; path: string }> = []
+  // Matches Payload's own test for whether an update saves a new password.
+  if (data.password) {
+    errors.push({
+      message: 'Change your password from your profile page.',
+      path: 'password',
+    })
+  }
+  if (
+    data.email !== undefined &&
+    normalizedEmail(data.email) !== normalizedEmail(originalDoc.email)
+  ) {
+    errors.push({
+      message: 'Your own email address cannot be changed here.',
+      path: 'email',
+    })
+  }
+  if (errors.length > 0) throw new ValidationError({ collection: 'users', errors, req })
+  return data
+}
+
+const PASSWORD_CHANGED_CONTEXT = 'usersPasswordChangedIDs'
+
+const passwordChangedIDs = (context: unknown): string[] => {
+  const value = isRecord(context) ? context[PASSWORD_CHANGED_CONTEXT] : undefined
+  return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : []
+}
+
+/** Any password change through an update ends every Payload session for that account. */
+const revokeSessionsWhenPasswordChanges: CollectionBeforeChangeHook = ({
+  data,
+  operation,
+  originalDoc,
+  req,
+}) => {
+  if (operation !== 'update' || !data.password || !originalDoc) return data
+  req.context = {
+    ...req.context,
+    [PASSWORD_CHANGED_CONTEXT]: [...passwordChangedIDs(req.context), String(originalDoc.id)],
+  }
+  return { ...data, sessions: [] }
+}
+
+const revokeExternalSessionsAfterPasswordChange: CollectionAfterChangeHook = async ({
+  doc,
+  operation,
+  req,
+}) => {
+  if (operation !== 'update') return doc
+  const changed = passwordChangedIDs(req.context)
+  if (!changed.includes(String(doc.id))) return doc
+  req.context[PASSWORD_CHANGED_CONTEXT] = changed.filter((id) => id !== String(doc.id))
+  const { revokeAllExternalSessionsForUser } = await import('@/lib/xero/identity/service')
+  await revokeAllExternalSessionsForUser(req.payload, doc.id, 'password-changed', req)
+  return doc
+}
+
+/**
+ * Payload's logout (used by Payload Admin) removes only the JWT session, while the Xero
+ * session strategy authenticates first from its own cookie. End that session as well and
+ * expire its cookie on the REST response; the app's own logout action already does both.
+ */
+const revokeExternalSessionOnLogout: CollectionAfterLogoutHook = async ({ req }) => {
+  const rawToken = readExternalSessionCookie(req.headers)
+  if (!rawToken) return
+  const { revokeCurrentExternalSession } = await import('@/lib/xero/identity/service')
+  await revokeCurrentExternalSession(req.payload, rawToken, req)
+  const responseHeaders = req.responseHeaders ?? new Headers()
+  responseHeaders.append('Set-Cookie', expiredExternalSessionCookieHeader())
+  req.responseHeaders = responseHeaders
 }
 
 const revokeExternalSessionsWhenDeactivated: CollectionAfterChangeHook = async ({
@@ -251,6 +347,9 @@ const revokeOtherSessionsAfterPasswordReset: CollectionAfterOperationHook = asyn
     overrideAccess: true,
     req,
   })
+  // A reset is a credential recovery: Xero sign-in sessions must end with the old password's.
+  const { revokeAllExternalSessionsForUser } = await import('@/lib/xero/identity/service')
+  await revokeAllExternalSessionsForUser(req.payload, userID, 'password-reset', req)
   return result
 }
 
@@ -422,10 +521,19 @@ export const Users: CollectionConfig = {
     },
   ],
   hooks: {
-    afterChange: [revokeExternalSessionsWhenDeactivated, auditUserAdministration],
+    afterChange: [
+      revokeExternalSessionsWhenDeactivated,
+      revokeExternalSessionsAfterPasswordChange,
+      auditUserAdministration,
+    ],
+    afterLogout: [revokeExternalSessionOnLogout],
     afterOperation: [revokeOtherSessionsAfterPasswordReset],
     afterRead: [addSafeLoginDiagnostics],
-    beforeChange: [revokeSessionsWhenDeactivated],
+    beforeChange: [
+      rejectGenericOwnCredentialChanges,
+      revokeSessionsWhenDeactivated,
+      revokeSessionsWhenPasswordChanges,
+    ],
     beforeLogin: [rejectInactiveLogin],
     beforeOperation: [enforcePasswordPolicy],
     beforeValidate: [bootstrapFirstOwner],

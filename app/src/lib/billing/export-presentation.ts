@@ -1,3 +1,4 @@
+import { XERO_RECONNECT_EXPORT_CODE } from '@/lib/xero/accounting/recovery'
 import type { InvoiceExport } from '@/payload-types'
 
 const EXPORT_STATE_LABELS: Record<InvoiceExport['state'], string> = {
@@ -22,8 +23,19 @@ const XERO_INVOICE_STATUS_LABELS: Record<string, string> = {
   VOIDED: 'Voided',
 }
 
-export const exportStateLabel = (state: InvoiceExport['state']): string =>
-  EXPORT_STATE_LABELS[state]
+export const isAwaitingXeroReconnect = (
+  document: Pick<InvoiceExport, 'lastErrorCode' | 'state'>,
+): boolean =>
+  document.lastErrorCode === XERO_RECONNECT_EXPORT_CODE &&
+  (document.state === 'retry-wait' || document.state === 'reconciling')
+
+export const exportStateLabel = (
+  state: InvoiceExport['state'],
+  lastErrorCode?: string | null,
+): string =>
+  isAwaitingXeroReconnect({ lastErrorCode, state })
+    ? 'Waiting for Xero'
+    : EXPORT_STATE_LABELS[state]
 
 export const xeroInvoiceStatusLabel = (status: string | null | undefined): string =>
   status ? (XERO_INVOICE_STATUS_LABELS[status] ?? status) : 'Not yet known'

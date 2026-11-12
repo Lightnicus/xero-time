@@ -331,6 +331,9 @@ export async function getBillingEligibility(
   })
   const connection = connectionResult.docs[0] as unknown as Record<string, unknown> | undefined
   const tenantID = connection?.status === 'connected' ? stringValue(connection.tenantId, 100) : ''
+  // A pinned organisation whose connection stopped working needs a reconnect, not a first connect.
+  const xeroReconnectRequired =
+    connection?.status === 'action-required' && Boolean(stringValue(connection.tenantId, 100))
   const references = await referenceMaps(session, tenantID || null)
   const settingsRecord = settingsDocument as unknown as Record<string, unknown>
   const settings = billingSettingsSnapshot(settingsRecord)
@@ -473,7 +476,13 @@ export async function getBillingEligibility(
       reasons.push(blocker('stale-source-data', 'The source user is unavailable.'))
 
     const contactID = stringValue(customer?.xeroContactId, 100)
-    reasons.push(...xeroConnectionBlockers(tenantID || null, references.capabilityAvailable))
+    reasons.push(
+      ...xeroConnectionBlockers(
+        tenantID || null,
+        references.capabilityAvailable,
+        xeroReconnectRequired,
+      ),
+    )
     if (!contactID || customer?.xeroMappingStatus === 'unmapped') {
       reasons.push(
         blocker(

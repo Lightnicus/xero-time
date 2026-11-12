@@ -9,6 +9,11 @@ import { requireMongoModel } from '@/lib/payload/mongo'
 import type { XeroAccountingClient } from '@/lib/xero/accounting/client'
 import { AccountingIntegrationError } from '@/lib/xero/accounting/contracts'
 import {
+  XERO_RECONNECT_EXPORT_CODE,
+  XERO_RECONNECT_EXPORT_MESSAGE,
+  XERO_RECONNECT_RECHECK_SECONDS,
+} from '@/lib/xero/accounting/recovery'
+import {
   createAccountingSystemSession,
   getValidAccountingAccessToken,
   resolveAccountingRuntime,
@@ -355,8 +360,9 @@ const retryReconciliation = async (
   document: InvoiceExport,
   code: string,
   message: string,
+  delaySeconds = 60,
 ): Promise<void> => {
-  const next = await queue(payload, String(document.id), 'reconcile-xero-invoice', 60)
+  const next = await queue(payload, String(document.id), 'reconcile-xero-invoice', delaySeconds)
   await payload.update({
     collection: 'invoice-exports',
     id: document.id,
@@ -448,6 +454,9 @@ export async function reconcileInvoiceExport(
           { unitdp: '4' },
         )
       : await client.accountingGet(token.accessToken, token.connection.tenantId, 'Invoices', {
+          // Xero only includes line items in an invoice list when the request is paged, and
+          // the snapshot comparison needs them.
+          page: '1',
           unitdp: '4',
           where: `Reference=="${document.applicationReference.replaceAll('"', '\\"')}"`,
         })
@@ -552,6 +561,17 @@ export async function reconcileInvoiceExport(
             'Xero reconciliation is temporarily unavailable.',
             { cause: unknownError, retryable: true },
           )
+    if (error.reconnectRequired) {
+      await retryReconciliation(
+        payload,
+        req,
+        document,
+        XERO_RECONNECT_EXPORT_CODE,
+        XERO_RECONNECT_EXPORT_MESSAGE,
+        XERO_RECONNECT_RECHECK_SECONDS,
+      )
+      return { state: 'reconciling' }
+    }
     if (error.retryable || error.status === 429 || (error.status && error.status >= 500)) {
       await retryReconciliation(payload, req, document, error.code, error.message)
       return { state: 'reconciling' }

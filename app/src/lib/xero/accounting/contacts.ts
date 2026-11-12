@@ -516,16 +516,23 @@ export async function refreshCustomerContact(
       req: session.req,
     })
   } catch (error) {
-    await session.payload.update({
-      collection: 'customers',
-      id: customer.id,
-      data: {
-        xeroLastValidatedAt: new Date().toISOString(),
-        xeroMappingStatus: 'invalid',
-      },
-      overrideAccess: true,
-      req: session.req,
-    })
+    // Only Xero saying the contact is gone invalidates the mapping. A timeout, rate limit or
+    // broken connection says nothing about the contact and must not block billing for it.
+    const contactMissing =
+      error instanceof AccountingIntegrationError &&
+      (error.code === 'contact-not-found' || error.status === 404)
+    if (contactMissing) {
+      await session.payload.update({
+        collection: 'customers',
+        id: customer.id,
+        data: {
+          xeroLastValidatedAt: new Date().toISOString(),
+          xeroMappingStatus: 'invalid',
+        },
+        overrideAccess: true,
+        req: session.req,
+      })
+    }
     throw error
   }
 }

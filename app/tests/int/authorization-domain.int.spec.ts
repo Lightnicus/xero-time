@@ -1737,6 +1737,34 @@ describe.sequential('Payload authorization and domain integration', () => {
     ).rejects.toMatchObject({ status: 400 })
   })
 
+  it('lets an owner assign time only to users whose role logs time', async () => {
+    const assigned = {
+      description: 'Assigned by the owner',
+      enteredHours: 1,
+      enteredMinutes: 0,
+      inputMode: 'duration',
+      project: project.id,
+      timezone: 'Pacific/Auckland',
+      workDate: '2026-07-19',
+    }
+
+    await expect(
+      createDocument(
+        'time-entries',
+        { ...assigned, owner: biller.id },
+        { overrideAccess: false, req: ownerReq },
+      ),
+    ).rejects.toMatchObject({ status: 400 })
+
+    const adminEntry = await createDocument<TestTimeEntry>(
+      'time-entries',
+      { ...assigned, owner: admin.id },
+      { overrideAccess: false, req: ownerReq },
+    )
+    expect(relationshipID(adminEntry.owner)).toBe(admin.id)
+    await payload.delete({ collection: 'time-entries', id: adminEntry.id, overrideAccess: true })
+  })
+
   it('prevents generic update or deletion after an entry is reserved', async () => {
     await expect(
       updateDocument(

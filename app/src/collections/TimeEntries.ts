@@ -81,8 +81,9 @@ const activeOrCurrentTimeRelationship =
     }
   }
 
+// Only roles that log time (access-matrix.md: member, admin, owner; never biller) may own an entry.
 const activeOrCurrentOwner = activeOrCurrentTimeRelationship('owner', {
-  active: { equals: true },
+  and: [{ active: { equals: true } }, { role: { in: ['owner', 'admin', 'member'] } }],
 })
 const activeOrCurrentProject = activeOrCurrentTimeRelationship('project', {
   status: { equals: 'active' },
