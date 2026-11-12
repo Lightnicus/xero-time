@@ -22,7 +22,6 @@ export default defineConfig({
         'src/lib/member-app/{date-time,time-filters}.ts',
         'src/lib/xero/accounting/{client,contracts,crypto,token}.ts',
         'src/lib/xero/export/**/*.ts',
-        'src/lib/xero/identity/{constants,contracts}.ts',
       ],
       provider: 'v8',
       reporter: ['text', 'json-summary', 'html'],

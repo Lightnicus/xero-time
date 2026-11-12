@@ -431,7 +431,7 @@ export interface Customer {
 export interface Project {
   id: string;
   /**
-   * Currency is validated against this customer when the project is saved.
+   * Currency is validated against this customer when the project is saved. Changing the customer moves the project's unbilled time to the new customer.
    */
   customer: string | Customer;
   name: string;
@@ -1410,6 +1410,10 @@ export interface XeroConnection {
   lastReferenceDataSyncAt?: string | null;
   lastErrorCode?: string | null;
   lastErrorMessage?: string | null;
+  /**
+   * When the "Xero needs reconnecting" email was sent for the current outage.
+   */
+  reconnectAlertSentAt?: string | null;
   disconnectedAt?: string | null;
   disconnectedBy?: (string | null) | User;
   disconnectReason?: string | null;
@@ -1539,6 +1543,7 @@ export interface XeroContactOperation {
   applicationReference: string;
   idempotencyKey: string;
   customer?: (string | null) | Customer;
+  activeCustomerKey?: string | null;
   requestedBy: string | User;
   state: 'preparing' | 'processing' | 'succeeded' | 'ambiguous' | 'failed';
   payloadHash: string;
@@ -2017,6 +2022,7 @@ export interface XeroConnectionsSelect<T extends boolean = true> {
   lastReferenceDataSyncAt?: T;
   lastErrorCode?: T;
   lastErrorMessage?: T;
+  reconnectAlertSentAt?: T;
   disconnectedAt?: T;
   disconnectedBy?: T;
   disconnectReason?: T;
@@ -2213,6 +2219,7 @@ export interface XeroContactOperationsSelect<T extends boolean = true> {
   applicationReference?: T;
   idempotencyKey?: T;
   customer?: T;
+  activeCustomerKey?: T;
   requestedBy?: T;
   state?: T;
   payloadHash?: T;

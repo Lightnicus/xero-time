@@ -18,6 +18,7 @@ import { attributeChange, attributionFields } from '@/lib/payload/attribution'
 import { activeSalesItemReference } from '@/lib/projects/xero-items'
 
 import type {
+  CollectionAfterChangeHook,
   CollectionConfig,
   CollectionBeforeChangeHook,
   CollectionBeforeValidateHook,
@@ -206,6 +207,56 @@ export const validateXeroItemMappingChange: CollectionBeforeChangeHook<
   return data
 }
 
+/**
+ * When a project moves to another customer, its unbilled time moves with it so it can be billed
+ * to the new customer. Reserved and exported time keeps the customer it was invoiced under.
+ */
+const moveUnbilledTimeWithProject: CollectionAfterChangeHook<ProjectHookDocument> = async ({
+  doc,
+  operation,
+  previousDoc,
+  req,
+}) => {
+  if (operation !== 'update') return doc
+  const customerID = relationshipID(doc.customer)
+  if (customerID === null || String(customerID) === String(relationshipID(previousDoc?.customer)))
+    return doc
+
+  const customer = await req.payload.findByID({
+    collection: CUSTOMERS_SLUG,
+    depth: 0,
+    id: customerID,
+    overrideAccess: true,
+    req,
+  })
+  const moved = await req.payload.update({
+    collection: 'time-entries' as CollectionSlug,
+    data: {
+      customer: customerID,
+      customerNameSnapshot: isRecord(customer) ? customer.name : undefined,
+    } as never,
+    depth: 0,
+    overrideAccess: true,
+    req,
+    where: {
+      and: [{ project: { equals: doc.id } }, { billingStatus: { equals: 'unbilled' } }],
+    },
+  })
+  if (moved.errors.length > 0) {
+    throw new ValidationError({
+      collection: 'projects',
+      errors: [
+        {
+          message: `${moved.errors.length} unbilled time entries could not be moved to the new customer.`,
+          path: 'customer',
+        },
+      ],
+      req,
+    })
+  }
+  return doc
+}
+
 /** Enforces the currency boundary at write time instead of relying on the admin form. */
 const validateCustomerCurrency: CollectionBeforeValidateHook<ProjectHookDocument> = async ({
   data,
@@ -311,7 +362,7 @@ export const Projects: CollectionConfig = {
               admin: {
                 allowCreate: false,
                 description:
-                  'Currency is validated against this customer when the project is saved.',
+                  "Currency is validated against this customer when the project is saved. Changing the customer moves the project's unbilled time to the new customer.",
               },
             },
             {
@@ -592,6 +643,7 @@ export const Projects: CollectionConfig = {
   ],
   hooks: {
     afterChange: [
+      moveUnbilledTimeWithProject,
       auditCollectionChange('project.changed', [
         'billableByDefault',
         'code',

@@ -155,6 +155,13 @@ export const XeroConnections: CollectionConfig = {
       ],
     },
     {
+      name: 'reconnectAlertSentAt',
+      type: 'date',
+      admin: {
+        description: 'When the "Xero needs reconnecting" email was sent for the current outage.',
+      },
+    },
+    {
       type: 'row',
       fields: [
         { name: 'disconnectedAt', type: 'date' },

@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { validateXeroBillingDefaults } from '@/lib/billing/default-validation'
 import type { AppSession } from '@/lib/member-app/session'
+import { requireMongoModel } from '@/lib/payload/mongo'
 import type { XeroAccountingClient } from '@/lib/xero/accounting/client'
 import {
   createXeroContact,
@@ -103,9 +104,6 @@ const clear = async (): Promise<void> => {
     'time-entries',
     'projects',
     'customers',
-    'invitations',
-    'external-auth-sessions',
-    'auth-identities',
     'users',
   ]) {
     await payload.db.collections[slug]?.deleteMany({})
@@ -549,7 +547,7 @@ describe.sequential('Xero contacts and reference data', () => {
     expect(operations.docs[0]).toMatchObject({ state: 'succeeded' })
   })
 
-  it('refreshes archived status and keeps all Xero contact operations owner/admin-only', async () => {
+  it('refreshes archived status of a linked contact', async () => {
     const firstContact = contacts.get(FIRST_CONTACT_ID)
     if (!firstContact) throw new Error('The first contact fixture is missing.')
     firstContact.ContactStatus = 'ARCHIVED'
@@ -562,5 +560,119 @@ describe.sequential('Xero contacts and reference data', () => {
         overrideAccess: true,
       }),
     ).resolves.toMatchObject({ xeroMappingStatus: 'archived' })
+  })
+
+  it('allows one unfinished contact creation per customer and reuses an earlier attempt', async () => {
+    const customer = await payload.create({
+      collection: 'customers',
+      data: { currency: 'NZD', name: 'Local Third' } as never,
+      overrideAccess: false,
+      req: ownerSession.req,
+    })
+    const customerID = String(customer.id)
+    const operations = requireMongoModel(payload, 'xero-contact-operations')
+    const unfinished = await payload.create({
+      collection: 'xero-contact-operations',
+      data: {
+        activeCustomerKey: customerID,
+        applicationReference: 'CONTACT-EARLIER-ATTEMPT',
+        attemptCount: 1,
+        customer: customerID,
+        idempotencyKey: 'CONTACT-EARLIER-ATTEMPT',
+        payloadHash: 'hash',
+        requestPayload: { Name: 'Local Third' },
+        requestedBy: ownerSession.user.id,
+        state: 'processing',
+      },
+      overrideAccess: true,
+    })
+    const postsBefore = vi.mocked(client.accountingPost).mock.calls.length
+
+    // A double submit while the first request may still be with Xero is refused.
+    await expect(
+      createXeroContact(ownerSession, { confirmation: true, customerID }, overrides()),
+    ).rejects.toMatchObject({ code: 'contact-create-in-progress' })
+    // The database also refuses a second unfinished creation for the same customer.
+    await expect(
+      operations.create({
+        activeCustomerKey: customerID,
+        applicationReference: 'CONTACT-SECOND',
+        attemptCount: 0,
+        customer: customerID,
+        idempotencyKey: 'CONTACT-SECOND',
+        payloadHash: 'hash',
+        requestPayload: {},
+        requestedBy: ownerSession.user.id,
+        state: 'preparing',
+      }),
+    ).rejects.toMatchObject({ code: 11_000 })
+
+    // Later, the earlier attempt turns out to have created the contact: link it, post nothing.
+    await operations.collection.updateOne(
+      { _id: new operations.base.Types.ObjectId(String(unfinished.id)) as never },
+      { $set: { createdAt: new Date(Date.now() - 10 * 60_000) } },
+    )
+    const earlierContactID = '00000000-0000-4000-8000-000000000999'
+    contacts.set(earlierContactID, {
+      ContactID: earlierContactID,
+      ContactNumber: 'CONTACT-EARLIER-ATTEMPT',
+      ContactStatus: 'ACTIVE',
+      Name: 'Local Third',
+    })
+    await expect(
+      createXeroContact(ownerSession, { confirmation: true, customerID }, overrides()),
+    ).resolves.toBeUndefined()
+    expect(vi.mocked(client.accountingPost).mock.calls.length).toBe(postsBefore)
+    await expect(
+      payload.findByID({ collection: 'customers', depth: 0, id: customerID, overrideAccess: true }),
+    ).resolves.toMatchObject({ xeroContactId: earlierContactID })
+    await expect(
+      payload.findByID({
+        collection: 'xero-contact-operations',
+        depth: 0,
+        id: unfinished.id,
+        overrideAccess: true,
+        showHiddenFields: true,
+      }),
+    ).resolves.toMatchObject({ activeCustomerKey: null, state: 'succeeded' })
+  })
+
+  it('replaces an uncertain attempt that Xero never received with exactly one new contact', async () => {
+    const customer = await payload.create({
+      collection: 'customers',
+      data: { currency: 'NZD', name: 'Local Fourth' } as never,
+      overrideAccess: false,
+      req: ownerSession.req,
+    })
+    const customerID = String(customer.id)
+    const ambiguous = await payload.create({
+      collection: 'xero-contact-operations',
+      data: {
+        activeCustomerKey: customerID,
+        applicationReference: 'CONTACT-NEVER-ARRIVED',
+        attemptCount: 1,
+        customer: customerID,
+        idempotencyKey: 'CONTACT-NEVER-ARRIVED',
+        payloadHash: 'hash',
+        requestPayload: { Name: 'Local Fourth' },
+        requestedBy: ownerSession.user.id,
+        state: 'ambiguous',
+      },
+      overrideAccess: true,
+    })
+    const postsBefore = vi.mocked(client.accountingPost).mock.calls.length
+    await expect(
+      createXeroContact(ownerSession, { confirmation: true, customerID }, overrides()),
+    ).resolves.toBeUndefined()
+    expect(vi.mocked(client.accountingPost).mock.calls.length - postsBefore).toBe(1)
+    await expect(
+      payload.findByID({
+        collection: 'xero-contact-operations',
+        depth: 0,
+        id: ambiguous.id,
+        overrideAccess: true,
+        showHiddenFields: true,
+      }),
+    ).resolves.toMatchObject({ activeCustomerKey: null, state: 'failed' })
   })
 })

@@ -337,6 +337,7 @@ const finalizeCreatedContact = async (
       collection: 'xero-contact-operations',
       id: operationID,
       data: {
+        activeCustomerKey: null,
         completedAt: new Date().toISOString(),
         state: 'succeeded',
         xeroContactId: contact.contactID,
@@ -358,6 +359,86 @@ const finalizeCreatedContact = async (
   })
 }
 
+/** A creation younger than this may still be waiting for Xero, so it is left alone. */
+const CONTACT_CREATION_IN_FLIGHT_MS = 2 * 60 * 1_000
+
+const contactCreationInProgress = () =>
+  new AccountingIntegrationError(
+    'contact-create-in-progress',
+    'A Xero contact is already being created for this customer. Wait a moment, then refresh.',
+  )
+
+const isDuplicateKeyError = (error: unknown): boolean => {
+  const candidate = error as { cause?: { code?: unknown }; code?: unknown; data?: unknown } | null
+  return (
+    candidate?.code === 11_000 ||
+    candidate?.cause?.code === 11_000 ||
+    /duplicate key|E11000|activeCustomerKey/i.test(error instanceof Error ? error.message : '') ||
+    JSON.stringify(candidate?.data ?? '').includes('activeCustomerKey')
+  )
+}
+
+/**
+ * Resolves an earlier creation for this customer that never finished (a double submit, a timeout,
+ * or an uncertain Xero response) before another one starts. If Xero has the earlier contact it is
+ * linked instead of creating a duplicate. Returns true when the customer is now linked.
+ */
+const settleUnfinishedContactCreation = async (
+  session: AppSession,
+  customer: Customer,
+  resolved: Awaited<ReturnType<typeof resolveClient>>,
+): Promise<boolean> => {
+  const unfinished = await session.payload.find({
+    collection: 'xero-contact-operations',
+    depth: 0,
+    limit: 10,
+    overrideAccess: true,
+    pagination: false,
+    req: session.req,
+    sort: '-createdAt',
+    where: {
+      and: [
+        { customer: { equals: customer.id } },
+        { state: { in: ['preparing', 'processing', 'ambiguous'] } },
+      ],
+    },
+  })
+  for (const operation of unfinished.docs) {
+    const inFlight =
+      operation.state !== 'ambiguous' &&
+      Date.parse(operation.createdAt) > Date.now() - CONTACT_CREATION_IN_FLIGHT_MS
+    if (inFlight) throw contactCreationInProgress()
+
+    const search = await resolved.client.accountingGet(
+      resolved.accessToken,
+      resolved.tenantID,
+      'Contacts',
+      { searchTerm: operation.applicationReference },
+    )
+    const matches = contactsFrom(search.data).filter(
+      (contact) => contact.contactNumber === operation.applicationReference,
+    )
+    const match = matches.length === 1 ? matches[0] : undefined
+    if (match) {
+      await finalizeCreatedContact(session, String(operation.id), customer, match)
+      return true
+    }
+    await session.payload.update({
+      collection: 'xero-contact-operations',
+      id: operation.id,
+      data: {
+        activeCustomerKey: null,
+        lastErrorCode: 'not-found-in-xero',
+        lastErrorMessage: 'Xero has no contact from this attempt; a new attempt replaced it.',
+        state: 'failed',
+      },
+      overrideAccess: true,
+      req: session.req,
+    })
+  }
+  return false
+}
+
 export async function createXeroContact(
   session: AppSession,
   input: { confirmation: boolean; customerID: string },
@@ -376,24 +457,33 @@ export async function createXeroContact(
   if (customer.xeroContactId) {
     throw new AccountingIntegrationError('already-mapped', 'That customer is already mapped.')
   }
+  const resolved = await resolveClient(session, overrides)
+  if (await settleUnfinishedContactCreation(session, customer, resolved)) return
+
   const reference = `CONTACT-${randomUUID()}`
   const request = { ...contactCreationPreview(customer), ContactNumber: reference }
-  const operation = await session.payload.create({
-    collection: 'xero-contact-operations',
-    data: {
-      applicationReference: reference,
-      attemptCount: 0,
-      customer: customer.id,
-      idempotencyKey: reference,
-      payloadHash: payloadHash(request),
-      requestPayload: request,
-      requestedBy: session.user.id,
-      state: 'preparing',
-    },
-    overrideAccess: true,
-    req: session.req,
-  })
-  const resolved = await resolveClient(session, overrides)
+  let operation: { id: string }
+  try {
+    operation = await session.payload.create({
+      collection: 'xero-contact-operations',
+      data: {
+        activeCustomerKey: String(customer.id),
+        applicationReference: reference,
+        attemptCount: 0,
+        customer: customer.id,
+        idempotencyKey: reference,
+        payloadHash: payloadHash(request),
+        requestPayload: request,
+        requestedBy: session.user.id,
+        state: 'preparing',
+      },
+      overrideAccess: true,
+      req: session.req,
+    })
+  } catch (error) {
+    if (isDuplicateKeyError(error)) throw contactCreationInProgress()
+    throw error
+  }
   await session.payload.update({
     collection: 'xero-contact-operations',
     id: operation.id,
@@ -458,9 +548,12 @@ export async function createXeroContact(
       collection: 'xero-contact-operations',
       id: operation.id,
       data: {
+        // An uncertain result stays the customer's unfinished creation, so the next attempt
+        // looks for it in Xero before creating anything.
+        activeCustomerKey: integrationError.requestMayHaveBeenSent ? String(customer.id) : null,
         lastErrorCode: integrationError.code,
         lastErrorMessage: integrationError.requestMayHaveBeenSent
-          ? 'The contact result is uncertain and must be reconciled before retrying.'
+          ? 'The contact result is uncertain; the next attempt checks Xero for it first.'
           : 'Xero rejected the contact request.',
         state: integrationError.requestMayHaveBeenSent ? 'ambiguous' : 'failed',
       },

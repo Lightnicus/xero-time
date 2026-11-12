@@ -670,16 +670,34 @@ const queueFollowUp = async (
   return String(job.id)
 }
 
-export const consecutiveRetryWaits = (exportDocument: Pick<InvoiceExport, 'stateHistory'>) => {
+/** After this many automatic retries in a row, an export stops and waits for the user. */
+export const MAX_CONSECUTIVE_RETRIES = 8
+export const RETRY_LIMIT_ERROR_CODE = 'retry-limit-reached'
+
+/**
+ * How many times in a row the export has gone back to `state` for another automatic try. Waiting
+ * for Xero to be reconnected is not a failed try, so those entries are skipped without counting.
+ */
+export const consecutiveRetries = (
+  exportDocument: Pick<InvoiceExport, 'stateHistory'>,
+  state: 'reconciling' | 'retry-wait',
+): number => {
   const history = Array.isArray(exportDocument.stateHistory) ? exportDocument.stateHistory : []
   let count = 0
   for (let index = history.length - 1; index >= 0; index -= 1) {
     const entry = history[index]
-    if (!isRecord(entry) || entry.to !== 'retry-wait') break
-    count += 1
+    if (!isRecord(entry) || entry.to !== state) break
+    const metadata = isRecord(entry.metadata) ? entry.metadata : {}
+    if (metadata.errorCode !== XERO_RECONNECT_EXPORT_CODE) count += 1
   }
   return count
 }
+
+export const consecutiveRetryWaits = (exportDocument: Pick<InvoiceExport, 'stateHistory'>) =>
+  consecutiveRetries(exportDocument, 'retry-wait')
+
+export const retryLimitMessage = (lastError: string): string =>
+  `Stopped after ${MAX_CONSECUTIVE_RETRIES} automatic retries in a row. Its time stays reserved. Last error: ${lastError} Fix the cause, then use Request recovery on the export page.`
 
 const retryDelaySeconds = (
   exportDocument: InvoiceExport,
@@ -738,7 +756,10 @@ const deferExport = async (
       processingLeaseExpiresAt: null,
       processingLeaseId: null,
       state,
-      stateHistory: stateHistory(exportDocument, state, { retryAt: nextAttemptAt.toISOString() }),
+      stateHistory: stateHistory(exportDocument, state, {
+        errorCode: error.code,
+        retryAt: nextAttemptAt.toISOString(),
+      }),
     },
     overrideAccess: true,
     req,
@@ -981,7 +1002,68 @@ export async function processInvoiceExport(
       await deferExport(payload, req, claimed, attempt, error, 'reconciling')
       return { state: 'reconciling' }
     }
+    if (consecutiveRetries(claimed, 'retry-wait') >= MAX_CONSECUTIVE_RETRIES) {
+      await stopAfterRetryLimit(payload, req, claimed, attempt, error)
+      return { state: 'manual-review' }
+    }
     await deferExport(payload, req, claimed, attempt, error, 'retry-wait')
     return { state: 'retry-wait' }
   }
+}
+
+/** Parks an export that keeps failing in manual review, keeping its time reserved. */
+const stopAfterRetryLimit = async (
+  payload: Payload,
+  req: PayloadRequest,
+  exportDocument: InvoiceExport,
+  attempt: XeroAttempt,
+  error: AccountingIntegrationError,
+): Promise<void> => {
+  await payload.update({
+    collection: 'xero-attempts',
+    id: attempt.id,
+    data: {
+      errorCode: error.code,
+      errorMessage: error.message,
+      httpStatus: error.status,
+      requestMayHaveBeenSent: attempt.requestMayHaveBeenSent || error.requestMayHaveBeenSent,
+      result: 'retryable-before-send',
+      xeroCorrelationId: error.correlationID,
+    },
+    overrideAccess: true,
+    req,
+  })
+  await payload.update({
+    collection: 'invoice-exports',
+    id: exportDocument.id,
+    data: {
+      jobId: null,
+      lastErrorCode: RETRY_LIMIT_ERROR_CODE,
+      lastErrorMessage: retryLimitMessage(error.message).slice(0, 500),
+      nextAttemptAt: null,
+      processingLeaseExpiresAt: null,
+      processingLeaseId: null,
+      state: 'manual-review',
+      stateHistory: stateHistory(exportDocument, 'manual-review', { errorCode: error.code }),
+    },
+    overrideAccess: true,
+    req,
+  })
+  await recordAuditEvent(
+    payload,
+    {
+      correlationId: error.correlationID,
+      eventType: 'export.state-changed',
+      exportId: exportDocument.id,
+      machineActor: 'xero-export-worker',
+      metadata: {
+        errorCode: RETRY_LIMIT_ERROR_CODE,
+        lastErrorCode: error.code,
+        to: 'manual-review',
+      },
+      targetCollection: 'invoice-exports',
+      targetId: exportDocument.id,
+    },
+    req,
+  )
 }

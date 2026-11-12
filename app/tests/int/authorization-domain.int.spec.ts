@@ -1491,6 +1491,80 @@ describe.sequential('Payload authorization and domain integration', () => {
     ).resolves.toMatchObject({ totalDocs: expect.any(Number) })
   })
 
+  it('moves unbilled time with a project that changes customer', async () => {
+    const movable = await createDocument<TestTimeEntry>(
+      'time-entries',
+      {
+        description: 'Unbilled time that follows its project',
+        enteredHours: 1,
+        enteredMinutes: 0,
+        inputMode: 'duration',
+        project: project.id,
+        timezone: 'Pacific/Auckland',
+        workDate: '2026-07-19',
+      },
+      { overrideAccess: false, req: userReq },
+    )
+    const held = await createDocument<TestTimeEntry>(
+      'time-entries',
+      {
+        description: 'Reserved time that stays with its invoice customer',
+        enteredHours: 1,
+        enteredMinutes: 0,
+        inputMode: 'duration',
+        project: project.id,
+        timezone: 'Pacific/Auckland',
+        workDate: '2026-07-19',
+      },
+      { overrideAccess: false, req: userReq },
+    )
+    await requireMongoModel(payload, 'time-entries').updateOne(
+      { _id: held.id },
+      { $set: { billingStatus: 'reserved' } },
+    )
+    const reservedBefore = await findDocument<TestTimeEntry>('time-entries', held.id, {
+      overrideAccess: true,
+    })
+    expect(reservedBefore.billingStatus).toBe('reserved')
+
+    try {
+      await updateDocument(
+        'projects',
+        project.id,
+        { customer: otherCustomer.id },
+        {
+          overrideAccess: false,
+          req: userReq,
+        },
+      )
+      const [moved, reservedAfter] = await Promise.all([
+        findDocument<TestTimeEntry>('time-entries', movable.id, { overrideAccess: true }),
+        findDocument<TestTimeEntry>('time-entries', held.id, { overrideAccess: true }),
+      ])
+      expect(moved).toMatchObject({
+        customer: otherCustomer.id,
+        customerNameSnapshot: 'Unrelated Customer',
+      })
+      // Reserved time stays with the customer it is being invoiced to.
+      expect(reservedAfter).toMatchObject({
+        customer: reservedBefore.customer,
+        customerNameSnapshot: reservedBefore.customerNameSnapshot,
+      })
+    } finally {
+      await updateDocument(
+        'projects',
+        project.id,
+        { customer: customer.id },
+        {
+          overrideAccess: false,
+          req: userReq,
+        },
+      )
+      await deleteDocument('time-entries', movable.id, { overrideAccess: true })
+      await requireMongoModel(payload, 'time-entries').deleteOne({ _id: held.id })
+    }
+  })
+
   it('rejects new time when the project customer is archived', async () => {
     await updateDocument<TestCustomer>(
       'customers',

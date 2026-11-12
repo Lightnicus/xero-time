@@ -30,6 +30,7 @@ import {
   randomOpaqueValue,
   type EncryptionKey,
 } from './crypto'
+import { sendReconnectAlert } from './reconnect-alert'
 import { connectionFailureMessage } from './recovery'
 import { validateAccountingAccessToken, type AccountingAccessTokenMetadata } from './token'
 
@@ -610,6 +611,7 @@ const persistConnection = async (
     lastErrorCode: null,
     lastErrorMessage: null,
     lastSuccessfulRequestAt: now,
+    reconnectAlertSentAt: null,
     refreshLockExpiresAt: null,
     refreshLockId: null,
     refreshTokenEnvelope: encryptSecret(
@@ -1219,7 +1221,10 @@ export async function getValidAccountingAccessToken(
             retryable: true,
           })
     await updateRefreshFailure(session, connection, lockID, safeError)
-    if (!safeError.retryable) safeError.reconnectRequired = true
+    if (!safeError.retryable) {
+      safeError.reconnectRequired = true
+      await sendReconnectAlert(session.payload, connection.id)
+    }
     throw safeError
   }
 }
@@ -1251,6 +1256,7 @@ export async function checkAccountingConnectionHealth(
       overrideAccess: true,
       req: session.req,
     })
+    await sendReconnectAlert(session.payload, connection.id)
     return safeConnectionView(updated)
   }
 

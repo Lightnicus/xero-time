@@ -46,6 +46,34 @@ const hasPendingJob = async (
   return Boolean(await requireMongoModel(payload, 'payload-jobs').findOne(query))
 }
 
+/** Queue runs are capped well below this, so a job still "processing" after it has stalled. */
+export const STALLED_JOB_MS = 10 * 60 * 1_000
+
+/**
+ * Payload never clears `processing` on a job whose worker died (for example a function timeout),
+ * and every Xero job shares one concurrency key, so one stalled job would block the whole queue.
+ * Fail such jobs; the export's own lease recovery then retries or reconciles it safely.
+ */
+export const releaseStalledJobs = async (payload: Payload): Promise<number> => {
+  const result = await requireMongoModel(payload, 'payload-jobs').updateMany(
+    {
+      completedAt: { $in: [null, undefined] },
+      processing: true,
+      queue: 'xero',
+      updatedAt: { $lt: new Date(Date.now() - STALLED_JOB_MS) },
+    },
+    {
+      $set: {
+        error: { message: 'The worker stopped before finishing; the job was released.' },
+        hasError: true,
+        processing: false,
+        updatedAt: new Date(),
+      },
+    },
+  )
+  return result.modifiedCount
+}
+
 const recoverStaleExports = async (payload: Payload, req: PayloadRequest): Promise<number> => {
   const stale = await payload.find({
     collection: 'invoice-exports',
@@ -279,10 +307,10 @@ const scheduleStatusRefresh = async (payload: Payload, req: PayloadRequest): Pro
   return queued
 }
 
-const scheduleConnectionMaintenance = async (
-  payload: Payload,
-  req: PayloadRequest,
-): Promise<number> => {
+const HEALTH_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1_000
+
+/** The connected business connection when its daily health check is due, otherwise null. */
+const connectionDueForHealthCheck = async (payload: Payload, req: PayloadRequest) => {
   const connections = await payload.find({
     collection: 'xero-connections',
     depth: 0,
@@ -292,9 +320,35 @@ const scheduleConnectionMaintenance = async (
     where: { singletonKey: { equals: 'business-accounting' } },
   })
   const connection = connections.docs[0]
-  if (!connection || connection.status !== 'connected') return 0
+  if (!connection || connection.status !== 'connected') return null
   const last = Date.parse(connection.lastHealthCheckAt ?? connection.lastRefreshedAt ?? '')
-  if (Number.isFinite(last) && last > Date.now() - 24 * 60 * 60 * 1_000) return 0
+  if (Number.isFinite(last) && last > Date.now() - HEALTH_CHECK_INTERVAL_MS) return null
+  return connection
+}
+
+/**
+ * While processing is paused the queue does not run, but Xero's refresh token still expires after
+ * 60 days without use. Check the connection directly so a long pause never forces a reconnect.
+ * A failure marks the connection as needing reconnection (and emails the user) as usual.
+ */
+export const checkConnectionWhilePaused = async (
+  payload: Payload,
+  req: PayloadRequest,
+): Promise<number> => {
+  if (!(await connectionDueForHealthCheck(payload, req))) return 0
+  try {
+    await checkAccountingConnectionHealth(await createAccountingSystemSession(payload))
+  } catch {
+    // The connection records its own failure state; the next cron run retries when still due.
+  }
+  return 1
+}
+
+const scheduleConnectionMaintenance = async (
+  payload: Payload,
+  req: PayloadRequest,
+): Promise<number> => {
+  if (!(await connectionDueForHealthCheck(payload, req))) return 0
   if (await hasPendingJob(payload, 'maintain-xero-accounting')) return 0
   await queue(payload)({
     input: { reason: 'scheduled-daily' },
@@ -325,7 +379,13 @@ export async function prepareXeroQueue(
     overrideAccess: true,
     req,
   })
-  if (settings.processingEnabled !== true) return { state: 'processing-paused' }
+  if (settings.processingEnabled !== true) {
+    return {
+      healthChecks: await checkConnectionWhilePaused(payload, req),
+      state: 'processing-paused',
+    }
+  }
+  const stalledJobs = await releaseStalledJobs(payload)
   const recovered = await recoverStaleExports(payload, req)
   const requeued = await requeueOrphanedExports(payload, req)
   const dispatched = await dispatchPreparingExports(payload, req)
@@ -338,6 +398,7 @@ export async function prepareXeroQueue(
     maintenanceJobs,
     recovered,
     requeued,
+    stalledJobs,
     state: 'ready',
     statusRefreshes,
     webhookReceipts,

@@ -20,6 +20,20 @@ export function durationToQuantityScaled(durationSeconds: number): number {
   return assertSafeResult((BigInt(durationSeconds) * BigInt(QUANTITY_SCALE) + 1_800n) / 3_600n)
 }
 
+/** One cent in the four-decimal scale used for amounts. */
+const CENT_SCALED = 100n
+
+/** Rounds a non-negative four-decimal amount to whole cents, half up, as Xero does. */
+export function roundScaledToCents(value: number | bigint): number {
+  const scaled = BigInt(value)
+  if (scaled < 0n) throw new Error('Amounts must not be negative.')
+  return assertSafeResult(((scaled + CENT_SCALED / 2n) / CENT_SCALED) * CENT_SCALED)
+}
+
+/**
+ * Xero stores each line amount as Quantity x UnitAmount rounded to cents, so line amounts (and
+ * everything summed from them) are rounded per line here too.
+ */
 export function quantityRateAmountScaled(quantityScaled: number, rateScaled: number): number {
   if (
     !Number.isSafeInteger(quantityScaled) ||
@@ -29,7 +43,7 @@ export function quantityRateAmountScaled(quantityScaled: number, rateScaled: num
   ) {
     throw new Error('Quantity and rate must be valid scaled integers.')
   }
-  return assertSafeResult(
+  return roundScaledToCents(
     (BigInt(quantityScaled) * BigInt(rateScaled) + BigInt(QUANTITY_SCALE / 2)) /
       BigInt(QUANTITY_SCALE),
   )
@@ -51,13 +65,14 @@ export function taxForLine(
   }
   if (lineAmountType === 'NoTax' || taxRatePercent === 0) return 0
 
+  // Xero calculates tax on each line and rounds it to cents.
   const rateBasisPoints = Math.round(taxRatePercent * 100)
   if (lineAmountType === 'Exclusive') {
-    return assertSafeResult((BigInt(amountScaled) * BigInt(rateBasisPoints) + 5_000n) / 10_000n)
+    return roundScaledToCents((BigInt(amountScaled) * BigInt(rateBasisPoints) + 5_000n) / 10_000n)
   }
 
   const denominator = 10_000 + rateBasisPoints
-  const exclusive = assertSafeResult(
+  const exclusive = roundScaledToCents(
     (BigInt(amountScaled) * 10_000n + BigInt(Math.floor(denominator / 2))) / BigInt(denominator),
   )
   return amountScaled - exclusive

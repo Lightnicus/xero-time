@@ -20,8 +20,9 @@ import { normalizeBillingFilter } from '@/lib/billing/selection'
 import { isRecord, relationshipID } from '@/lib/domain/validation'
 import type { AppSession } from '@/lib/member-app/session'
 import { requireMongoModel } from '@/lib/payload/mongo'
-import { prepareXeroQueue } from '@/lib/xero/export/maintenance'
+import { prepareXeroQueue, releaseStalledJobs, STALLED_JOB_MS } from '@/lib/xero/export/maintenance'
 import {
+  MAX_CONSECUTIVE_RETRIES,
   parseRemoteInvoices,
   processInvoiceExport,
   remoteDerivedValuesHash,
@@ -834,7 +835,7 @@ describe.sequential('Xero export and webhook recovery', () => {
         client: fake.client(),
         token: token(),
       }),
-    ).resolves.toEqual({ remoteStatus: 'DELETED', state: 'action-required' })
+    ).resolves.toEqual({ remoteStatus: 'DELETED', state: 'reconciling' })
     await expect(
       payload.findByID({
         collection: 'time-entries',
@@ -855,9 +856,11 @@ describe.sequential('Xero export and webhook recovery', () => {
         showHiddenFields: true,
       }),
     ).resolves.toMatchObject({
-      lastErrorCode: 'remote-invoice-mismatch',
+      // A refresh never takes over an export a worker is handling; it only records Xero's status.
+      lastErrorCode: 'reconciliation-mismatch',
       processingLeaseId: processingLeaseID,
-      state: 'action-required',
+      remoteStatus: 'DELETED',
+      state: 'reconciling',
     })
     await expect(
       releaseInvoiceExport(
@@ -877,13 +880,20 @@ describe.sequential('Xero export and webhook recovery', () => {
       billingStatus: 'reserved',
       currentExport: reserved.exportID,
     })
+    // The worker finishes and leaves the mismatch for review; a refresh now sees the deletion.
     await payload.update({
       collection: 'invoice-exports',
-      data: { processingLeaseExpiresAt: null, processingLeaseId: null },
+      data: { processingLeaseExpiresAt: null, processingLeaseId: null, state: 'manual-review' },
       depth: 0,
       id: reserved.exportID,
       overrideAccess: true,
     })
+    await expect(
+      refreshInvoiceExportStatus(ownerSession.req, reserved.exportID, {
+        client: fake.client(),
+        token: token(),
+      }),
+    ).resolves.toEqual({ remoteStatus: 'DELETED', state: 'action-required' })
 
     await expect(
       releaseInvoiceExport(
@@ -1138,6 +1148,204 @@ describe.sequential('Xero export and webhook recovery', () => {
         token: token(),
       }),
     ).resolves.toEqual({ state: 'succeeded' })
+  })
+
+  it('stops automatic retries after the limit and keeps the time reserved', async () => {
+    const reserved = await reserveOneEntry(
+      'Retries until the limit',
+      'D1D1D1D1-D1D1-4D1D-8D1D-D1D1D1D1D1D1',
+    )
+    const current = await payload.findByID({
+      collection: 'invoice-exports',
+      depth: 0,
+      id: reserved.exportID,
+      overrideAccess: true,
+    })
+    // Earlier failed tries, plus reconnect waits that must not count toward the limit.
+    const retryEntries = Array.from({ length: MAX_CONSECUTIVE_RETRIES }, (_, index) => ({
+      at: new Date().toISOString(),
+      from: 'processing',
+      metadata: { errorCode: index % 2 ? 'xero-reconnect-required' : 'xero-server-error' },
+      to: 'retry-wait',
+    }))
+    await payload.update({
+      collection: 'invoice-exports',
+      id: reserved.exportID,
+      data: {
+        state: 'retry-wait',
+        stateHistory: [...(current.stateHistory as unknown[]), ...retryEntries],
+      },
+      overrideAccess: true,
+    })
+    const fake = new FakeXeroAccountingServer()
+    fake.setInvoiceSequence(950)
+    fake.enqueue('post', 'rate-limit')
+    await expect(
+      processInvoiceExport(ownerSession.req, reserved.exportID, {
+        client: fake.client(),
+        token: token(),
+      }),
+    ).resolves.toEqual({ state: 'retry-wait' })
+
+    // Fill the streak with real failures only: the next failure stops the export.
+    const afterOne = await payload.findByID({
+      collection: 'invoice-exports',
+      depth: 0,
+      id: reserved.exportID,
+      overrideAccess: true,
+    })
+    await payload.update({
+      collection: 'invoice-exports',
+      id: reserved.exportID,
+      data: {
+        nextAttemptAt: null,
+        stateHistory: [
+          ...(afterOne.stateHistory as unknown[]),
+          ...retryEntries.map((entry) => ({ ...entry, metadata: { errorCode: 'x' } })),
+        ],
+      },
+      overrideAccess: true,
+    })
+    fake.enqueue('post', 'rate-limit')
+    await expect(
+      processInvoiceExport(ownerSession.req, reserved.exportID, {
+        client: fake.client(),
+        token: token(),
+      }),
+    ).resolves.toEqual({ state: 'manual-review' })
+    const [stopped, entry] = await Promise.all([
+      payload.findByID({
+        collection: 'invoice-exports',
+        depth: 0,
+        id: reserved.exportID,
+        overrideAccess: true,
+      }),
+      payload.findByID({
+        collection: 'time-entries',
+        depth: 0,
+        id: reserved.entryID,
+        overrideAccess: true,
+      }),
+    ])
+    expect(stopped).toMatchObject({
+      jobId: null,
+      lastErrorCode: 'retry-limit-reached',
+      state: 'manual-review',
+    })
+    expect(stopped.lastErrorMessage).toContain('Request recovery')
+    expect(entry).toMatchObject({ billingStatus: 'reserved' })
+  })
+
+  it('lets a status refresh change only exports it owns and never overwrite a newer change', async () => {
+    const draft = await createSucceededDraft(
+      'Refresh ownership and races',
+      'D2D2D2D2-D2D2-4D2D-8D2D-D2D2D2D2D2D2',
+      960,
+    )
+    const fakeClient = draft.fake.client()
+
+    // An export in manual review keeps its state and note; only Xero's status is recorded.
+    await payload.update({
+      collection: 'invoice-exports',
+      id: draft.exportID,
+      data: {
+        lastErrorCode: 'operator-check',
+        lastErrorMessage: 'Waiting for a person to check this.',
+        state: 'manual-review',
+      },
+      overrideAccess: true,
+    })
+    await expect(
+      refreshInvoiceExportStatus(ownerSession.req, draft.exportID, {
+        client: fakeClient,
+        token: token(),
+      }),
+    ).resolves.toEqual({ remoteStatus: 'DRAFT', state: 'manual-review' })
+    await expect(
+      payload.findByID({
+        collection: 'invoice-exports',
+        depth: 0,
+        id: draft.exportID,
+        overrideAccess: true,
+      }),
+    ).resolves.toMatchObject({
+      lastErrorCode: 'operator-check',
+      lastErrorMessage: 'Waiting for a person to check this.',
+      remoteStatus: 'DRAFT',
+      state: 'manual-review',
+    })
+
+    // A change that lands while the refresh waits for Xero wins over the refresh.
+    await payload.update({
+      collection: 'invoice-exports',
+      id: draft.exportID,
+      data: { lastErrorCode: null, lastErrorMessage: null, state: 'succeeded' },
+      overrideAccess: true,
+    })
+    const racingClient = {
+      ...fakeClient,
+      accountingGet: async (...args: Parameters<typeof fakeClient.accountingGet>) => {
+        const response = await fakeClient.accountingGet(...args)
+        await payload.update({
+          collection: 'invoice-exports',
+          id: draft.exportID,
+          data: { lastErrorMessage: 'Changed by another worker.' },
+          overrideAccess: true,
+        })
+        return response
+      },
+    }
+    await expect(
+      refreshInvoiceExportStatus(ownerSession.req, draft.exportID, {
+        client: racingClient,
+        token: token(),
+      }),
+    ).resolves.toEqual({ remoteStatus: 'DRAFT', state: 'superseded' })
+    await expect(
+      payload.findByID({
+        collection: 'invoice-exports',
+        depth: 0,
+        id: draft.exportID,
+        overrideAccess: true,
+      }),
+    ).resolves.toMatchObject({ lastErrorMessage: 'Changed by another worker.' })
+  })
+
+  it('releases a stalled job so it no longer blocks the shared Xero queue', async () => {
+    const jobs = requireMongoModel(payload, 'payload-jobs')
+    const queued = await (
+      payload.jobs.queue as unknown as (args: {
+        input: { reason: string }
+        queue: string
+        task: string
+      }) => Promise<{ id: number | string }>
+    )({ input: { reason: 'stall-test' }, queue: 'xero', task: 'maintain-xero-accounting' })
+    const fresh = await (
+      payload.jobs.queue as unknown as (args: {
+        input: { reason: string }
+        queue: string
+        task: string
+      }) => Promise<{ id: number | string }>
+    )({ input: { reason: 'fresh-test' }, queue: 'xero', task: 'maintain-xero-accounting' })
+    // The raw driver keeps mongoose from stamping a fresh updatedAt.
+    await jobs.collection.updateOne(
+      { _id: new jobs.base.Types.ObjectId(String(queued.id)) as never },
+      { $set: { processing: true, updatedAt: new Date(Date.now() - STALLED_JOB_MS - 60_000) } },
+    )
+    await jobs.collection.updateOne(
+      { _id: new jobs.base.Types.ObjectId(String(fresh.id)) as never },
+      { $set: { processing: true, updatedAt: new Date() } },
+    )
+    try {
+      await expect(releaseStalledJobs(payload)).resolves.toBe(1)
+      await expect(jobs.findById(queued.id).lean()).resolves.toMatchObject({
+        hasError: true,
+        processing: false,
+      })
+      await expect(jobs.findById(fresh.id).lean()).resolves.toMatchObject({ processing: true })
+    } finally {
+      await jobs.deleteMany({ _id: { $in: [queued.id, fresh.id] } })
+    }
   })
 
   it('recovers stale workers differently before and after the send boundary', async () => {

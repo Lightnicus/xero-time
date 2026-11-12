@@ -34,6 +34,14 @@ export const XeroContactOperations: CollectionConfig = {
       index: true,
     },
     { name: 'customer', type: 'relationship', relationTo: 'customers', maxDepth: 0, index: true },
+    {
+      // Set to the customer ID while a creation is unfinished. A unique index on it (created in
+      // payload.config onInit) allows only one unfinished contact creation per customer.
+      name: 'activeCustomerKey',
+      type: 'text',
+      hidden: true,
+      maxLength: 100,
+    },
     { name: 'requestedBy', type: 'relationship', relationTo: 'users', maxDepth: 0, required: true },
     {
       name: 'state',

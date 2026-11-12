@@ -87,6 +87,14 @@ export default buildConfig({
         { stateHash: 1 },
         { name: 'stateHash_1', unique: true },
       ),
+      requireMongoModel(payload, 'xero-contact-operations').collection.createIndex(
+        { activeCustomerKey: 1 },
+        {
+          name: 'activeCustomerKey_unique_when_present',
+          partialFilterExpression: { activeCustomerKey: { $type: 'string' } },
+          unique: true,
+        },
+      ),
       requireMongoModel(payload, 'invoice-exports').collection.createIndex(
         { xeroInvoiceId: 1 },
         {
