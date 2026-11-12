@@ -494,9 +494,9 @@ export async function getBillingEligibility(
     } else if (customer?.xeroMappingStatus !== 'active') {
       reasons.push(
         blocker(
-          'stale-source-data',
-          'The Xero contact mapping needs review.',
-          '/app/settings/customers',
+          'stale-contact',
+          "The link to this customer's Xero contact needs a re-check. It is re-checked automatically each day, or use Refresh from Xero now.",
+          `/app/settings/customers#customer-${encodeURIComponent(customerID)}`,
         ),
       )
     }
@@ -508,8 +508,8 @@ export async function getBillingEligibility(
       reasons.push(
         blocker(
           'stale-contact',
-          'Refresh this Xero contact mapping before invoicing.',
-          '/app/settings/customers',
+          "This customer's Xero contact has not been checked for 30 days. It is re-checked automatically each day, or use Refresh from Xero now.",
+          `/app/settings/customers#customer-${encodeURIComponent(customerID)}`,
         ),
       )
     }

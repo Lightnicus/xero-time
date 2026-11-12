@@ -613,3 +613,56 @@ export async function refreshCustomerContact(
     throw error
   }
 }
+
+/** Linked contacts are re-checked well before billing treats them as stale (30 days). */
+const CONTACT_RECHECK_AFTER_MS = 7 * 24 * 60 * 60 * 1_000
+const CONTACT_RECHECK_BATCH = 25
+
+/**
+ * Re-checks linked Xero contacts that are flagged or have not been checked for a week, so billing
+ * never waits on a manual "Refresh from Xero". A flag left by an earlier failure (for example while
+ * the connection was broken) clears as soon as Xero confirms the contact. Failures are per customer
+ * and never stop the run.
+ */
+export async function refreshLinkedContacts(
+  session: AppSession,
+  overrides: AccountingOverrides = {},
+): Promise<{ checked: number; failed: number }> {
+  const due = await session.payload.find({
+    collection: 'customers',
+    depth: 0,
+    limit: CONTACT_RECHECK_BATCH,
+    overrideAccess: true,
+    pagination: false,
+    req: session.req,
+    sort: 'xeroLastValidatedAt',
+    where: {
+      and: [
+        { xeroContactId: { exists: true } },
+        { xeroContactId: { not_equals: '' } },
+        {
+          or: [
+            { xeroMappingStatus: { in: ['invalid', 'needs-review'] } },
+            { xeroLastValidatedAt: { exists: false } },
+            {
+              xeroLastValidatedAt: {
+                less_than: new Date(Date.now() - CONTACT_RECHECK_AFTER_MS).toISOString(),
+              },
+            },
+          ],
+        },
+      ],
+    },
+  })
+  let checked = 0
+  let failed = 0
+  for (const customer of due.docs) {
+    try {
+      await refreshCustomerContact(session, String(customer.id), overrides)
+      checked += 1
+    } catch {
+      failed += 1
+    }
+  }
+  return { checked, failed }
+}

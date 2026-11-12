@@ -12,6 +12,7 @@ import {
   importXeroContact,
   linkXeroContact,
   refreshCustomerContact,
+  refreshLinkedContacts,
   searchXeroContacts,
 } from '@/lib/xero/accounting/contacts'
 import { AccountingIntegrationError } from '@/lib/xero/accounting/contracts'
@@ -674,5 +675,37 @@ describe.sequential('Xero contacts and reference data', () => {
         showHiddenFields: true,
       }),
     ).resolves.toMatchObject({ activeCustomerKey: null, state: 'failed' })
+  })
+
+  it('re-checks flagged or old contact links automatically and clears a stale flag', async () => {
+    // Left over from a failed check while Xero was unreachable: the contact itself is fine.
+    await payload.update({
+      collection: 'customers',
+      data: {
+        xeroLastValidatedAt: new Date(Date.now() - 40 * 24 * 60 * 60 * 1_000).toISOString(),
+        xeroMappingStatus: 'invalid',
+      },
+      id: secondCustomerID,
+      overrideAccess: true,
+    })
+    const result = await refreshLinkedContacts(ownerSession, overrides())
+    expect(result.checked).toBeGreaterThanOrEqual(1)
+    const refreshed = await payload.findByID({
+      collection: 'customers',
+      depth: 0,
+      id: secondCustomerID,
+      overrideAccess: true,
+    })
+    expect(refreshed.xeroMappingStatus).toBe('active')
+    expect(Date.parse(refreshed.xeroLastValidatedAt ?? '')).toBeGreaterThan(Date.now() - 60_000)
+
+    // A freshly checked, linked customer is left alone.
+    const getsBefore = vi.mocked(client.accountingGet).mock.calls.length
+    await refreshLinkedContacts(ownerSession, overrides())
+    const contactGets = vi
+      .mocked(client.accountingGet)
+      .mock.calls.slice(getsBefore)
+      .filter(([, , path]) => path === `Contacts/${refreshed.xeroContactId}`)
+    expect(contactGets).toHaveLength(0)
   })
 })

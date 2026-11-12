@@ -97,6 +97,27 @@ test.describe.serial('Billing application', () => {
     await expect(page.getByRole('status')).toContainText('Invoice reference settings saved')
   })
 
+  test('lays out a linked customer readably at phone width', async ({ page }, testInfo) => {
+    await page.setViewportSize({ height: 844, width: 390 })
+    await signIn(page)
+    await page.goto('/app/settings/customers')
+
+    const row = page.locator('.mapping-row').filter({ hasText: 'Billable E2E Customer' }).last()
+    await expect(row.getByText('Linked', { exact: true })).toBeVisible()
+    await expect(row.getByText(/^Checked /)).toBeVisible()
+    const details = await row.locator('.mapping-row-details').boundingBox()
+    const button = await row.getByRole('button', { name: 'Refresh from Xero' }).boundingBox()
+    expect(details && button).toBeTruthy()
+    // The button sits below the details instead of squeezing them into a narrow column.
+    expect(button!.y).toBeGreaterThanOrEqual(details!.y + details!.height - 1)
+    expect(details!.width).toBeGreaterThan(250)
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    )
+    expect(overflow).toBeLessThanOrEqual(0)
+    await row.screenshot({ path: testInfo.outputPath('customer-row-390.png') })
+  })
+
   test('previews and confirms a recalculation of unbilled project rates', async ({ page }) => {
     await signIn(page)
     await page.goto('/app/settings/projects')
