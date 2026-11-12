@@ -1,4 +1,4 @@
-import { ownerAdminOrBiller, ownerOrAdmin } from '@/access/roles'
+import { authenticated } from '@/access/roles'
 import { auditGlobalChange } from '@/lib/audit/change-hooks'
 import { validateXeroBillingDefaults } from '@/lib/billing/default-validation'
 import { isRecord, validateWholeNumber } from '@/lib/domain/validation'
@@ -89,9 +89,9 @@ export const BillingSettings: GlobalConfig = {
   slug: 'billing-settings',
   label: 'Billing Settings',
   access: {
-    read: ownerAdminOrBiller,
-    readVersions: ownerOrAdmin,
-    update: ownerOrAdmin,
+    read: authenticated,
+    readVersions: authenticated,
+    update: authenticated,
   },
   admin: {
     description:
@@ -270,7 +270,7 @@ export const BillingSettings: GlobalConfig = {
                   required: true,
                   admin: {
                     description:
-                      'Owner-controlled kill switch. Existing export history and queued work are retained.',
+                      'Kill switch for new exports. Existing export history and queued work are retained.',
                     width: '33%',
                   },
                 },
@@ -310,15 +310,6 @@ export const BillingSettings: GlobalConfig = {
               admin: {
                 description:
                   'Both modes persist the same durable job. “Wait for Xero” may still finish in the background after a timeout or interruption.',
-              },
-            },
-            {
-              name: 'allowBillerModeOverride',
-              type: 'checkbox',
-              defaultValue: false,
-              admin: {
-                description:
-                  'When disabled, billers cannot override the configured mode for an individual export.',
               },
             },
             {
@@ -365,7 +356,6 @@ export const BillingSettings: GlobalConfig = {
     afterChange: [
       auditGlobalChange('settings.billing-changed', [
         'acceptingNewExports',
-        'allowBillerModeOverride',
         'defaultRevenueAccountCode',
         'defaultTaxType',
         'defaultTrackingCategories',

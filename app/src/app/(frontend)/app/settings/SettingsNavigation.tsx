@@ -10,7 +10,6 @@ type SettingsLink = {
 }
 
 const workflowLinks: SettingsLink[] = [
-  { href: '/app/settings/users', label: 'People & invitations' },
   { href: '/app/settings/customers', label: 'Customer billing' },
   { href: '/app/settings/projects', label: 'Project billing' },
   { href: '/app/settings/billing', label: 'Invoice defaults' },

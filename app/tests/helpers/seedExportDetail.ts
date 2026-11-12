@@ -1,6 +1,6 @@
 import { createLocalReq, getPayload } from 'payload'
 
-import { cleanupNavigationRoleFixture, seedNavigationRoleFixture, testUser } from './seedUser'
+import { cleanupTestUser, seedAppUser, testUser } from './seedUser'
 import { TIME_ENTRY_BILLING_MUTATION_CONTEXT } from '../../src/collections/TimeEntries.js'
 import config from '../../src/payload.config.js'
 
@@ -90,23 +90,23 @@ const fixtureScenarios = [
 ] as const satisfies readonly ExportDetailScenario[]
 
 /**
- * Seeds immutable export snapshots for the export-detail state and role matrix.
+ * Seeds immutable export snapshots for the export-detail state matrix.
  * No Xero processing is scheduled; the browser cases only read these documents.
  */
 export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
-  await seedNavigationRoleFixture()
+  await seedAppUser()
 
   const payload = await getPayload({ config })
-  const ownerResult = await payload.find({
+  const userResult = await payload.find({
     collection: 'users',
     limit: 1,
     overrideAccess: true,
     where: { email: { equals: testUser.email } },
   })
-  const owner = ownerResult.docs[0]
-  if (!owner) throw new Error('The export-detail fixture owner was not created.')
+  const user = userResult.docs[0]
+  if (!user) throw new Error('The export-detail fixture user was not created.')
 
-  const ownerReq = await createLocalReq({ user: owner }, payload)
+  const userReq = await createLocalReq({ user }, payload)
   const seededAt = new Date().toISOString()
   const tenantID = 'e2e-export-detail-tenant'
   const xeroContactID = '33333333-cccc-4333-8333-333333333333'
@@ -128,7 +128,7 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
       tokenVersion: 0,
     },
     overrideAccess: true,
-    req: ownerReq,
+    req: userReq,
   })
 
   await payload.create({
@@ -144,7 +144,7 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
       xeroId: xeroItemID,
     },
     overrideAccess: true,
-    req: ownerReq,
+    req: userReq,
   })
 
   const customer = await payload.create({
@@ -159,7 +159,7 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
       xeroMappingStatus: 'active',
     },
     overrideAccess: true,
-    req: ownerReq,
+    req: userReq,
   })
 
   const project = await payload.create({
@@ -175,7 +175,7 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
       xeroItemId: xeroItemID,
     },
     overrideAccess: true,
-    req: ownerReq,
+    req: userReq,
   })
 
   const timeEntries: SeededTimeEntry[] = []
@@ -193,7 +193,7 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
           workDate: scenarioWorkDate(scenario),
         } as never,
         overrideAccess: false,
-        req: ownerReq,
+        req: userReq,
       }),
     )
   }
@@ -213,7 +213,7 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
       explicitEntryIds: timeEntries.map((entry) => String(entry.id)),
       invoiceCount: fixtureScenarios.length,
       normalizedFilterSnapshot: { fixture: 'export-detail' },
-      requestedBy: owner.id,
+      requestedBy: user.id,
       requestedMode: 'background',
       schemaVersion: 1,
       selectionType: 'explicit',
@@ -222,7 +222,7 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
       totalAmountScaled: totalScaled * fixtureScenarios.length,
     },
     overrideAccess: true,
-    req: ownerReq,
+    req: userReq,
   })
 
   const createExport = async (
@@ -268,12 +268,12 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
           Reference: scenario.reference,
           Type: 'ACCREC',
         },
-        requestedBy: owner.id,
+        requestedBy: user.id,
         requestedMode: 'background',
         schemaVersion: 1,
         selectionHash: 'e2e-export-detail-selection',
         state: scenario.state,
-        stateHistory: [{ actor: String(owner.id), at: seededAt, from: null, to: scenario.state }],
+        stateHistory: [{ actor: String(user.id), at: seededAt, from: null, to: scenario.state }],
         subtotalScaled,
         succeededAt: scenario.state === 'succeeded' ? seededAt : undefined,
         taxScaled,
@@ -282,7 +282,7 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
         xeroInvoiceNumber: scenario.xeroInvoiceNumber,
       },
       overrideAccess: true,
-      req: ownerReq,
+      req: userReq,
     })
 
     await payload.create({
@@ -309,13 +309,13 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
         timeEntry: timeEntry.id,
         timezone: testUser.timezone,
         tracking: [],
-        user: owner.id,
+        user: user.id,
         userName: testUser.displayName,
         workDate: scenarioWorkDate(scenario),
         xeroItemId: xeroItemID,
       },
       overrideAccess: true,
-      req: ownerReq,
+      req: userReq,
     })
 
     await payload.update({
@@ -329,7 +329,7 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
       },
       id: timeEntry.id,
       overrideAccess: true,
-      req: ownerReq,
+      req: userReq,
     })
 
     if (scenario.state === 'succeeded') {
@@ -344,7 +344,7 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
         },
         id: timeEntry.id,
         overrideAccess: true,
-        req: ownerReq,
+        req: userReq,
       })
     } else if (scenario.state === 'released') {
       await payload.update({
@@ -358,7 +358,7 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
         },
         id: timeEntry.id,
         overrideAccess: true,
-        req: ownerReq,
+        req: userReq,
       })
     }
 
@@ -382,5 +382,5 @@ export async function seedExportDetailFixture(): Promise<ExportDetailFixture> {
 
 /** Removes the isolated export-detail fixture and any browser-test side effects. */
 export async function cleanupExportDetailFixture(): Promise<void> {
-  await cleanupNavigationRoleFixture()
+  await cleanupTestUser()
 }

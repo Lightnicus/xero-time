@@ -1,7 +1,7 @@
 import { ValidationError } from 'payload'
 
-import { adminOnly, financialField, readBusinessDirectory, systemFieldWrite } from '@/access/domain'
-import { ownerOrAdmin } from '@/access/roles'
+import { authenticatedField, systemFieldWrite } from '@/access/domain'
+import { authenticated, signedInAdmin } from '@/access/roles'
 import { auditCollectionChange } from '@/lib/audit/change-hooks'
 import { formatScaledAmount } from '@/lib/domain/money'
 import {
@@ -110,8 +110,6 @@ export const protectCommercialChanges: CollectionBeforeChangeHook<ProjectHookDoc
     },
   })
   if (entries.docs.length === 0) return data
-  const reason = data.commercialChangeReason
-  const trimmedReason = typeof reason === 'string' ? reason.trim() : ''
   const errors: { message: string; path: string }[] = []
   if (data.confirmUnbilledImpact !== true) {
     errors.push({
@@ -120,16 +118,9 @@ export const protectCommercialChanges: CollectionBeforeChangeHook<ProjectHookDoc
       path: 'confirmUnbilledImpact',
     })
   }
-  if (trimmedReason.length < 10) {
-    errors.push({
-      message: 'Enter a commercial-change reason of at least 10 characters.',
-      path: 'commercialChangeReason',
-    })
-  }
   if (errors.length > 0) {
     throw new ValidationError({ collection: 'projects', errors, req })
   }
-  req.context = { ...(req.context ?? {}), auditReason: trimmedReason }
   return data
 }
 
@@ -285,12 +276,12 @@ export const Projects: CollectionConfig = {
     singular: 'Project',
   },
   access: {
-    admin: adminOnly,
-    create: ownerOrAdmin,
+    admin: signedInAdmin,
+    create: authenticated,
     delete: () => false,
-    read: readBusinessDirectory,
-    readVersions: ownerOrAdmin,
-    update: ownerOrAdmin,
+    read: authenticated,
+    readVersions: authenticated,
+    update: authenticated,
   },
   admin: {
     defaultColumns: ['code', 'name', 'customer', 'status', 'currency', 'hourlyRateScaled'],
@@ -414,7 +405,7 @@ export const Projects: CollectionConfig = {
                   defaultValue: 0,
                   validate: validateHourlyRate,
                   access: {
-                    read: financialField,
+                    read: authenticatedField,
                   },
                   admin: {
                     components: {
@@ -436,7 +427,7 @@ export const Projects: CollectionConfig = {
                   name: 'hourlyRateDisplay',
                   type: 'text',
                   virtual: true,
-                  access: { read: financialField },
+                  access: { read: authenticatedField },
                   admin: { hidden: true },
                   hooks: {
                     afterRead: [
@@ -483,7 +474,7 @@ export const Projects: CollectionConfig = {
                   validate: validateOptionalXeroID,
                   access: {
                     create: systemFieldWrite,
-                    read: financialField,
+                    read: authenticatedField,
                     update: systemFieldWrite,
                   },
                   admin: {
@@ -505,7 +496,7 @@ export const Projects: CollectionConfig = {
                   maxLength: 30,
                   access: {
                     create: systemFieldWrite,
-                    read: financialField,
+                    read: authenticatedField,
                     update: systemFieldWrite,
                   },
                   admin: {
@@ -521,7 +512,7 @@ export const Projects: CollectionConfig = {
                   maxLength: 50,
                   access: {
                     create: systemFieldWrite,
-                    read: financialField,
+                    read: authenticatedField,
                     update: systemFieldWrite,
                   },
                   admin: {
@@ -539,7 +530,7 @@ export const Projects: CollectionConfig = {
                   name: 'revenueAccountCode',
                   type: 'text',
                   maxLength: 20,
-                  access: { read: financialField },
+                  access: { read: authenticatedField },
                   admin: {
                     description: 'Optional override; otherwise customer then Billing Settings.',
                     width: '50%',
@@ -555,7 +546,7 @@ export const Projects: CollectionConfig = {
                   name: 'taxType',
                   type: 'text',
                   maxLength: 50,
-                  access: { read: financialField },
+                  access: { read: authenticatedField },
                   admin: {
                     description: 'Optional Xero TaxType override.',
                     width: '50%',
@@ -572,7 +563,7 @@ export const Projects: CollectionConfig = {
             {
               name: 'trackingCategories',
               type: 'json',
-              access: { read: financialField },
+              access: { read: authenticatedField },
               admin: {
                 description:
                   'Optional Xero tracking category/option pairs. Empty values inherit future defaults.',
@@ -589,16 +580,6 @@ export const Projects: CollectionConfig = {
                     description:
                       'Required for an item/rate/currency/account/tax/tracking change when unbilled entries exist. Future previews may use the change; reserved/exported snapshots remain unchanged.',
                     width: '33%',
-                  },
-                },
-                {
-                  name: 'commercialChangeReason',
-                  type: 'text',
-                  virtual: true,
-                  maxLength: 1_000,
-                  admin: {
-                    description: 'Recorded in the audit trail for a confirmed commercial change.',
-                    width: '67%',
                   },
                 },
               ],

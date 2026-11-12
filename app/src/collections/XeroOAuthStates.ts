@@ -25,10 +25,7 @@ export const XeroOAuthStates: CollectionConfig = {
       type: 'select',
       defaultValue: 'accounting',
       index: true,
-      options: [
-        { label: 'Accounting', value: 'accounting' },
-        { label: 'Identity', value: 'identity' },
-      ],
+      options: [{ label: 'Accounting', value: 'accounting' }],
       required: true,
     },
     {
@@ -38,9 +35,6 @@ export const XeroOAuthStates: CollectionConfig = {
         { label: 'Initial connection', value: 'initial-connect' },
         { label: 'Reconnect', value: 'reconnect' },
         { label: 'Authorizer handover', value: 'authorizer-handover' },
-        { label: 'Identity sign-in', value: 'sign-in' },
-        { label: 'Invitation acceptance', value: 'invite-acceptance' },
-        { label: 'Identity link', value: 'identity-link' },
       ],
       required: true,
     },
@@ -79,12 +73,6 @@ export const XeroOAuthStates: CollectionConfig = {
       maxDepth: 0,
     },
     {
-      name: 'invitation',
-      type: 'relationship',
-      relationTo: 'invitations',
-      maxDepth: 0,
-    },
-    {
       name: 'returnPath',
       type: 'text',
       maxLength: 500,
@@ -92,10 +80,7 @@ export const XeroOAuthStates: CollectionConfig = {
     },
     {
       type: 'row',
-      fields: [
-        { name: 'nonceEnvelope', type: 'textarea', hidden: true },
-        { name: 'pkceVerifierEnvelope', type: 'textarea', hidden: true },
-      ],
+      fields: [{ name: 'pkceVerifierEnvelope', type: 'textarea', hidden: true }],
     },
     {
       name: 'pinnedTenantId',
@@ -137,7 +122,6 @@ export const XeroOAuthStates: CollectionConfig = {
   indexes: [
     { fields: ['family', 'status', 'expiresAt'] },
     { fields: ['family', 'initiatingUser', 'status'] },
-    { fields: ['family', 'invitation', 'status'] },
   ],
   lockDocuments: false,
   timestamps: true,

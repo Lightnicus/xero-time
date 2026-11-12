@@ -16,13 +16,9 @@ export function XeroConnectionBanner({ alert }: { alert: XeroConnectionAlert }) 
           <strong>{organisation} needs to be reconnected.</strong>{' '}
           {waitingText(alert.waitingExports)}
         </p>
-        {alert.canReconnect ? (
-          <Link className="button button-secondary" href="/app/settings/xero">
-            Reconnect Xero
-          </Link>
-        ) : (
-          <p>Ask an owner or admin to reconnect Xero in Settings.</p>
-        )}
+        <Link className="button button-secondary" href="/app/settings/xero">
+          Reconnect Xero
+        </Link>
       </div>
     </div>
   )

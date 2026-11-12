@@ -17,7 +17,7 @@ import {
   listMyProjectFilterOptions,
   listMyTimeEntries,
 } from '@/lib/member-app/data'
-import { canLogTime, requireAppSession } from '@/lib/member-app/session'
+import { requireAppSession } from '@/lib/member-app/session'
 import {
   dateRangeForFilters,
   normalizeTimeEntryFilters,
@@ -91,7 +91,6 @@ export default async function TimeEntriesPage({
     redirect(appHref(filters, result.totalPages))
   }
 
-  const canCreate = canLogTime(session.user)
   const message = flashMessage(params)
   const dateFormatter = new Intl.DateTimeFormat(settings.locale, {
     dateStyle: settings.dateDisplayStyle,
@@ -123,7 +122,7 @@ export default async function TimeEntriesPage({
     filters.billable,
   ].filter(Boolean).length
   const hasAnyEntries = projectOptions.length > 0
-  const canStartFirstEntry = canCreate && activeProjects.length > 0
+  const canStartFirstEntry = activeProjects.length > 0
 
   return (
     <div className="page-stack time-workflow-page">
@@ -135,12 +134,6 @@ export default async function TimeEntriesPage({
       {message && (
         <div aria-live="polite" className="notice notice-success" role="status">
           {message}
-        </div>
-      )}
-
-      {!canCreate && (
-        <div className="notice">
-          Your billing role can review this page, but it cannot create or change time entries.
         </div>
       )}
 

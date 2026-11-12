@@ -2,7 +2,6 @@ import 'server-only'
 
 import { randomUUID } from 'node:crypto'
 
-import { hasActiveRole } from '@/access/roles'
 import { TIME_ENTRY_BILLING_MUTATION_CONTEXT } from '@/collections/TimeEntries'
 import { recordAuditEvent } from '@/lib/audit/service'
 import { stableHash } from '@/lib/billing/stable'
@@ -53,12 +52,6 @@ const history = (
   ...(Array.isArray(document.stateHistory) ? document.stateHistory : []),
   { actor, at: new Date().toISOString(), from: document.state, metadata, to },
 ]
-
-const assertOwnerAdmin = (session: AppSession): void => {
-  if (!hasActiveRole(session.user, ['owner', 'admin'])) {
-    throw new Error('Only an owner or administrator can perform this action.')
-  }
-}
 
 const loadExportAllocations = async (session: AppSession, exportID: string) =>
   (
@@ -136,7 +129,6 @@ export async function releaseInvoiceExport(
     fetchRemote?: typeof fetchRemoteInvoiceForExport
   } = {},
 ): Promise<{ entryIDs: string[]; releaseID: string }> {
-  assertOwnerAdmin(session)
   const document = await session.payload.findByID({
     collection: 'invoice-exports',
     depth: 0,
@@ -332,7 +324,6 @@ export async function deleteDraftInvoiceAndRelease(
     token?: Awaited<ReturnType<typeof getValidAccountingAccessToken>>
   } = {},
 ): Promise<{ entryIDs: string[]; releaseID: string }> {
-  assertOwnerAdmin(session)
   const deletionReason = operationReason(
     input.reason,
     'Requested deletion of a verified Xero draft and release of its mapped time entries.',
@@ -529,8 +520,6 @@ export async function cancelInvoiceExport(
   session: AppSession,
   input: { exportID: string; reason?: string },
 ): Promise<void> {
-  if (!hasActiveRole(session.user, ['owner', 'admin', 'biller']))
-    throw new Error('Billing access is required.')
   const cancellationReason = operationReason(
     input.reason,
     'Cancelled the export before any Xero request was sent.',
@@ -693,7 +682,6 @@ export async function requestInvoiceReconciliation(
   session: AppSession,
   input: { exportID: string; reason?: string },
 ): Promise<string> {
-  assertOwnerAdmin(session)
   const reconciliationReason = operationReason(
     input.reason,
     'Requested an authoritative Xero reconciliation for this export.',
@@ -784,7 +772,6 @@ export async function authorizeReplacementAttempt(
   session: AppSession,
   input: { exportID: string; reason?: string },
 ): Promise<string> {
-  assertOwnerAdmin(session)
   const replacementReason = operationReason(
     input.reason,
     'Authorized a linked replacement attempt after Xero confirmed the original invoice was absent.',
@@ -876,7 +863,6 @@ export async function acceptExistingInvoice(
     token?: Awaited<ReturnType<typeof getValidAccountingAccessToken>>
   } = {},
 ): Promise<void> {
-  assertOwnerAdmin(session)
   const acceptanceReason = reason(input.reason)
   if (!/^[0-9a-f-]{36}$/i.test(input.invoiceID)) throw new Error('Enter a valid Xero InvoiceID.')
   const document = await session.payload.findByID({
@@ -989,6 +975,5 @@ export async function refreshExportForUser(
   session: AppSession,
   exportID: string,
 ): Promise<{ remoteStatus: string; state: string }> {
-  assertOwnerAdmin(session)
   return refreshInvoiceExportStatus(session.req, exportID)
 }

@@ -549,7 +549,7 @@ export async function reconcileInvoiceExport(
       req,
       document,
       'confirmed-absent-replacement-approval-required',
-      'No invoice was found after the original idempotency window. An owner must authorize a linked replacement attempt.',
+      'No invoice was found after the original idempotency window. Approve a linked replacement attempt from the export page.',
     )
     return { state: 'manual-review' }
   } catch (unknownError) {

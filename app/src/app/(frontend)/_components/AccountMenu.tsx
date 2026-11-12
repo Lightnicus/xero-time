@@ -13,13 +13,12 @@ import type {
 type AccountMenuProps = {
   destinations: readonly (NavigationActionDestination | NavigationLinkDestination)[]
   displayName: string
-  roleLabel: string
 }
 
 const isActiveDestination = (pathname: string, href: string): boolean =>
   href === '/app' ? pathname === href : pathname === href || pathname.startsWith(`${href}/`)
 
-export function AccountMenu({ destinations, displayName, roleLabel }: AccountMenuProps) {
+export function AccountMenu({ destinations, displayName }: AccountMenuProps) {
   const pathname = usePathname()
   const triggerRef = useRef<HTMLButtonElement>(null)
   const [open, setOpen] = useState(false)
@@ -51,7 +50,6 @@ export function AccountMenu({ destinations, displayName, roleLabel }: AccountMen
         </span>
         <span className="account-copy">
           <strong>{displayName}</strong>
-          <small>{roleLabel}</small>
         </span>
         <span aria-hidden="true" className="menu-chevron">
           ▾
@@ -62,7 +60,6 @@ export function AccountMenu({ destinations, displayName, roleLabel }: AccountMen
         <div className="nav-popover account-popover" id="account-menu-panel">
           <div className="account-popover-heading">
             <strong>{displayName}</strong>
-            <span>{roleLabel}</span>
           </div>
           {destinations.map((destination) =>
             destination.kind === 'link' ? (

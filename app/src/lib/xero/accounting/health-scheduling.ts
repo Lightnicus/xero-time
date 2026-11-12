@@ -13,25 +13,25 @@ type QueueMaintenance = (args: {
   task: 'maintain-xero-accounting'
 }) => Promise<unknown>
 
-/** Queues only a deduplicated health job; it never receives or opens an identity credential. */
+/** A sign-in queues a health check when the last one is older than this. */
+const STALE_HEALTH_CHECK_HOURS = 24
+
+/** Queues only a deduplicated health job. */
 export async function enqueueStaleAccountingHealthCheck(
   payload: Payload,
   user: User,
 ): Promise<boolean> {
-  const [settings, connections] = await Promise.all([
-    payload.findGlobal({ slug: 'authentication-settings', overrideAccess: true }),
-    payload.find({
-      collection: 'xero-connections',
-      depth: 0,
-      limit: 1,
-      overrideAccess: true,
-      where: { singletonKey: { equals: 'business-accounting' } },
-    }),
-  ])
+  const connections = await payload.find({
+    collection: 'xero-connections',
+    depth: 0,
+    limit: 1,
+    overrideAccess: true,
+    where: { singletonKey: { equals: 'business-accounting' } },
+  })
   const connection = connections.docs[0]
   if (!connection || connection.status !== 'connected') return false
   const lastCheck = Date.parse(connection.lastHealthCheckAt ?? connection.lastRefreshedAt ?? '')
-  const staleAfter = settings.staleAccountingHealthCheckHours * 60 * 60 * 1_000
+  const staleAfter = STALE_HEALTH_CHECK_HOURS * 60 * 60 * 1_000
   if (Number.isFinite(lastCheck) && lastCheck > Date.now() - staleAfter) return false
 
   const pending = await requireMongoModel(payload, 'payload-jobs').findOne({

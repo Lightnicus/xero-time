@@ -65,11 +65,9 @@ describe.sequential('billing reservation saga', () => {
     const bootstrapped = await registerFirstUserOperation({
       collection: payload.collections.users,
       data: {
-        active: true,
         displayName: 'Billing Owner',
         email: 'billing-owner@example.test',
         password: PASSWORD,
-        role: 'owner',
         timezone: 'Pacific/Auckland',
       } as never,
       req: anonymousReq,
@@ -80,12 +78,9 @@ describe.sequential('billing reservation saga', () => {
     const biller = await payload.create({
       collection: 'users',
       data: {
-        _verified: true,
-        active: true,
         displayName: 'Billing Operator',
         email: 'billing-operator@example.test',
         password: PASSWORD,
-        role: 'biller',
         timezone: 'Pacific/Auckland',
       },
       overrideAccess: false,
@@ -94,12 +89,9 @@ describe.sequential('billing reservation saga', () => {
     const member = await payload.create({
       collection: 'users',
       data: {
-        _verified: true,
-        active: true,
         displayName: 'Time Member',
         email: 'billing-member@example.test',
         password: PASSWORD,
-        role: 'member',
         timezone: 'Pacific/Auckland',
       },
       overrideAccess: false,
@@ -263,7 +255,6 @@ describe.sequential('billing reservation saga', () => {
     await payload.update({
       collection: 'projects',
       data: {
-        commercialChangeReason: 'Verify the required Xero item billing blocker.',
         confirmUnbilledImpact: true,
         xeroItemId: null,
       },
@@ -291,7 +282,6 @@ describe.sequential('billing reservation saga', () => {
     await payload.update({
       collection: 'projects',
       data: {
-        commercialChangeReason: 'Restore the active Xero item billing mapping.',
         confirmUnbilledImpact: true,
         xeroItemId: '44444444-4444-4444-8444-444444444444',
       },
@@ -675,20 +665,13 @@ describe.sequential('billing reservation saga', () => {
     })
   })
 
-  it('denies billing collections to members through ordinary APIs', async () => {
-    const member = await payload.find({
-      collection: 'users',
-      depth: 0,
-      limit: 1,
-      overrideAccess: true,
-      where: { role: { equals: 'member' } },
-    })
-    const memberReq = await reqFor(member.docs[0])
+  it('denies billing collections to anonymous requests', async () => {
+    const anonymousReq = await createLocalReq({}, payload)
     await expect(
-      payload.find({ collection: 'invoice-exports', overrideAccess: false, req: memberReq }),
+      payload.find({ collection: 'invoice-exports', overrideAccess: false, req: anonymousReq }),
     ).rejects.toMatchObject({ status: 403 })
     await expect(
-      payload.find({ collection: 'xero-attempts', overrideAccess: false, req: memberReq }),
+      payload.find({ collection: 'xero-attempts', overrideAccess: false, req: anonymousReq }),
     ).rejects.toMatchObject({ status: 403 })
   })
 
@@ -698,7 +681,7 @@ describe.sequential('billing reservation saga', () => {
       depth: 0,
       limit: 1,
       overrideAccess: true,
-      where: { role: { equals: 'member' } },
+      where: { email: { equals: 'billing-member@example.test' } },
     })
     const timeEntry = await payload.create({
       collection: 'time-entries',
@@ -733,7 +716,7 @@ describe.sequential('billing reservation saga', () => {
     return { preview, selection }
   }
 
-  it('confirms without an override reason when configured wait mode is forced to background', async () => {
+  it('confirms a forced-background or overridden mode without a reason', async () => {
     await payload.updateGlobal({
       slug: 'billing-settings',
       data: { waitForResultEnabled: false, xeroExportMode: 'wait-for-result' },
@@ -767,7 +750,7 @@ describe.sequential('billing reservation saga', () => {
         await cancelInvoiceExport(ownerSession, { exportID: result.exportIDs[0] as string })
       }
 
-      // A real override (background configured, wait requested) still needs a reason.
+      // A real override (background configured, wait requested) no longer needs a reason.
       await payload.updateGlobal({
         slug: 'billing-settings',
         data: { xeroExportMode: 'background' },
@@ -778,16 +761,16 @@ describe.sequential('billing reservation saga', () => {
         entryID,
         'ABABABAB-0000-4000-8000-000000000003',
       )
-      await expect(
-        confirmBillingPreview(ownerSession, {
-          batchReference: preview.batchReference,
-          checksum: preview.checksum,
-          invoiceDate: '2026-07-22',
-          modeOverrideReason: '',
-          requestedMode: 'wait-for-result',
-          selection,
-        }),
-      ).rejects.toThrow(/different execution mode/)
+      const overridden = await confirmBillingPreview(ownerSession, {
+        batchReference: preview.batchReference,
+        checksum: preview.checksum,
+        invoiceDate: '2026-07-22',
+        modeOverrideReason: '',
+        requestedMode: 'wait-for-result',
+        selection,
+      })
+      expect(overridden).toMatchObject({ status: 'queued' })
+      await cancelInvoiceExport(ownerSession, { exportID: overridden.exportIDs[0] as string })
     } finally {
       await payload.updateGlobal({
         slug: 'billing-settings',

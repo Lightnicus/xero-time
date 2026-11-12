@@ -37,7 +37,6 @@ type TimeEntryFormProps = {
   initialValues: TimeEntryFormValues
   mode: 'create' | 'edit'
   projects: ProjectOption[]
-  requiresCorrectionReason?: boolean
   timezones: TimezoneOption[]
 }
 
@@ -54,7 +53,6 @@ export function TimeEntryForm({
   initialValues,
   mode,
   projects,
-  requiresCorrectionReason = false,
   timezones,
 }: TimeEntryFormProps) {
   const action = mode === 'create' ? createTimeEntryAction : updateTimeEntryAction
@@ -97,7 +95,7 @@ export function TimeEntryForm({
 
       {!hasProjects && (
         <div className="notice notice-warning">
-          There are no active projects available. Ask an administrator to create or activate one.
+          There are no active projects yet. Create one under Manage → Project billing.
         </div>
       )}
 
@@ -333,28 +331,6 @@ export function TimeEntryForm({
               </label>
             </details>
           </div>
-
-          {mode === 'edit' && requiresCorrectionReason && (
-            <section className="time-correction-field" aria-labelledby="correction-reason-heading">
-              <div>
-                <h2 id="correction-reason-heading">Correction reason</h2>
-                <p>Administrator corrections are recorded in the audit trail.</p>
-              </div>
-              <label className="field" htmlFor="privilegedCorrectionReason">
-                <span>Reason</span>
-                <textarea
-                  aria-invalid={Boolean(state.fieldErrors?.privilegedCorrectionReason)}
-                  id="privilegedCorrectionReason"
-                  maxLength={1_000}
-                  minLength={10}
-                  name="privilegedCorrectionReason"
-                  required
-                  rows={3}
-                />
-                <FieldError field="privilegedCorrectionReason" state={state} />
-              </label>
-            </section>
-          )}
 
           <div className="time-form-actions">
             <Link className="button button-secondary" href="/app">

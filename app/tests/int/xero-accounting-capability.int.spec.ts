@@ -132,11 +132,9 @@ describe.sequential('Xero accounting capability validation', () => {
     const bootstrap = await registerFirstUserOperation({
       collection: payload.collections.users,
       data: {
-        active: true,
         displayName: 'Capability Owner',
         email: 'capability-owner@example.test',
         password: PASSWORD,
-        role: 'owner',
         timezone: 'Pacific/Auckland',
       } as never,
       req: anonymousReq,

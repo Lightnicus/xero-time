@@ -105,21 +105,6 @@ export function ProjectXeroItemForm({
         <small className="field-error">{state.fieldErrors.confirmUnbilledImpact}</small>
       )}
 
-      <label className="field">
-        <span>Commercial reason</span>
-        <textarea
-          aria-invalid={Boolean(state.fieldErrors?.commercialChangeReason)}
-          maxLength={1_000}
-          minLength={10}
-          name="commercialChangeReason"
-          placeholder="Required when this project has unbilled time"
-          rows={2}
-        />
-        {state.fieldErrors?.commercialChangeReason && (
-          <small className="field-error">{state.fieldErrors.commercialChangeReason}</small>
-        )}
-      </label>
-
       <PendingSubmitButton
         className="button button-secondary"
         disabled={disabled}

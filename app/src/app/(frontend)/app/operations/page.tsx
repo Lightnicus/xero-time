@@ -1,9 +1,6 @@
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
 
-import { hasActiveRole } from '@/access/roles'
 import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
-import { environment } from '@/lib/env'
 import { requireAppSession } from '@/lib/member-app/session'
 import { getAccountingConnectionView } from '@/lib/xero/accounting/service'
 
@@ -13,27 +10,17 @@ export const metadata: Metadata = { title: 'Operations | Project Time' }
 
 export default async function OperationsPage() {
   const session = await requireAppSession()
-  if (!hasActiveRole(session.user, ['owner', 'admin'])) redirect('/app')
 
   const [
-    activeUsers,
     unmappedCustomers,
     unbilledEntries,
     queuedExports,
     actionExports,
     pendingWebhooks,
-    externalSessions,
-    authSettings,
     billingSettings,
     accounting,
     settingsAudits,
   ] = await Promise.all([
-    session.payload.count({
-      collection: 'users',
-      overrideAccess: true,
-      req: session.req,
-      where: { active: { equals: true } },
-    }),
     session.payload.count({
       collection: 'customers',
       overrideAccess: true,
@@ -64,17 +51,6 @@ export default async function OperationsPage() {
       req: session.req,
       where: { status: { in: ['pending', 'failed', 'processing'] } },
     }),
-    session.payload.count({
-      collection: 'external-auth-sessions',
-      overrideAccess: true,
-      req: session.req,
-      where: { revokedAt: { exists: false } },
-    }),
-    session.payload.findGlobal({
-      slug: 'authentication-settings',
-      overrideAccess: true,
-      req: session.req,
-    }),
     session.payload.findGlobal({
       slug: 'billing-settings',
       overrideAccess: true,
@@ -91,7 +67,6 @@ export default async function OperationsPage() {
       where: {
         eventType: {
           in: [
-            'settings.authentication-changed',
             'settings.billing-changed',
             'settings.business-changed',
             'security.kill-switch-changed',
@@ -123,7 +98,6 @@ export default async function OperationsPage() {
   const actorNames = new Map(actors.docs.map((user) => [String(user.id), user.displayName]))
 
   const operationalCounts = [
-    ['Active users', activeUsers.totalDocs, '/app/settings/users', false],
     ['Unmapped customers', unmappedCustomers.totalDocs, '/app/settings/customers', false],
     ['Unbilled entries', unbilledEntries.totalDocs, '/app/billing', false],
     ['Queued or active exports', queuedExports.totalDocs, '/app/billing/exports', false],
@@ -164,22 +138,9 @@ export default async function OperationsPage() {
 
       <section className="operations-section">
         <div className="operations-section-heading">
-          <h2>Independent integration health</h2>
-          <p>An outage or kill switch in one boundary does not imply failure in the other.</p>
+          <h2>Xero health</h2>
         </div>
         <dl className="detail-list">
-          <div>
-            <dt>Xero identity configuration</dt>
-            <dd>{environment.xeroIdentity.configured ? 'Configured' : 'Not configured'}</dd>
-          </div>
-          <div>
-            <dt>Xero identity sign-in</dt>
-            <dd>{authSettings.xeroIdentityLoginEnabled ? 'Enabled' : 'Disabled'}</dd>
-          </div>
-          <div>
-            <dt>Active external sessions</dt>
-            <dd>{externalSessions.totalDocs}</dd>
-          </div>
           <div>
             <dt>Xero accounting</dt>
             <dd>{accounting.status.replaceAll('-', ' ')}</dd>

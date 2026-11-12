@@ -1,7 +1,6 @@
 import Link from 'next/link'
-import { notFound, redirect } from 'next/navigation'
+import { notFound } from 'next/navigation'
 
-import { hasActiveRole } from '@/access/roles'
 import { ExportStatusPoller } from '@/app/(frontend)/_components/ExportStatusPoller'
 import { PendingSubmitButton } from '@/app/(frontend)/_components/PendingControls'
 import { exportDetailActionAvailability } from '@/lib/billing/export-detail'
@@ -44,7 +43,6 @@ export default async function InvoiceExportDetailPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const session = await requireAppSession()
-  if (!hasActiveRole(session.user, ['owner', 'admin', 'biller'])) redirect('/app')
   const { id } = await params
   if (!/^[A-Za-z0-9_-]{1,100}$/.test(id)) notFound()
   let document
@@ -71,8 +69,7 @@ export default async function InvoiceExportDetailPage({
     sort: 'lineOrdinal',
     where: { invoiceExport: { equals: id } },
   })
-  const isOwnerAdmin = hasActiveRole(session.user, ['owner', 'admin'])
-  const actionAvailability = exportDetailActionAvailability(document, session.user.role)
+  const actionAvailability = exportDetailActionAvailability(document)
   const awaitingXeroReconnect = isAwaitingXeroReconnect(document)
   const xeroInvoiceHref =
     document.xeroInvoiceUrl ??
@@ -142,13 +139,9 @@ export default async function InvoiceExportDetailPage({
             Xero stopped accepting this app&apos;s connection, so this export is paused. Its time
             stays reserved and it resumes automatically once Xero is reconnected.
           </p>
-          {isOwnerAdmin ? (
-            <Link className="button button-secondary" href="/app/settings/xero">
-              Reconnect Xero
-            </Link>
-          ) : (
-            <p>Ask an owner or admin to reconnect Xero in Settings.</p>
-          )}
+          <Link className="button button-secondary" href="/app/settings/xero">
+            Reconnect Xero
+          </Link>
         </div>
       ) : (
         document.lastErrorMessage && (
@@ -411,8 +404,7 @@ export default async function InvoiceExportDetailPage({
         </section>
       )}
 
-      {isOwnerAdmin &&
-        (document.remoteStatus === 'DELETED' || document.remoteStatus === 'VOIDED') &&
+      {(document.remoteStatus === 'DELETED' || document.remoteStatus === 'VOIDED') &&
         document.state !== 'released' && (
           <section className="panel page-stack">
             <h2>Release all entries for rebilling</h2>

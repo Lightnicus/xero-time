@@ -1,4 +1,4 @@
-import { adminOnly } from '@/access/domain'
+import { signedInAdmin } from '@/access/roles'
 
 import type { CollectionConfig } from 'payload'
 
@@ -7,10 +7,10 @@ const denyAll = () => false
 export const XeroReferenceData: CollectionConfig = {
   slug: 'xero-reference-data',
   access: {
-    admin: adminOnly,
+    admin: signedInAdmin,
     create: denyAll,
     delete: denyAll,
-    read: adminOnly,
+    read: signedInAdmin,
     update: denyAll,
   },
   admin: {

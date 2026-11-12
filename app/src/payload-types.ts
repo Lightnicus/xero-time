@@ -68,9 +68,6 @@ export interface Config {
   blocks: {};
   collections: {
     users: User;
-    invitations: Invitation;
-    'auth-identities': AuthIdentity;
-    'external-auth-sessions': ExternalAuthSession;
     customers: Customer;
     projects: Project;
     'time-entries': TimeEntry;
@@ -94,9 +91,6 @@ export interface Config {
   collectionsJoins: {};
   collectionsSelect: {
     users: UsersSelect<false> | UsersSelect<true>;
-    invitations: InvitationsSelect<false> | InvitationsSelect<true>;
-    'auth-identities': AuthIdentitiesSelect<false> | AuthIdentitiesSelect<true>;
-    'external-auth-sessions': ExternalAuthSessionsSelect<false> | ExternalAuthSessionsSelect<true>;
     customers: CustomersSelect<false> | CustomersSelect<true>;
     projects: ProjectsSelect<false> | ProjectsSelect<true>;
     'time-entries': TimeEntriesSelect<false> | TimeEntriesSelect<true>;
@@ -123,12 +117,10 @@ export interface Config {
   fallbackLocale: null;
   globals: {
     'business-settings': BusinessSetting;
-    'authentication-settings': AuthenticationSetting;
     'billing-settings': BillingSetting;
   };
   globalsSelect: {
     'business-settings': BusinessSettingsSelect<false> | BusinessSettingsSelect<true>;
-    'authentication-settings': AuthenticationSettingsSelect<false> | AuthenticationSettingsSelect<true>;
     'billing-settings': BillingSettingsSelect<false> | BillingSettingsSelect<true>;
   };
   locale: null;
@@ -176,24 +168,10 @@ export interface UserAuthOperations {
 export interface User {
   id: string;
   displayName: string;
-  role: 'owner' | 'admin' | 'biller' | 'member';
-  /**
-   * Inactive users are denied application and Payload Admin authorization.
-   */
-  active: boolean;
-  bootstrapMarker?: string | null;
   /**
    * IANA timezone, for example Pacific/Auckland.
    */
   timezone: string;
-  /**
-   * Managed by protected authentication workflows.
-   */
-  enabledLoginMethods?: ('email-password' | 'xero')[] | null;
-  lastLoginProvider?: ('email-password' | 'xero') | null;
-  lastLoginAt?: string | null;
-  linkedXeroDisplay?: string | null;
-  activeExternalSessionCount?: number | null;
   updatedAt: string;
   createdAt: string;
   email: string;
@@ -201,8 +179,6 @@ export interface User {
   resetPasswordExpiration?: string | null;
   salt?: string | null;
   hash?: string | null;
-  _verified?: boolean | null;
-  _verificationToken?: string | null;
   loginAttempts?: number | null;
   lockUntil?: string | null;
   sessions?:
@@ -214,80 +190,6 @@ export interface User {
     | null;
   password?: string | null;
   collection: 'users';
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "invitations".
- */
-export interface Invitation {
-  id: string;
-  email: string;
-  displayName: string;
-  role: 'admin' | 'biller' | 'member';
-  timezone: string;
-  status: 'pending' | 'accepting' | 'accepted' | 'revoked';
-  tokenHash: string;
-  issuedAt: string;
-  expiresAt: string;
-  cleanupAt?: string | null;
-  invitedBy: string | User;
-  acceptedBy?: (string | null) | User;
-  acceptanceProvider?: ('email-password' | 'xero') | null;
-  acceptedAt?: string | null;
-  revokedAt?: string | null;
-  revokedBy?: (string | null) | User;
-  revocationReason?: string | null;
-  deliveryStatus: 'pending' | 'sent' | 'failed';
-  deliveryAttempts: number;
-  lastDeliveredAt?: string | null;
-  lastDeliveryError?: string | null;
-  updatedAt: string;
-  createdAt: string;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "auth-identities".
- */
-export interface AuthIdentity {
-  id: string;
-  user: string | User;
-  provider: 'xero';
-  status: 'active' | 'revoked' | 'collision-review';
-  issuer: string;
-  subject: string;
-  emailSnapshot?: string | null;
-  displayNameSnapshot?: string | null;
-  linkedAt: string;
-  lastUsedAt?: string | null;
-  linkedBy?: (string | null) | User;
-  unlinkedBy?: (string | null) | User;
-  unlinkedAt?: string | null;
-  unlinkReason?: string | null;
-  updatedAt: string;
-  createdAt: string;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "external-auth-sessions".
- */
-export interface ExternalAuthSession {
-  id: string;
-  user: string | User;
-  identity: string | AuthIdentity;
-  tokenHash: string;
-  status: 'active' | 'revoked' | 'expired';
-  version: number;
-  issuedAt: string;
-  lastSeenAt: string;
-  idleExpiresAt: string;
-  absoluteExpiresAt: string;
-  cleanupAt?: string | null;
-  deviceLabel?: string | null;
-  userAgentHash?: string | null;
-  revokedAt?: string | null;
-  revocationReason?: string | null;
-  updatedAt: string;
-  createdAt: string;
 }
 /**
  * Local customers may be used for projects and time before they are explicitly mapped to a Xero contact.
@@ -757,10 +659,6 @@ export interface Project {
    * Required for an item/rate/currency/account/tax/tracking change when unbilled entries exist. Future previews may use the change; reserved/exported snapshots remain unchanged.
    */
   confirmUnbilledImpact?: boolean | null;
-  /**
-   * Recorded in the audit trail for a confirmed commercial change.
-   */
-  commercialChangeReason?: string | null;
   createdBy?: (string | null) | User;
   updatedBy?: (string | null) | User;
   updatedAt: string;
@@ -775,7 +673,7 @@ export interface Project {
 export interface TimeEntry {
   id: string;
   /**
-   * Members are always assigned to themselves; an owner or admin may choose another active user.
+   * Defaults to the signed-in user.
    */
   owner: string | User;
   /**
@@ -885,6 +783,7 @@ export interface TimeEntry {
     | 'America/Coral_Harbour'
     | 'America/Cordoba'
     | 'America/Costa_Rica'
+    | 'America/Coyhaique'
     | 'America/Creston'
     | 'America/Cuiaba'
     | 'America/Curacao'
@@ -1232,10 +1131,6 @@ export interface TimeEntry {
    */
   billable?: boolean | null;
   /**
-   * Required when an owner or administrator corrects an existing unbilled entry. Recorded in the audit trail.
-   */
-  privilegedCorrectionReason?: string | null;
-  /**
    * Canonical whole-minute duration derived from the selected input mode.
    */
   durationSeconds: number;
@@ -1527,15 +1422,13 @@ export interface XeroConnection {
  */
 export interface XeroOauthState {
   id: string;
-  family: 'accounting' | 'identity';
-  purpose: 'initial-connect' | 'reconnect' | 'authorizer-handover' | 'sign-in' | 'invite-acceptance' | 'identity-link';
+  family: 'accounting';
+  purpose: 'initial-connect' | 'reconnect' | 'authorizer-handover';
   status: 'pending' | 'consumed' | 'awaiting-selection' | 'completed' | 'failed';
   stateHash: string;
   browserBindingHash: string;
   initiatingUser?: (string | null) | User;
-  invitation?: (string | null) | Invitation;
   returnPath?: string | null;
-  nonceEnvelope?: string | null;
   pkceVerifierEnvelope?: string | null;
   pinnedTenantId?: string | null;
   handoverReason?: string | null;
@@ -1989,15 +1882,7 @@ export interface PayloadMigration {
  */
 export interface UsersSelect<T extends boolean = true> {
   displayName?: T;
-  role?: T;
-  active?: T;
-  bootstrapMarker?: T;
   timezone?: T;
-  enabledLoginMethods?: T;
-  lastLoginProvider?: T;
-  lastLoginAt?: T;
-  linkedXeroDisplay?: T;
-  activeExternalSessionCount?: T;
   updatedAt?: T;
   createdAt?: T;
   email?: T;
@@ -2005,8 +1890,6 @@ export interface UsersSelect<T extends boolean = true> {
   resetPasswordExpiration?: T;
   salt?: T;
   hash?: T;
-  _verified?: T;
-  _verificationToken?: T;
   loginAttempts?: T;
   lockUntil?: T;
   sessions?:
@@ -2016,77 +1899,6 @@ export interface UsersSelect<T extends boolean = true> {
         createdAt?: T;
         expiresAt?: T;
       };
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "invitations_select".
- */
-export interface InvitationsSelect<T extends boolean = true> {
-  email?: T;
-  displayName?: T;
-  role?: T;
-  timezone?: T;
-  status?: T;
-  tokenHash?: T;
-  issuedAt?: T;
-  expiresAt?: T;
-  cleanupAt?: T;
-  invitedBy?: T;
-  acceptedBy?: T;
-  acceptanceProvider?: T;
-  acceptedAt?: T;
-  revokedAt?: T;
-  revokedBy?: T;
-  revocationReason?: T;
-  deliveryStatus?: T;
-  deliveryAttempts?: T;
-  lastDeliveredAt?: T;
-  lastDeliveryError?: T;
-  updatedAt?: T;
-  createdAt?: T;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "auth-identities_select".
- */
-export interface AuthIdentitiesSelect<T extends boolean = true> {
-  user?: T;
-  provider?: T;
-  status?: T;
-  issuer?: T;
-  subject?: T;
-  emailSnapshot?: T;
-  displayNameSnapshot?: T;
-  linkedAt?: T;
-  lastUsedAt?: T;
-  linkedBy?: T;
-  unlinkedBy?: T;
-  unlinkedAt?: T;
-  unlinkReason?: T;
-  updatedAt?: T;
-  createdAt?: T;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "external-auth-sessions_select".
- */
-export interface ExternalAuthSessionsSelect<T extends boolean = true> {
-  user?: T;
-  identity?: T;
-  tokenHash?: T;
-  status?: T;
-  version?: T;
-  issuedAt?: T;
-  lastSeenAt?: T;
-  idleExpiresAt?: T;
-  absoluteExpiresAt?: T;
-  cleanupAt?: T;
-  deviceLabel?: T;
-  userAgentHash?: T;
-  revokedAt?: T;
-  revocationReason?: T;
-  updatedAt?: T;
-  createdAt?: T;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -2137,7 +1949,6 @@ export interface ProjectsSelect<T extends boolean = true> {
   taxType?: T;
   trackingCategories?: T;
   confirmUnbilledImpact?: T;
-  commercialChangeReason?: T;
   createdBy?: T;
   updatedBy?: T;
   updatedAt?: T;
@@ -2160,7 +1971,6 @@ export interface TimeEntriesSelect<T extends boolean = true> {
   enteredMinutes?: T;
   description?: T;
   billable?: T;
-  privilegedCorrectionReason?: T;
   durationSeconds?: T;
   rateSnapshotScaled?: T;
   currencySnapshot?: T;
@@ -2224,9 +2034,7 @@ export interface XeroOauthStatesSelect<T extends boolean = true> {
   stateHash?: T;
   browserBindingHash?: T;
   initiatingUser?: T;
-  invitation?: T;
   returnPath?: T;
-  nonceEnvelope?: T;
   pkceVerifierEnvelope?: T;
   pinnedTenantId?: T;
   handoverReason?: T;
@@ -2670,6 +2478,7 @@ export interface BusinessSetting {
     | 'America/Coral_Harbour'
     | 'America/Cordoba'
     | 'America/Costa_Rica'
+    | 'America/Coyhaique'
     | 'America/Creston'
     | 'America/Cuiaba'
     | 'America/Curacao'
@@ -3179,53 +2988,6 @@ export interface BusinessSetting {
   createdAt?: string | null;
 }
 /**
- * Controls optional Xero identity sign-in and local external-session policy. Email/password recovery remains enabled.
- *
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "authentication-settings".
- */
-export interface AuthenticationSetting {
-  id: string;
-  /**
-   * Always enabled so the final owner retains a recovery path independent of Xero.
-   */
-  emailPasswordEnabled: boolean;
-  /**
-   * Enables identity-only “Sign in with Xero”. This does not affect the business accounting connection.
-   */
-  xeroIdentityLoginEnabled?: boolean | null;
-  /**
-   * Allows an authenticated user to link a Xero identity.
-   */
-  xeroIdentityLinkingEnabled?: boolean | null;
-  /**
-   * Allows a valid invitation to be accepted using Xero identity.
-   */
-  xeroIdentityInviteAcceptanceEnabled?: boolean | null;
-  /**
-   * Roles offered Xero identity sign-in during staged rollout. Local roles remain authoritative.
-   */
-  xeroIdentityRolloutRoles?: ('owner' | 'admin' | 'biller' | 'member')[] | null;
-  /**
-   * Idle lifetime in minutes. Default: 7 days.
-   */
-  externalSessionIdleMinutes: number;
-  /**
-   * Maximum lifetime in minutes. Default: 30 days.
-   */
-  externalSessionAbsoluteMinutes: number;
-  /**
-   * Shows safe active-session metadata on the account-security page.
-   */
-  showSessionManagement?: boolean | null;
-  /**
-   * After a successful login, a non-blocking accounting health check may be queued when the last check is older than this. Identity tokens are never used.
-   */
-  staleAccountingHealthCheckHours: number;
-  updatedAt?: string | null;
-  createdAt?: string | null;
-}
-/**
  * Defaults for future invoice previews and exports. Saved time and invoice snapshots are immutable.
  *
  * This interface was referenced by `Config`'s JSON-Schema
@@ -3285,7 +3047,7 @@ export interface BillingSetting {
     | boolean
     | null;
   /**
-   * Owner-controlled kill switch. Existing export history and queued work are retained.
+   * Kill switch for new exports. Existing export history and queued work are retained.
    */
   acceptingNewExports: boolean;
   /**
@@ -3300,10 +3062,6 @@ export interface BillingSetting {
    * Both modes persist the same durable job. “Wait for Xero” may still finish in the background after a timeout or interruption.
    */
   xeroExportMode: 'background' | 'wait-for-result';
-  /**
-   * When disabled, billers cannot override the configured mode for an individual export.
-   */
-  allowBillerModeOverride?: boolean | null;
   /**
    * A larger batch is forced to background mode regardless of the configured mode.
    */
@@ -3334,24 +3092,6 @@ export interface BusinessSettingsSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "authentication-settings_select".
- */
-export interface AuthenticationSettingsSelect<T extends boolean = true> {
-  emailPasswordEnabled?: T;
-  xeroIdentityLoginEnabled?: T;
-  xeroIdentityLinkingEnabled?: T;
-  xeroIdentityInviteAcceptanceEnabled?: T;
-  xeroIdentityRolloutRoles?: T;
-  externalSessionIdleMinutes?: T;
-  externalSessionAbsoluteMinutes?: T;
-  showSessionManagement?: T;
-  staleAccountingHealthCheckHours?: T;
-  updatedAt?: T;
-  createdAt?: T;
-  globalType?: T;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "billing-settings_select".
  */
 export interface BillingSettingsSelect<T extends boolean = true> {
@@ -3372,7 +3112,6 @@ export interface BillingSettingsSelect<T extends boolean = true> {
   processingEnabled?: T;
   waitForResultEnabled?: T;
   xeroExportMode?: T;
-  allowBillerModeOverride?: T;
   maxWaitInvoices?: T;
   maxWaitLines?: T;
   updatedAt?: T;

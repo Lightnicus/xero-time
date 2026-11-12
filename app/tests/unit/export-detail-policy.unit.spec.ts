@@ -15,30 +15,10 @@ const exportDocument = (overrides: Partial<ExportDetailDocument> = {}): ExportDe
 })
 
 describe('export detail action availability', () => {
-  it.each(['owner', 'admin'] as const)('allows an %s to refresh a saved invoice', (role) => {
+  it('allows refreshing a saved invoice', () => {
     expect(
-      exportDetailActionAvailability(exportDocument({ xeroInvoiceId: 'invoice-1' }), role),
+      exportDetailActionAvailability(exportDocument({ xeroInvoiceId: 'invoice-1' })),
     ).toMatchObject({ canRefresh: true })
-  })
-
-  it('denies every recovery action to a biller', () => {
-    expect(
-      exportDetailActionAvailability(
-        exportDocument({
-          remoteStatus: 'DRAFT',
-          state: 'succeeded',
-          xeroInvoiceId: 'invoice-1',
-        }),
-        'biller',
-      ),
-    ).toEqual({
-      canAuthorizeReplacement: false,
-      canDeleteDraft: false,
-      canRefresh: false,
-      canRequestRecovery: false,
-      recoveryInProgress: false,
-      showDraftRecovery: false,
-    })
   })
 
   it('shows and enables draft deletion for a succeeded saved DRAFT', () => {
@@ -49,7 +29,6 @@ describe('export detail action availability', () => {
           state: 'succeeded',
           xeroInvoiceId: 'invoice-1',
         }),
-        'owner',
       ),
     ).toMatchObject({
       canDeleteDraft: true,
@@ -64,7 +43,6 @@ describe('export detail action availability', () => {
       expect(
         exportDetailActionAvailability(
           exportDocument({ remoteStatus, state: 'succeeded', xeroInvoiceId: 'invoice-1' }),
-          'owner',
         ),
       ).toEqual({
         canAuthorizeReplacement: false,
@@ -85,7 +63,6 @@ describe('export detail action availability', () => {
           state: 'manual-review',
           xeroInvoiceId: 'invoice-1',
         }),
-        'admin',
       ),
     ).toMatchObject({
       canDeleteDraft: false,
@@ -95,9 +72,7 @@ describe('export detail action availability', () => {
   })
 
   it('marks reconciliation in progress without offering a duplicate queue action', () => {
-    expect(
-      exportDetailActionAvailability(exportDocument({ state: 'reconciling' }), 'owner'),
-    ).toMatchObject({
+    expect(exportDetailActionAvailability(exportDocument({ state: 'reconciling' }))).toMatchObject({
       canRequestRecovery: false,
       recoveryInProgress: true,
     })
@@ -110,7 +85,6 @@ describe('export detail action availability', () => {
           lastErrorCode: 'confirmed-absent-replacement-approval-required',
           state: 'manual-review',
         }),
-        'admin',
       ),
     ).toMatchObject({
       canAuthorizeReplacement: true,
@@ -128,7 +102,6 @@ describe('export detail action availability', () => {
             state: 'action-required',
             xeroInvoiceId: 'invoice-1',
           }),
-          'owner',
         ),
       ).toMatchObject({
         canRefresh: true,
@@ -139,10 +112,7 @@ describe('export detail action availability', () => {
 
   it('requires a saved invoice ID for refresh and DRAFT recovery context', () => {
     expect(
-      exportDetailActionAvailability(
-        exportDocument({ remoteStatus: 'DRAFT', state: 'succeeded' }),
-        'owner',
-      ),
+      exportDetailActionAvailability(exportDocument({ remoteStatus: 'DRAFT', state: 'succeeded' })),
     ).toMatchObject({
       canDeleteDraft: false,
       canRefresh: false,
@@ -162,7 +132,6 @@ describe('export detail action availability', () => {
           state,
           xeroInvoiceId: 'invoice-1',
         }),
-        'owner',
       ),
     ).toMatchObject({
       canDeleteDraft: false,

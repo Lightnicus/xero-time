@@ -1,5 +1,3 @@
-import type { UserRole } from '@/access/roles'
-
 export type NavigationLinkDestination = {
   href: string
   id: string
@@ -64,12 +62,6 @@ const billing = {
 const manage = {
   destinations: [
     {
-      href: '/app/settings/users',
-      id: 'people',
-      kind: 'link',
-      label: 'People & invitations',
-    },
-    {
       href: '/app/settings/customers',
       id: 'customers',
       kind: 'link',
@@ -130,7 +122,7 @@ const accountDestinations = [
     href: '/app/profile',
     id: 'profile',
     kind: 'link',
-    label: 'Profile & security',
+    label: 'Profile',
   },
   {
     id: 'sign-out',
@@ -139,37 +131,13 @@ const accountDestinations = [
   },
 ] as const satisfies readonly (NavigationActionDestination | NavigationLinkDestination)[]
 
-const navigationByRole = {
-  admin: {
-    accountDestinations,
-    destinationGroups: [billing, manage, settings, advanced],
-    homeHref: '/app',
-    primaryDestinations: [myTime, addTime],
-  },
-  biller: {
-    accountDestinations,
-    destinationGroups: [billing],
-    homeHref: '/app/billing',
-    primaryDestinations: [],
-  },
-  member: {
-    accountDestinations,
-    destinationGroups: [],
-    homeHref: '/app',
-    primaryDestinations: [myTime, addTime],
-  },
-  owner: {
-    accountDestinations,
-    destinationGroups: [billing, manage, settings, advanced],
-    homeHref: '/app',
-    primaryDestinations: [myTime, addTime],
-  },
-} as const satisfies Record<UserRole, MemberNavigation>
+const navigation = {
+  accountDestinations,
+  destinationGroups: [billing, manage, settings, advanced],
+  homeHref: '/app',
+  primaryDestinations: [myTime, addTime],
+} as const satisfies MemberNavigation
 
-export function defaultAppHome(role: UserRole): string {
-  return navigationByRole[role].homeHref
-}
-
-export function navigationForRole(role: UserRole): MemberNavigation {
-  return navigationByRole[role]
+export function appNavigation(): MemberNavigation {
+  return navigation
 }

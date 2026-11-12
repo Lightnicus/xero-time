@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
-import { hasActiveRole } from '@/access/roles'
 import { MetricStrip } from '@/app/(frontend)/_components/MetricStrip'
 import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import { PendingSubmitButton } from '@/app/(frontend)/_components/PendingControls'
@@ -60,7 +59,6 @@ export default async function BillingPreviewPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const session = await requireAppSession()
-  if (!hasActiveRole(session.user, ['owner', 'admin', 'biller'])) redirect('/app')
   const params = await searchParams
   const token = typeof params.selection === 'string' ? params.selection : ''
   let envelope
@@ -93,7 +91,6 @@ export default async function BillingPreviewPage({
     preview.summary.invoiceCount > settings.maxWaitInvoices ||
     preview.summary.entryCount > settings.maxWaitLines ||
     settings.waitForResultEnabled !== true
-  const canOverride = session.user.role !== 'biller' || settings.allowBillerModeOverride === true
   const customerCount = new Set(preview.invoices.map((invoice) => invoice.contactID)).size
   const invoiceDates = new Set(preview.invoices.map((invoice) => invoice.invoiceDate))
   const dueDates = new Set(preview.invoices.map((invoice) => invoice.dueDate))
@@ -315,25 +312,18 @@ export default async function BillingPreviewPage({
               <span>Execution mode</span>
               <select
                 defaultValue={forcedBackground ? 'background' : configuredMode}
-                disabled={!canOverride || forcedBackground}
+                disabled={forcedBackground}
                 name="requestedMode"
               >
                 <option value="background">Background</option>
                 <option value="wait-for-result">Wait briefly for Xero</option>
               </select>
-              {(!canOverride || forcedBackground) && (
+              {forcedBackground && (
                 // Submit the configured mode, not the forced fallback: the server applies the
-                // background fallback itself, and anything else would count as an override that
-                // needs a reason the disabled form cannot collect.
+                // background fallback itself.
                 <input name="requestedMode" type="hidden" value={configuredMode} />
               )}
             </label>
-            {canOverride && (
-              <label className="field">
-                <span>Override reason (required only when changing the configured mode)</span>
-                <input maxLength={500} minLength={10} name="modeOverrideReason" />
-              </label>
-            )}
           </div>
         </details>
         <div className="billing-confirmation-actions">

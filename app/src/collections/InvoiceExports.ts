@@ -1,9 +1,9 @@
-import { hasActiveRole, isActiveOwnerOrAdmin } from '@/access/roles'
+import { isSignedIn } from '@/access/roles'
 
 import type { Access, CollectionConfig, Validate } from 'payload'
 
 const denyAll = () => false
-const readBilling: Access = ({ req }) => hasActiveRole(req.user, ['owner', 'admin', 'biller'])
+const readBilling: Access = ({ req }) => isSignedIn(req.user)
 const validatePositiveInteger: Validate<number> = (value) =>
   value === null || typeof value === 'undefined' || (Number.isInteger(value) && value >= 1)
     ? true
@@ -25,7 +25,7 @@ export const INVOICE_EXPORT_STATES = [
 export const InvoiceExports: CollectionConfig = {
   slug: 'invoice-exports',
   access: {
-    admin: ({ req }) => isActiveOwnerOrAdmin(req.user),
+    admin: ({ req }) => isSignedIn(req.user),
     create: denyAll,
     delete: denyAll,
     read: readBilling,

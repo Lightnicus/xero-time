@@ -2,7 +2,7 @@
  * Shared vocabulary for a Xero accounting connection that stopped working.
  *
  * The connection service records a machine-readable `lastErrorCode`; this module turns it into
- * the cause an owner or admin needs to act on, so the settings page, the app-wide banner, and the
+ * the cause to act on, so the settings page, the app-wide banner, and the
  * export worker all describe the same recovery steps.
  */
 
@@ -10,7 +10,7 @@
 export const XERO_RECONNECT_EXPORT_CODE = 'xero-reconnect-required'
 
 export const XERO_RECONNECT_EXPORT_MESSAGE =
-  'Paused until an owner or admin reconnects Xero. It resumes automatically after reconnection.'
+  'Paused until Xero is reconnected. It resumes automatically after reconnection.'
 
 /**
  * How long a parked export waits before it checks the connection again on its own. Reconnecting

@@ -4,7 +4,6 @@ import { revalidatePath } from 'next/cache'
 import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 
-import { hasActiveRole } from '@/access/roles'
 import {
   customerHasInvoiceReferenceSequence,
   normalizeInvoiceReferenceCode,
@@ -45,7 +44,6 @@ const runCommand = async (operation: () => Promise<void>, success: string): Prom
 
 const commandSession = async (scope = 'xero-contact') => {
   const session = await requireAppSession()
-  if (!hasActiveRole(session.user, ['owner', 'admin'])) redirect('/app')
   await enforceRateLimit(session.payload, {
     key: rateLimitKey(await headers(), String(session.user.id)),
     limit: 40,

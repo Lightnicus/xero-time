@@ -1,14 +1,13 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 
-import { hasActiveRole } from '@/access/roles'
 import { DeleteTimeEntryButton } from '@/app/(frontend)/_components/DeleteTimeEntryButton'
 import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import { TimeEntryForm, type TimeEntryFormValues } from '@/app/(frontend)/_components/TimeEntryForm'
 import { relationshipID } from '@/lib/domain/validation'
 import { findMyTimeEntry, listActiveProjectOptions } from '@/lib/member-app/data'
 import { instantToLocalDateTime, timezoneOptionsIncluding } from '@/lib/member-app/date-time'
-import { canLogTime, requireAppSession } from '@/lib/member-app/session'
+import { requireAppSession } from '@/lib/member-app/session'
 
 import '../../../../time-workflow.css'
 
@@ -32,8 +31,7 @@ export default async function EditTimeEntryPage({ params }: { params: Promise<{ 
 
   if (!entry) notFound()
 
-  const editable = canLogTime(session.user) && entry.billingStatus === 'unbilled'
-  const privileged = hasActiveRole(session.user, ['owner', 'admin'])
+  const editable = entry.billingStatus === 'unbilled'
 
   if (!editable) {
     return (
@@ -45,9 +43,7 @@ export default async function EditTimeEntryPage({ params }: { params: Promise<{ 
         />
 
         <div className="notice notice-warning">
-          {entry.billingStatus === 'unbilled'
-            ? 'Your current role cannot edit time.'
-            : `This entry is ${entry.billingStatus} and locked. An administrator can release it for rebilling.`}
+          {`This entry is ${entry.billingStatus} and locked. Release its export to edit it again.`}
         </div>
 
         <section className="panel detail-panel">
@@ -93,7 +89,7 @@ export default async function EditTimeEntryPage({ params }: { params: Promise<{ 
           <Link className="button button-secondary" href="/app">
             Back to my time
           </Link>
-          {entry.currentExport && hasActiveRole(session.user, ['owner', 'admin', 'biller']) && (
+          {entry.currentExport && (
             <Link
               className="button button-secondary"
               href={`/app/billing/exports/${relationshipID(entry.currentExport)}`}
@@ -151,7 +147,6 @@ export default async function EditTimeEntryPage({ params }: { params: Promise<{ 
         initialValues={initialValues}
         mode="edit"
         projects={projects}
-        requiresCorrectionReason={privileged}
         timezones={timezoneOptionsIncluding(entry.timezone, session.user.timezone)}
       />
 
@@ -160,7 +155,7 @@ export default async function EditTimeEntryPage({ params }: { params: Promise<{ 
           <h2>Delete entry</h2>
           <p>Only unbilled time can be deleted. This action cannot be undone.</p>
         </div>
-        <DeleteTimeEntryButton entryID={entry.id} requiresReason={privileged} />
+        <DeleteTimeEntryButton entryID={entry.id} />
       </section>
     </div>
   )

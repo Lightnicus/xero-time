@@ -1,6 +1,5 @@
 import 'server-only'
 
-import { hasActiveRole } from '@/access/roles'
 import { isRecord, isValidCurrencyCode, relationshipID } from '@/lib/domain/validation'
 import type { AppSession } from '@/lib/member-app/session'
 
@@ -37,12 +36,6 @@ const blocker = (
   message: string,
   remediationHref?: string,
 ): BillingBlocker => ({ code, message, remediationHref })
-
-const assertBillingRole = (session: AppSession): void => {
-  if (!hasActiveRole(session.user, ['owner', 'admin', 'biller'])) {
-    throw new Error('You do not have access to billing.')
-  }
-}
 
 const chunks = <T>(values: T[], size: number): T[][] => {
   const result: T[][] = []
@@ -302,7 +295,6 @@ export async function getBillingEligibility(
     settingsDocument: Record<string, unknown>
   }
 > {
-  assertBillingRole(session)
   const filter = normalizeBillingFilter(filterInput)
   const entries = await findEntries(session, filter, options.entryIDs)
   const customerIDs = entries.map((entry) => relation(entry.customer)).filter(Boolean) as string[]

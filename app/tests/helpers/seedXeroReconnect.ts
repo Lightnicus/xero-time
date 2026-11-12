@@ -1,13 +1,13 @@
 import { getPayload } from 'payload'
 
-import { cleanupNavigationRoleFixture, seedNavigationRoleFixture } from './seedUser'
+import { cleanupTestUser, seedAppUser } from './seedUser'
 import config from '../../src/payload.config.js'
 
 export const RECONNECT_TENANT_NAME = 'Reconnect E2E Company'
 
-/** Seeds every app role plus a configured Xero connection that Xero has stopped accepting. */
+/** Seeds the user plus a configured Xero connection that Xero has stopped accepting. */
 export async function seedXeroReconnectFixture(): Promise<void> {
-  await seedNavigationRoleFixture()
+  await seedAppUser()
   const payload = await getPayload({ config })
   await payload.create({
     collection: 'xero-connections',
@@ -36,5 +36,5 @@ export async function seedXeroReconnectFixture(): Promise<void> {
 }
 
 export async function cleanupXeroReconnectFixture(): Promise<void> {
-  await cleanupNavigationRoleFixture()
+  await cleanupTestUser()
 }

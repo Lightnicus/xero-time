@@ -1,9 +1,7 @@
 import 'server-only'
 
 import { NextResponse } from 'next/server'
-import { generatePayloadCookie } from 'payload'
 
-import { hasActiveRole } from '@/access/roles'
 import { environment } from '@/lib/env'
 import type { AppSession } from '@/lib/member-app/session'
 import { enforceRateLimit, rateLimitKey } from '@/lib/security/rate-limit'
@@ -33,10 +31,6 @@ export const selectionURL = (flowID: string): URL => {
   url.searchParams.set('flow', flowID)
   return url
 }
-
-export const isAllowedAccountingAdministrator = (
-  session: AppSession | null,
-): session is AppSession => Boolean(session && hasActiveRole(session.user, ['owner', 'admin']))
 
 export const hasTrustedOrigin = (request: Request): boolean => {
   const origin = request.headers.get('origin')
@@ -77,31 +71,6 @@ export const clearAccountingFlowCookie = (response: NextResponse): void => {
     path: '/',
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
-  })
-}
-
-export const setReauthenticatedPayloadCookie = (
-  response: NextResponse,
-  session: AppSession,
-  token: string,
-): void => {
-  const authConfig = session.payload.collections.users.config.auth
-  if (!authConfig) return
-
-  const payloadCookie = generatePayloadCookie({
-    collectionAuthConfig: authConfig,
-    cookiePrefix: session.payload.config.cookiePrefix,
-    returnCookieAsObject: true,
-    token,
-  })
-
-  response.cookies.set(payloadCookie.name, payloadCookie.value ?? '', {
-    domain: payloadCookie.domain,
-    expires: payloadCookie.expires ? new Date(payloadCookie.expires) : undefined,
-    httpOnly: payloadCookie.httpOnly,
-    path: payloadCookie.path,
-    sameSite: payloadCookie.sameSite?.toLowerCase() as 'lax' | 'none' | 'strict' | undefined,
-    secure: payloadCookie.secure,
   })
 }
 

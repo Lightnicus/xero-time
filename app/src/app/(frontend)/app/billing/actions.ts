@@ -4,7 +4,6 @@ import { revalidatePath } from 'next/cache'
 import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 
-import { hasActiveRole } from '@/access/roles'
 import type { BillingBlockerCode, BillingFilter, BillingSelection } from '@/lib/billing/contracts'
 import {
   acceptExistingInvoice,
@@ -32,11 +31,8 @@ const value = (formData: FormData, name: string): string => {
 const values = (formData: FormData, name: string): string[] =>
   formData.getAll(name).filter((item): item is string => typeof item === 'string')
 
-const commandSession = async (
-  roles: ('admin' | 'biller' | 'owner')[] = ['owner', 'admin', 'biller'],
-) => {
+const commandSession = async () => {
   const session = await requireAppSession()
-  if (!hasActiveRole(session.user, roles)) redirect('/app')
   await enforceRateLimit(session.payload, {
     key: rateLimitKey(await headers(), String(session.user.id)),
     limit: 30,
@@ -98,7 +94,7 @@ export async function allUninvoicedPreviewAction(formData: FormData): Promise<vo
 }
 
 export async function refreshBillingReferenceDataAction(): Promise<void> {
-  const session = await commandSession(['owner', 'admin'])
+  const session = await commandSession()
   let status = 'reference-refresh-failed'
   try {
     const result = await refreshXeroReferenceData(session)
@@ -123,7 +119,6 @@ export async function confirmBillingExportAction(formData: FormData): Promise<vo
       batchReference: value(formData, 'batchReference'),
       checksum: value(formData, 'checksum'),
       invoiceDate: envelope.invoiceDate,
-      modeOverrideReason: value(formData, 'modeOverrideReason'),
       requestedMode:
         value(formData, 'requestedMode') === 'wait-for-result' ? 'wait-for-result' : 'background',
       selection: envelope.selection,
@@ -152,7 +147,7 @@ export async function cancelExportAction(formData: FormData): Promise<void> {
 }
 
 export async function refreshExportAction(formData: FormData): Promise<void> {
-  const session = await commandSession(['owner', 'admin'])
+  const session = await commandSession()
   const exportID = value(formData, 'exportID')
   try {
     await refreshExportForUser(session, exportID)
@@ -164,7 +159,7 @@ export async function refreshExportAction(formData: FormData): Promise<void> {
 }
 
 export async function reconcileExportAction(formData: FormData): Promise<void> {
-  const session = await commandSession(['owner', 'admin'])
+  const session = await commandSession()
   const exportID = value(formData, 'exportID')
   try {
     await requestInvoiceReconciliation(session, { exportID })
@@ -176,7 +171,7 @@ export async function reconcileExportAction(formData: FormData): Promise<void> {
 }
 
 export async function releaseExportAction(formData: FormData): Promise<void> {
-  const session = await commandSession(['owner', 'admin'])
+  const session = await commandSession()
   const exportID = value(formData, 'exportID')
   try {
     await releaseInvoiceExport(session, { exportID })
@@ -188,7 +183,7 @@ export async function releaseExportAction(formData: FormData): Promise<void> {
 }
 
 export async function deleteDraftAndReleaseExportAction(formData: FormData): Promise<void> {
-  const session = await commandSession(['owner', 'admin'])
+  const session = await commandSession()
   const exportID = value(formData, 'exportID')
   try {
     await deleteDraftInvoiceAndRelease(session, { exportID })
@@ -203,7 +198,7 @@ export async function deleteDraftAndReleaseExportAction(formData: FormData): Pro
 }
 
 export async function authorizeReplacementAction(formData: FormData): Promise<void> {
-  const session = await commandSession(['owner', 'admin'])
+  const session = await commandSession()
   const exportID = value(formData, 'exportID')
   try {
     await authorizeReplacementAttempt(session, { exportID })
@@ -214,7 +209,7 @@ export async function authorizeReplacementAction(formData: FormData): Promise<vo
 }
 
 export async function acceptExistingInvoiceAction(formData: FormData): Promise<void> {
-  const session = await commandSession(['owner', 'admin'])
+  const session = await commandSession()
   const exportID = value(formData, 'exportID')
   try {
     await acceptExistingInvoice(session, {
@@ -229,7 +224,7 @@ export async function acceptExistingInvoiceAction(formData: FormData): Promise<v
 }
 
 export async function runXeroQueueNowAction(): Promise<void> {
-  const session = await commandSession(['owner', 'admin'])
+  const session = await commandSession()
   try {
     await prepareXeroQueue(session.payload, session.req)
     await session.payload.jobs.run({

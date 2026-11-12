@@ -174,11 +174,9 @@ describe.sequential('Xero export and webhook recovery', () => {
     const bootstrap = await registerFirstUserOperation({
       collection: payload.collections.users,
       data: {
-        active: true,
         displayName: 'Recovery Owner',
         email: 'recovery-owner@example.test',
         password: PASSWORD,
-        role: 'owner',
         timezone: 'Pacific/Auckland',
       } as never,
       req: anonymousReq,
@@ -189,12 +187,9 @@ describe.sequential('Xero export and webhook recovery', () => {
     const member = await payload.create({
       collection: 'users',
       data: {
-        _verified: true,
-        active: true,
         displayName: 'Recovery Member',
         email: 'recovery-member@example.test',
         password: PASSWORD,
-        role: 'member',
         timezone: 'Pacific/Auckland',
       },
       overrideAccess: false,

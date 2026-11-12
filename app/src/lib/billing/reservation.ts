@@ -2,7 +2,6 @@ import 'server-only'
 
 import { randomUUID } from 'node:crypto'
 
-import { hasActiveRole } from '@/access/roles'
 import { TIME_ENTRY_BILLING_MUTATION_CONTEXT } from '@/collections/TimeEntries'
 import { recordAuditEvent } from '@/lib/audit/service'
 import type { AppSession } from '@/lib/member-app/session'
@@ -67,8 +66,6 @@ export async function createBillingPreview(
     selection: BillingSelection
   },
 ): Promise<BillingPreview> {
-  if (!hasActiveRole(session.user, ['owner', 'admin', 'biller']))
-    throw new Error('Billing access is required.')
   const selection = normalizeBillingSelection(input.selection)
   const eligibility = await getBillingEligibility(
     session,
@@ -104,22 +101,14 @@ const executionMode = (
   // background when waiting is off or this batch exceeds the wait limits.
   const serverChoice =
     configured === 'wait-for-result' && waitAvailable ? 'wait-for-result' : 'background'
-  let requested = input.requestedMode
+  const requested = input.requestedMode
   // Asking for the configured mode, or for the mode the server would fall back to anyway, is not
-  // an override and must not demand a reason.
+  // an override.
   const override = requested !== configured && requested !== serverChoice
-  if (override) {
-    const billerCanOverride =
-      session.user.role !== 'biller' || settings.allowBillerModeOverride === true
-    if (!billerCanOverride) requested = configured
-    else if ((input.modeOverrideReason?.trim().length ?? 0) < 10) {
-      throw new Error('Explain why this export should use a different execution mode.')
-    }
-  }
   const actual = requested === 'wait-for-result' && waitAvailable ? 'wait-for-result' : 'background'
   return {
     actual,
-    reason: override ? input.modeOverrideReason?.trim() : undefined,
+    reason: override ? input.modeOverrideReason?.trim() || undefined : undefined,
     requested,
   }
 }
@@ -129,8 +118,6 @@ export async function confirmBillingPreview(
   input: ConfirmBillingInput,
   overrides: { dispatch?: typeof dispatchInvoiceExport } = {},
 ): Promise<BillingReservationResult> {
-  if (!hasActiveRole(session.user, ['owner', 'admin', 'biller']))
-    throw new Error('Billing access is required.')
   const selection = normalizeBillingSelection(input.selection)
 
   const transactionResult = await withPayloadTransaction(
@@ -148,7 +135,7 @@ export async function confirmBillingPreview(
         selection.type === 'explicit' ? { entryIDs: selection.explicitEntryIDs } : {},
       )
       if (eligibility.settingsDocument.acceptingNewExports !== true) {
-        throw new Error('New exports are currently paused by the owner.')
+        throw new Error('New exports are currently paused in billing settings.')
       }
       const selectedEntries = selectEligibleEntries(eligibility, selection)
       const preview = buildBillingPreview({

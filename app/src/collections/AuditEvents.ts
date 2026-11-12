@@ -1,9 +1,9 @@
-import { hasActiveRole, isActiveOwnerOrAdmin } from '@/access/roles'
+import { isSignedIn } from '@/access/roles'
 
 import type { Access, CollectionConfig } from 'payload'
 
 const denyAll = () => false
-const readAudit: Access = ({ req }) => hasActiveRole(req.user, ['owner', 'admin'])
+const readAudit: Access = ({ req }) => isSignedIn(req.user)
 
 export const AUDIT_EVENT_TYPES = [
   'authentication.login-succeeded',
@@ -52,7 +52,7 @@ export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number]
 export const AuditEvents: CollectionConfig = {
   slug: 'audit-events',
   access: {
-    admin: ({ req }) => isActiveOwnerOrAdmin(req.user),
+    admin: ({ req }) => isSignedIn(req.user),
     create: denyAll,
     delete: denyAll,
     read: readAudit,

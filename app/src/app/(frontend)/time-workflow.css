@@ -374,28 +374,6 @@
   margin-bottom: 0.65rem;
 }
 
-.time-correction-field {
-  display: grid;
-  gap: 0.8rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--line);
-}
-
-.time-correction-field h2,
-.time-correction-field p {
-  margin: 0;
-}
-
-.time-correction-field h2 {
-  font-size: 1rem;
-}
-
-.time-correction-field p {
-  margin-top: 0.15rem;
-  color: var(--ink-soft);
-  font-size: 0.78rem;
-}
-
 .time-form-actions {
   display: flex;
   justify-content: flex-end;

@@ -1,6 +1,5 @@
 import 'server-only'
 
-import { hasActiveRole } from '@/access/roles'
 import { recordAuditEvent } from '@/lib/audit/service'
 import { isRecord } from '@/lib/domain/validation'
 import type { AppSession } from '@/lib/member-app/session'
@@ -353,12 +352,6 @@ export async function refreshXeroReferenceData(
     token?: Awaited<ReturnType<typeof getValidAccountingAccessToken>>
   } = {},
 ): Promise<{ capabilityAvailable: boolean; resourceCount: number }> {
-  if (!hasActiveRole(session.user, ['owner', 'admin'])) {
-    throw new AccountingIntegrationError(
-      'forbidden',
-      'Only an owner or administrator can refresh Xero reference data.',
-    )
-  }
   const runtime = overrides.client ? null : await resolveAccountingRuntime(session)
   const client = overrides.client ?? runtime?.client
   if (!client) {

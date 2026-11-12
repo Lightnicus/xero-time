@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { billerAppUser, resetE2ERateLimits, testUser } from '../helpers/seedUser'
+import { resetE2ERateLimits, testUser } from '../helpers/seedUser'
 import {
   cleanupXeroReconnectFixture,
   RECONNECT_TENANT_NAME,
@@ -9,12 +9,12 @@ import {
 
 import type { Page } from '@playwright/test'
 
-const signIn = async (page: Page, user: { email: string; password: string }) => {
+const signIn = async (page: Page) => {
   await page.goto('/login')
-  await page.getByLabel('Email address').fill(user.email)
-  await page.getByLabel('Password').fill(user.password)
+  await page.getByLabel('Email address').fill(testUser.email)
+  await page.getByLabel('Password').fill(testUser.password)
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await expect(page).toHaveURL(/\/app/)
+  await expect(page).toHaveURL(/\/app$/)
 }
 
 test.describe.serial('Xero reconnection guidance', () => {
@@ -30,8 +30,8 @@ test.describe.serial('Xero reconnection guidance', () => {
     await cleanupXeroReconnectFixture()
   })
 
-  test('guides an owner from the app-wide banner to a reconnect', async ({ page }) => {
-    await signIn(page, testUser)
+  test('guides the user from the app-wide banner to a reconnect', async ({ page }) => {
+    await signIn(page)
 
     const banner = page.getByRole('alert').filter({ hasText: 'needs to be reconnected' })
     await expect(banner).toContainText(`Xero (${RECONNECT_TENANT_NAME}) needs to be reconnected.`)
@@ -44,18 +44,12 @@ test.describe.serial('Xero reconnection guidance', () => {
     await expect(
       page.getByText('Xero no longer accepts the saved authorization.').first(),
     ).toBeVisible()
+    const recoverySteps = page.locator('.recovery-steps')
+    await expect(recoverySteps).toContainText(`create invoices in ${RECONNECT_TENANT_NAME}`)
+    await expect(recoverySteps).toContainText('Invoice exports work again')
     await expect(page.getByRole('button', { name: 'Reconnect Xero' })).toBeVisible()
 
-    await page.getByText('Reconnecting as a different Xero user?').click()
-    await expect(page.getByLabel('I am reconnecting as a different Xero user')).toBeVisible()
-    await expect(page.getByLabel('Reason for changing the Xero user')).toBeVisible()
-  })
-
-  test('tells a biller who to ask instead of offering the reconnect', async ({ page }) => {
-    await signIn(page, billerAppUser)
-
-    const banner = page.getByRole('alert').filter({ hasText: 'needs to be reconnected' })
-    await expect(banner).toContainText('Ask an owner or admin to reconnect Xero')
-    await expect(banner.getByRole('link', { name: 'Reconnect Xero' })).toHaveCount(0)
+    await expect(page.getByText('Reconnecting as a different Xero user?')).toHaveCount(0)
+    await expect(page.getByLabel(/password/i)).toHaveCount(0)
   })
 })

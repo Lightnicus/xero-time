@@ -19,12 +19,10 @@ if (password.length < MIN_PASSWORD_LENGTH) {
   throw new Error(`SEED_OWNER_PASSWORD must contain at least ${MIN_PASSWORD_LENGTH} characters.`)
 }
 
-const [{ getPayload }, { default: configPromise }, { INITIAL_OWNER_SEED_CONTEXT }] =
-  await Promise.all([
-    import('payload'),
-    import('../src/payload.config'),
-    import('../src/access/users'),
-  ])
+const [{ getPayload }, { default: configPromise }] = await Promise.all([
+  import('payload'),
+  import('../src/payload.config'),
+])
 const payload = await getPayload({ config: configPromise })
 
 try {
@@ -37,40 +35,27 @@ try {
   })
 
   if (existing.docs[0]) {
-    if (existing.docs[0].role !== 'owner' || existing.docs[0].active !== true) {
-      throw new Error(
-        `User ${email} already exists but is not an active owner; refusing to change roles from a seed command.`,
-      )
-    }
-
-    payload.logger.info(`Owner ${email} already exists; no changes made.`)
+    payload.logger.info(`User ${email} already exists; no changes made.`)
     process.exitCode = 0
   } else {
     const userCount = await payload.count({ collection: 'users', overrideAccess: true })
 
     if (userCount.totalDocs > 0) {
-      throw new Error(
-        'Users already exist. Create or promote an owner through the protected application workflow instead of the bootstrap seed.',
-      )
+      throw new Error('A user already exists. Sign in with that account instead.')
     }
 
     await payload.create({
       collection: 'users',
-      context: {
-        [INITIAL_OWNER_SEED_CONTEXT]: true,
-      },
       data: {
-        active: true,
         displayName,
         email,
         password,
-        role: 'owner',
         timezone,
       },
       overrideAccess: true,
     })
 
-    payload.logger.info(`Created initial owner ${email}.`)
+    payload.logger.info(`Created user ${email}.`)
   }
 } finally {
   await payload.destroy()

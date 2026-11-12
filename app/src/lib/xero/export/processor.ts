@@ -688,7 +688,7 @@ const retryDelaySeconds = (
   if (error.retryAfterSeconds && error.retryAfterSeconds >= 0)
     return Math.min(error.retryAfterSeconds, 3_600)
   // Back off by how many retries in a row this export has already waited through; the attempt
-  // number only changes when an owner authorizes a replacement, so it never grew on its own.
+  // number only changes when a replacement is approved, so it never grew on its own.
   const exponent = Math.min(consecutiveRetryWaits(exportDocument), 5)
   return BASE_RETRY_SECONDS * 2 ** exponent + Math.floor(Math.random() * 10)
 }
@@ -956,8 +956,8 @@ export async function processInvoiceExport(
             },
           )
     if (error.reconnectRequired) {
-      // The connection, not this invoice, is the problem: keep the reservation and wait for an
-      // owner or admin to reconnect Xero rather than failing the export.
+      // The connection, not this invoice, is the problem: keep the reservation and wait for a
+      // Xero reconnection rather than failing the export.
       const state = requestMayHaveBeenSent ? 'reconciling' : 'retry-wait'
       await deferExport(
         payload,

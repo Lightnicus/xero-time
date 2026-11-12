@@ -2,7 +2,6 @@ import 'server-only'
 
 import { createHash, randomUUID } from 'node:crypto'
 
-import { hasActiveRole } from '@/access/roles'
 import { recordAuditEvent } from '@/lib/audit/service'
 import { isRecord, isValidCurrencyCode } from '@/lib/domain/validation'
 import type { AppSession } from '@/lib/member-app/session'
@@ -26,15 +25,6 @@ export type XeroContactView = {
   locallyMappedCustomerID?: string
   name: string
   status: 'active' | 'archived'
-}
-
-const assertAdministrator = (session: AppSession): void => {
-  if (!hasActiveRole(session.user, ['owner', 'admin'])) {
-    throw new AccountingIntegrationError(
-      'forbidden',
-      'Only an owner or administrator can manage Xero contact mappings.',
-    )
-  }
 }
 
 const stringValue = (value: unknown, max: number): string | undefined =>
@@ -120,7 +110,6 @@ export async function searchXeroContacts(
   input: { page?: number; query: string },
   overrides: AccountingOverrides = {},
 ): Promise<{ contacts: XeroContactView[]; page: number }> {
-  assertAdministrator(session)
   const query = input.query.trim()
   const page = input.page ?? 1
   if (
@@ -219,7 +208,6 @@ export async function linkXeroContact(
   },
   overrides: AccountingOverrides = {},
 ): Promise<void> {
-  assertAdministrator(session)
   const contact = await fetchContact(session, input.contactID, overrides)
   await assertContactNotMappedElsewhere(session, contact.contactID, input.customerID)
   const customer = await session.payload.findByID({
@@ -231,11 +219,10 @@ export async function linkXeroContact(
   })
   const changing = Boolean(customer.xeroContactId && customer.xeroContactId !== contact.contactID)
   if (changing) {
-    const reason = input.reason?.trim() ?? ''
-    if (reason.length < 10 || !input.confirmHistoricalChange) {
+    if (!input.confirmHistoricalChange) {
       throw new AccountingIntegrationError(
         'remap-confirmation-required',
-        'Changing a Xero link requires a reason and explicit historical-invoice confirmation.',
+        'Confirm that historical invoices keep their original contact before changing a Xero link.',
       )
     }
     const exports = await session.payload.find({
@@ -281,7 +268,6 @@ export async function importXeroContact(
   input: { contactID: string; currency: string; localName?: string },
   overrides: AccountingOverrides = {},
 ): Promise<Customer> {
-  assertAdministrator(session)
   if (!isValidCurrencyCode(input.currency)) {
     throw new AccountingIntegrationError('invalid-currency', 'Select a valid customer currency.')
   }
@@ -377,7 +363,6 @@ export async function createXeroContact(
   input: { confirmation: boolean; customerID: string },
   overrides: AccountingOverrides = {},
 ): Promise<void> {
-  assertAdministrator(session)
   if (!input.confirmation) {
     throw new AccountingIntegrationError('confirmation-required', 'Confirm the contact payload.')
   }
@@ -491,7 +476,6 @@ export async function refreshCustomerContact(
   customerID: string,
   overrides: AccountingOverrides = {},
 ): Promise<void> {
-  assertAdministrator(session)
   const customer = await session.payload.findByID({
     collection: 'customers',
     depth: 0,

@@ -1,7 +1,5 @@
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
 
-import { hasActiveRole } from '@/access/roles'
 import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import { requireAppSession } from '@/lib/member-app/session'
 
@@ -12,11 +10,6 @@ export const metadata: Metadata = {
 }
 
 const workflowLinks = [
-  {
-    description: 'Invite teammates and review invitation history.',
-    href: '/app/settings/users',
-    label: 'People & invitations',
-  },
   {
     description: 'Set invoice references and map customers to Xero contacts.',
     href: '/app/settings/customers',
@@ -55,8 +48,7 @@ const advancedLinks = [
 ]
 
 export default async function SettingsPage() {
-  const session = await requireAppSession()
-  if (!hasActiveRole(session.user, ['owner', 'admin'])) redirect('/app')
+  await requireAppSession()
 
   return (
     <div className="wide-page page-stack settings-overview">

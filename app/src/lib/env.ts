@@ -89,63 +89,7 @@ export function parseAccountEmailEnvironment(values: EnvironmentValues): Account
 
 const optionalEnvironmentValue = (name: string): string => process.env[name]?.trim() ?? ''
 
-export type XeroIdentityEnvironment =
-  | { configured: false }
-  | {
-      authFlowEncryptionKey: string
-      authFlowEncryptionKeyVersion: number
-      clientID: string
-      clientSecret: string
-      configured: true
-      redirectURI: string
-    }
-
-function xeroIdentityEnvironment(serverURL: string): XeroIdentityEnvironment {
-  const clientID = optionalEnvironmentValue('XERO_IDENTITY_CLIENT_ID')
-  const clientSecret = optionalEnvironmentValue('XERO_IDENTITY_CLIENT_SECRET')
-  const redirectURI = optionalEnvironmentValue('XERO_IDENTITY_REDIRECT_URI')
-  const configuredValues = [clientID, clientSecret, redirectURI]
-
-  if (configuredValues.every((value) => value.length === 0)) return { configured: false }
-  if (configuredValues.some((value) => value.length === 0)) {
-    throw new Error(
-      'XERO_IDENTITY_CLIENT_ID, XERO_IDENTITY_CLIENT_SECRET, and XERO_IDENTITY_REDIRECT_URI must be configured together.',
-    )
-  }
-
-  const callback = new URL(redirectURI)
-  if (
-    callback.origin !== serverURL ||
-    callback.pathname !== '/api/auth/xero/identity/callback' ||
-    callback.search ||
-    callback.hash ||
-    callback.username ||
-    callback.password
-  ) {
-    throw new Error(
-      'XERO_IDENTITY_REDIRECT_URI must use NEXT_PUBLIC_SERVER_URL and the identity callback path.',
-    )
-  }
-
-  const authFlowEncryptionKey = optionalEnvironmentValue('AUTH_FLOW_ENCRYPTION_KEY')
-  if (!/^[0-9a-f]{64}$/i.test(authFlowEncryptionKey)) {
-    throw new Error(
-      'AUTH_FLOW_ENCRYPTION_KEY must contain exactly 32 bytes encoded as 64 hex digits.',
-    )
-  }
-
-  return {
-    authFlowEncryptionKey,
-    authFlowEncryptionKeyVersion: positiveInteger('AUTH_FLOW_ENCRYPTION_KEY_VERSION', 1),
-    clientID,
-    clientSecret,
-    configured: true,
-    redirectURI: callback.toString(),
-  }
-}
-
 const serverURL = applicationOrigin(requiredEnvironmentValue('NEXT_PUBLIC_SERVER_URL'))
-const xeroIdentity = xeroIdentityEnvironment(serverURL)
 
 const protectedMachineSecret = (name: 'CRON_SECRET' | 'XERO_WEBHOOK_KEY'): string | undefined => {
   const value = optionalEnvironmentValue(name)
@@ -164,5 +108,4 @@ export const environment = {
   cronSecret: protectedMachineSecret('CRON_SECRET'),
   serverURL,
   xeroWebhookKey: protectedMachineSecret('XERO_WEBHOOK_KEY'),
-  xeroIdentity,
 }

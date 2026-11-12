@@ -5,15 +5,10 @@ import {
   clearAccountingFlowCookie,
   guardAccountingCommand,
   hasTrustedOrigin,
-  isAllowedAccountingAdministrator,
   safeErrorCode,
-  setReauthenticatedPayloadCookie,
   settingsURL,
 } from '@/lib/xero/accounting/route-helpers'
-import {
-  disconnectAccountingConnection,
-  verifyAccountingPassword,
-} from '@/lib/xero/accounting/service'
+import { disconnectAccountingConnection } from '@/lib/xero/accounting/service'
 
 export const runtime = 'nodejs'
 
@@ -23,25 +18,17 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const session = await getAppSession()
-  if (!isAllowedAccountingAdministrator(session)) {
-    return NextResponse.redirect(settingsURL({ error: 'forbidden' }), 303)
-  }
+  if (!session) return NextResponse.redirect(settingsURL({ error: 'forbidden' }), 303)
 
   try {
     const formData = await guardAccountingCommand(request, session, 'disconnect', [
       'confirmation',
-      'password',
       'reason',
     ])
-    const password = formData.get('password')
+    if (formData.get('confirmation') !== 'disconnect') {
+      throw new Error('Disconnect was not confirmed.')
+    }
     const reason = formData.get('reason')
-    const confirmation = formData.get('confirmation')
-    if (confirmation !== 'disconnect') throw new Error('Disconnect was not confirmed.')
-
-    const confirmedToken = await verifyAccountingPassword(
-      session,
-      typeof password === 'string' ? password : '',
-    )
     const result = await disconnectAccountingConnection(
       session,
       typeof reason === 'string' ? reason : '',
@@ -54,7 +41,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       303,
     )
     clearAccountingFlowCookie(response)
-    setReauthenticatedPayloadCookie(response, session, confirmedToken)
     return response
   } catch (error) {
     return NextResponse.redirect(settingsURL({ error: safeErrorCode(error) }), 303)

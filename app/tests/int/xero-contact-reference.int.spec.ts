@@ -35,7 +35,6 @@ type ContactRecord = {
 
 let payload: Payload
 let ownerSession: AppSession
-let memberSession: AppSession
 let connection: XeroConnection
 let firstCustomerID: string
 let secondCustomerID: string
@@ -260,11 +259,9 @@ describe.sequential('Xero contacts and reference data', () => {
     const bootstrap = await registerFirstUserOperation({
       collection: payload.collections.users,
       data: {
-        active: true,
         displayName: 'Contact Owner',
         email: 'contact-owner@example.test',
         password: PASSWORD,
-        role: 'owner',
         timezone: 'Pacific/Auckland',
       } as never,
       req: anonymousReq,
@@ -274,25 +271,6 @@ describe.sequential('Xero contacts and reference data', () => {
       payload,
       req: await createLocalReq({ user: bootstrap.user }, payload),
       user: bootstrap.user,
-    }
-    const member = await payload.create({
-      collection: 'users',
-      data: {
-        _verified: true,
-        active: true,
-        displayName: 'Contact Member',
-        email: 'contact-member@example.test',
-        password: PASSWORD,
-        role: 'member',
-        timezone: 'Pacific/Auckland',
-      },
-      overrideAccess: false,
-      req: ownerSession.req,
-    })
-    memberSession = {
-      payload,
-      req: await createLocalReq({ user: member }, payload),
-      user: member,
     }
     connection = await payload.create({
       collection: 'xero-connections',
@@ -584,12 +562,5 @@ describe.sequential('Xero contacts and reference data', () => {
         overrideAccess: true,
       }),
     ).resolves.toMatchObject({ xeroMappingStatus: 'archived' })
-
-    await expect(
-      searchXeroContacts(memberSession, { query: 'contact' }, overrides()),
-    ).rejects.toMatchObject({ code: 'forbidden' })
-    await expect(refreshXeroReferenceData(memberSession, overrides())).rejects.toMatchObject({
-      code: 'forbidden',
-    })
   })
 })

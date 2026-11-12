@@ -1,7 +1,5 @@
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
 
-import { hasActiveRole } from '@/access/roles'
 import { BillingSelectionToolbar } from '@/app/(frontend)/_components/BillingSelectionToolbar'
 import { FilterDisclosure } from '@/app/(frontend)/_components/FilterDisclosure'
 import { MetricStrip } from '@/app/(frontend)/_components/MetricStrip'
@@ -158,7 +156,6 @@ export default async function BillingQueuePage({
   searchParams: Promise<Params>
 }) {
   const session = await requireAppSession()
-  if (!hasActiveRole(session.user, ['owner', 'admin', 'biller'])) redirect('/app')
   const params = await searchParams
   const filter: Partial<BillingFilter> = {
     blocker: param(params, 'blocker') as BillingFilter['blocker'],
@@ -192,7 +189,6 @@ export default async function BillingQueuePage({
       allUninvoicedUnavailableReason = ALL_UNINVOICED_CAPACITY_MESSAGE
     }
   }
-  const canManageBillingSetup = hasActiveRole(session.user, ['owner', 'admin'])
   const remediation = summarizeBillingRemediation(eligibility.blocked)
   const [customers, projects, users] = await Promise.all([
     session.payload.find({
@@ -221,7 +217,6 @@ export default async function BillingQueuePage({
       pagination: false,
       req: session.req,
       sort: 'displayName',
-      where: { active: { equals: true } },
     }),
   ])
   const summary = summarizeSelection(eligibility.eligible)
@@ -271,12 +266,7 @@ export default async function BillingQueuePage({
       {eligibility.settingsDocument.acceptingNewExports !== true && (
         <div className="notice notice-warning">
           New Xero exports are currently paused. Invoice previews remain available, but confirmation
-          is disabled.{' '}
-          {canManageBillingSetup ? (
-            <Link href="/admin/globals/billing-settings">Manage the export switch</Link>
-          ) : (
-            'Ask an owner or administrator to enable new exports.'
-          )}
+          is disabled. <Link href="/admin/globals/billing-settings">Manage the export switch</Link>
         </div>
       )}
 
@@ -303,7 +293,7 @@ export default async function BillingQueuePage({
                     Blocking {issue.entryCount} {issue.entryCount === 1 ? 'entry' : 'entries'}
                   </small>
                 </div>
-                {canManageBillingSetup && issue.action === 'refresh-xero' && (
+                {issue.action === 'refresh-xero' && (
                   <form action={refreshBillingReferenceDataAction}>
                     <PendingSubmitButton
                       className="button button-secondary"
@@ -313,12 +303,12 @@ export default async function BillingQueuePage({
                     </PendingSubmitButton>
                   </form>
                 )}
-                {canManageBillingSetup && issue.action === 'billing-settings' && (
+                {issue.action === 'billing-settings' && (
                   <Link className="button button-secondary" href="/app/settings/billing">
                     {issue.actionLabel}
                   </Link>
                 )}
-                {canManageBillingSetup && issue.action === 'xero-settings' && (
+                {issue.action === 'xero-settings' && (
                   <Link className="button button-secondary" href="/app/settings/xero">
                     {issue.actionLabel}
                   </Link>
@@ -326,11 +316,6 @@ export default async function BillingQueuePage({
               </li>
             ))}
           </ul>
-          {!canManageBillingSetup && (
-            <div className="notice notice-warning">
-              Ask an owner or administrator to complete these billing setup steps.
-            </div>
-          )}
         </section>
       )}
 
@@ -545,16 +530,11 @@ export default async function BillingQueuePage({
                 {entry.blockers.map((item, index) => (
                   <li key={`${item.code}:${item.remediationHref ?? ''}:${index}`}>
                     <strong>{billingBlockerLabel(item.code)}:</strong> {item.message}{' '}
-                    {item.remediationHref &&
-                      (canManageBillingSetup ||
-                      (!item.remediationHref.startsWith('/admin') &&
-                        !item.remediationHref.startsWith('/app/settings/')) ? (
-                        <Link href={item.remediationHref}>
-                          {billingBlockerActionLabel(item.code)}
-                        </Link>
-                      ) : (
-                        <span className="muted-copy">Ask an owner or administrator.</span>
-                      ))}
+                    {item.remediationHref && (
+                      <Link href={item.remediationHref}>
+                        {billingBlockerActionLabel(item.code)}
+                      </Link>
+                    )}
                   </li>
                 ))}
               </ul>

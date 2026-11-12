@@ -2,43 +2,11 @@ import { createLocalReq, getPayload } from 'payload'
 
 import config from '../../src/payload.config.js'
 
+/** The app has a single kind of account; every browser case signs in as this user. */
 export const testUser = {
-  _verified: true,
-  active: true,
-  displayName: 'Payload E2E Owner',
+  displayName: 'E2E Time User',
   email: 'dev@payloadcms.com',
   password: 'test-password-only',
-  role: 'owner' as const,
-  timezone: 'Pacific/Auckland' as const,
-}
-
-export const memberAppUser = {
-  _verified: true,
-  active: true,
-  displayName: 'E2E Time Member',
-  email: 'time-member@example.test',
-  password: 'member-password-only',
-  role: 'member' as const,
-  timezone: 'Pacific/Auckland' as const,
-}
-
-export const adminAppUser = {
-  _verified: true,
-  active: true,
-  displayName: 'E2E Navigation Admin',
-  email: 'navigation-admin@example.test',
-  password: 'admin-password-only',
-  role: 'admin' as const,
-  timezone: 'Pacific/Auckland' as const,
-}
-
-export const billerAppUser = {
-  _verified: true,
-  active: true,
-  displayName: 'E2E Navigation Biller',
-  email: 'navigation-biller@example.test',
-  password: 'biller-password-only',
-  role: 'biller' as const,
   timezone: 'Pacific/Auckland' as const,
 }
 
@@ -79,13 +47,10 @@ const cleanE2EDatabase = async (payload: Awaited<ReturnType<typeof getPayload>>)
     'xero-reference-data',
     'xero-oauth-states',
     'xero-connections',
-    'external-auth-sessions',
-    'auth-identities',
     'audit-events',
     'time-entries',
     'projects',
     'customers',
-    'invitations',
     'users',
   ]
 
@@ -98,6 +63,22 @@ const cleanE2EDatabase = async (payload: Awaited<ReturnType<typeof getPayload>>)
   await payload.db.connection.db?.collection('application_rate_limits').deleteMany({})
 }
 
+const createTestUser = async (payload: Awaited<ReturnType<typeof getPayload>>) =>
+  payload.create({
+    collection: 'users',
+    data: testUser,
+    overrideAccess: true,
+  })
+
+/** Resets the isolated database and seeds only the signed-in user. */
+export async function seedAppUser(): Promise<void> {
+  assertIsolatedE2EDatabase()
+  const payload = await getPayload({ config })
+
+  await cleanE2EDatabase(payload)
+  await createTestUser(payload)
+}
+
 /**
  * Seeds a complete, locally billable fixture. Processing remains paused so the
  * browser suite proves reservation/cancellation without contacting Xero.
@@ -108,13 +89,8 @@ export async function seedBillingAppFixture(): Promise<void> {
 
   await cleanE2EDatabase(payload)
 
-  const owner = await payload.create({
-    collection: 'users',
-    data: testUser,
-    disableVerificationEmail: true,
-    overrideAccess: true,
-  })
-  const ownerReq = await createLocalReq({ user: owner }, payload)
+  const user = await createTestUser(payload)
+  const userReq = await createLocalReq({ user }, payload)
 
   const tenantID = 'e2e-demo-tenant'
   const itemID = '22222222-2222-4222-8222-222222222222'
@@ -135,7 +111,7 @@ export async function seedBillingAppFixture(): Promise<void> {
       tokenVersion: 0,
     },
     overrideAccess: true,
-    req: ownerReq,
+    req: userReq,
   })
 
   const references = [
@@ -180,7 +156,7 @@ export async function seedBillingAppFixture(): Promise<void> {
         status: 'active',
       },
       overrideAccess: true,
-      req: ownerReq,
+      req: userReq,
     })
   }
 
@@ -198,7 +174,7 @@ export async function seedBillingAppFixture(): Promise<void> {
       xeroExportMode: 'background',
     },
     overrideAccess: true,
-    req: ownerReq,
+    req: userReq,
   })
 
   const customer = await payload.create({
@@ -215,7 +191,7 @@ export async function seedBillingAppFixture(): Promise<void> {
       xeroMappingStatus: 'active',
     },
     overrideAccess: true,
-    req: ownerReq,
+    req: userReq,
   })
 
   const project = await payload.create({
@@ -231,7 +207,7 @@ export async function seedBillingAppFixture(): Promise<void> {
       xeroItemId: itemID,
     },
     overrideAccess: true,
-    req: ownerReq,
+    req: userReq,
   })
 
   for (const [description, hours, minutes] of [
@@ -250,7 +226,7 @@ export async function seedBillingAppFixture(): Promise<void> {
         workDate: '2026-07-18',
       } as never,
       overrideAccess: false,
-      req: ownerReq,
+      req: userReq,
     })
   }
 
@@ -258,18 +234,15 @@ export async function seedBillingAppFixture(): Promise<void> {
     collection: 'projects',
     id: project.id,
     data: {
-      commercialChangeReason: 'Prepare a deterministic browser recalculation preview.',
       confirmUnbilledImpact: true,
       hourlyRateScaled: 2_000_050,
     },
     overrideAccess: false,
-    req: ownerReq,
+    req: userReq,
   })
 }
 
-/**
- * Seeds a test user for e2e admin tests.
- */
+/** Seeds the user plus one project for the Payload Admin browser cases. */
 export async function seedTestUser(): Promise<void> {
   assertIsolatedE2EDatabase()
   const payload = await getPayload({ config })
@@ -277,13 +250,8 @@ export async function seedTestUser(): Promise<void> {
   // The entire database is test-only, so a prior interrupted run is safe to clean directly.
   await cleanE2EDatabase(payload)
 
-  const owner = await payload.create({
-    collection: 'users',
-    data: testUser,
-    disableVerificationEmail: true,
-    overrideAccess: true,
-  })
-  const ownerReq = await createLocalReq({ user: owner }, payload)
+  const user = await createTestUser(payload)
+  const userReq = await createLocalReq({ user }, payload)
   const customer = await payload.create({
     collection: 'customers',
     data: {
@@ -293,7 +261,7 @@ export async function seedTestUser(): Promise<void> {
       xeroMappingStatus: 'unmapped',
     },
     overrideAccess: false,
-    req: ownerReq,
+    req: userReq,
   })
 
   await payload.create({
@@ -308,32 +276,19 @@ export async function seedTestUser(): Promise<void> {
       status: 'active',
     },
     overrideAccess: false,
-    req: ownerReq,
+    req: userReq,
   })
 }
 
-/** Seeds an active project and a member who can use the custom time application. */
-export async function seedMemberAppFixture(): Promise<void> {
+/** Seeds an active project and an archived-customer project for the time application. */
+export async function seedTimeAppFixture(): Promise<void> {
   assertIsolatedE2EDatabase()
   const payload = await getPayload({ config })
 
   await cleanE2EDatabase(payload)
 
-  const owner = await payload.create({
-    collection: 'users',
-    data: testUser,
-    disableVerificationEmail: true,
-    overrideAccess: true,
-  })
-  const ownerReq = await createLocalReq({ user: owner }, payload)
-
-  await payload.create({
-    collection: 'users',
-    data: memberAppUser,
-    disableVerificationEmail: true,
-    overrideAccess: false,
-    req: ownerReq,
-  })
+  const user = await createTestUser(payload)
+  const userReq = await createLocalReq({ user }, payload)
 
   const customer = await payload.create({
     collection: 'customers',
@@ -344,7 +299,7 @@ export async function seedMemberAppFixture(): Promise<void> {
       xeroMappingStatus: 'unmapped',
     },
     overrideAccess: false,
-    req: ownerReq,
+    req: userReq,
   })
 
   await payload.create({
@@ -355,11 +310,11 @@ export async function seedMemberAppFixture(): Promise<void> {
       currency: 'NZD',
       customer: customer.id,
       hourlyRateScaled: 1_500_000,
-      name: 'Member Application Project',
+      name: 'Time Application Project',
       status: 'active',
     },
     overrideAccess: false,
-    req: ownerReq,
+    req: userReq,
   })
 
   const archivedCustomer = await payload.create({
@@ -371,7 +326,7 @@ export async function seedMemberAppFixture(): Promise<void> {
       xeroMappingStatus: 'unmapped',
     },
     overrideAccess: false,
-    req: ownerReq,
+    req: userReq,
   })
 
   await payload.create({
@@ -386,7 +341,7 @@ export async function seedMemberAppFixture(): Promise<void> {
       status: 'active',
     },
     overrideAccess: false,
-    req: ownerReq,
+    req: userReq,
   })
 
   await payload.update({
@@ -394,53 +349,19 @@ export async function seedMemberAppFixture(): Promise<void> {
     id: archivedCustomer.id,
     data: { status: 'archived' },
     overrideAccess: false,
-    req: ownerReq,
+    req: userReq,
   })
 }
 
-/** Seeds one deterministic user for every custom-application navigation role. */
-export async function seedNavigationRoleFixture(): Promise<void> {
+export async function seedTimeEntries(count: number): Promise<void> {
   assertIsolatedE2EDatabase()
   const payload = await getPayload({ config })
-
-  await cleanE2EDatabase(payload)
-
-  const owner = await payload.create({
-    collection: 'users',
-    data: testUser,
-    disableVerificationEmail: true,
-    overrideAccess: true,
-  })
-  const ownerReq = await createLocalReq({ user: owner }, payload)
-
-  for (const user of [adminAppUser, billerAppUser, memberAppUser]) {
-    await payload.create({
-      collection: 'users',
-      data: user,
-      disableVerificationEmail: true,
-      overrideAccess: false,
-      req: ownerReq,
-    })
-  }
-}
-
-/** Removes the isolated role-navigation fixture and any browser-test side effects. */
-export async function cleanupNavigationRoleFixture(): Promise<void> {
-  assertIsolatedE2EDatabase()
-  const payload = await getPayload({ config })
-
-  await cleanE2EDatabase(payload)
-}
-
-export async function seedMemberTimeEntries(count: number): Promise<void> {
-  assertIsolatedE2EDatabase()
-  const payload = await getPayload({ config })
-  const [memberResult, projectResult] = await Promise.all([
+  const [userResult, projectResult] = await Promise.all([
     payload.find({
       collection: 'users',
       limit: 1,
       overrideAccess: true,
-      where: { email: { equals: memberAppUser.email } },
+      where: { email: { equals: testUser.email } },
     }),
     payload.find({
       collection: 'projects',
@@ -449,12 +370,12 @@ export async function seedMemberTimeEntries(count: number): Promise<void> {
       where: { code: { equals: 'E2E-WEB' } },
     }),
   ])
-  const member = memberResult.docs[0]
+  const user = userResult.docs[0]
   const project = projectResult.docs[0]
 
-  if (!member || !project) throw new Error('The member application fixture is incomplete.')
+  if (!user || !project) throw new Error('The time application fixture is incomplete.')
 
-  const memberReq = await createLocalReq({ user: member }, payload)
+  const userReq = await createLocalReq({ user }, payload)
 
   for (let index = 0; index < count; index += 1) {
     await payload.create({
@@ -465,11 +386,11 @@ export async function seedMemberTimeEntries(count: number): Promise<void> {
         enteredMinutes: 1,
         inputMode: 'duration',
         project: project.id,
-        timezone: memberAppUser.timezone,
+        timezone: testUser.timezone,
         workDate: '2026-07-17',
       } as never,
       overrideAccess: false,
-      req: memberReq,
+      req: userReq,
     })
   }
 }
@@ -496,9 +417,7 @@ export async function issueE2EPasswordResetToken(email: string): Promise<string>
   return token
 }
 
-/**
- * Cleans up test user after tests
- */
+/** Removes every fixture and browser-test side effect from the isolated database. */
 export async function cleanupTestUser(): Promise<void> {
   assertIsolatedE2EDatabase()
   const payload = await getPayload({ config })

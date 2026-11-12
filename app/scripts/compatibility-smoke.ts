@@ -35,7 +35,7 @@ const globalSlugs = new Set<string>(config.globals?.map((global) => global.slug)
 for (const slug of ['users', 'time-entries', 'invoice-exports', 'xero-connections']) {
   if (!collectionSlugs.has(slug)) throw new Error(`Payload collection ${slug} is unavailable.`)
 }
-for (const slug of ['authentication-settings', 'billing-settings', 'business-settings']) {
+for (const slug of ['billing-settings', 'business-settings']) {
   if (!globalSlugs.has(slug)) throw new Error(`Payload global ${slug} is unavailable.`)
 }
 if (config.graphQL?.disable !== true) throw new Error('GraphQL must remain disabled.')

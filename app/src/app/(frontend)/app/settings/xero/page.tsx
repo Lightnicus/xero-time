@@ -1,7 +1,5 @@
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
 
-import { hasActiveRole } from '@/access/roles'
 import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import {
   PendingNavigationForm,
@@ -32,14 +30,9 @@ const errorMessage = (code: string): string | null => {
     'code-exchange-invalid-grant':
       'The Xero callback expired or was already used. Start the connection again.',
     'code-exchange-network-error': 'Xero could not be reached. Start the connection again.',
-    'credential-boundary':
-      'Use a different client ID and secret from the optional Xero identity application.',
     'disconnect-before-config-change':
       'Disconnect Xero accounting before replacing its OAuth application credentials.',
-    forbidden: 'Only an owner or administrator can manage the accounting connection.',
-    'handover-required':
-      'You approved the connection as a different Xero user from the one who connected it before. To keep that user, tick "I am reconnecting as a different Xero user", give a reason, and reconnect again.',
-    'invalid-handover-reason': 'Enter a handover reason of at least 10 characters.',
+    forbidden: 'Sign in again to manage the accounting connection.',
     'invalid-client-id': 'Enter the client ID from the dedicated Xero accounting application.',
     'invalid-client-secret':
       'Enter the client secret from the dedicated Xero accounting application.',
@@ -60,14 +53,13 @@ const errorMessage = (code: string): string | null => {
     'token-refresh-invalid-client':
       'Xero rejected the saved client ID or secret. Update the OAuth application credentials, then reconnect.',
     'operation-failed': 'The accounting operation could not be completed.',
-    'reauthentication-failed': 'Password confirmation failed.',
     'state-replayed': 'That Xero connection attempt has already been used.',
     'token-refresh-invalid-grant': 'Xero requires this organisation to be reconnected.',
     'token-refresh-invalid_grant': 'Xero requires this organisation to be reconnected.',
+    'unsafe-export-state':
+      'Some invoice exports are still in progress. Let them finish or cancel them on the export history page, then disconnect.',
     'wrong-tenant':
       "Xero returned a different organisation from the pinned one. Reconnect and choose the pinned organisation on Xero's organisation screen.",
-    'unsafe-export-state':
-      'Resolve active, ambiguous, or action-required exports before changing accounting authority.',
   }
   return code ? (messages[code] ?? 'The Xero accounting operation could not be completed.') : null
 }
@@ -78,7 +70,6 @@ export default async function XeroAccountingPage({
   searchParams: Promise<Record<string, SearchValue>>
 }) {
   const session = await requireAppSession()
-  if (!hasActiveRole(session.user, ['owner', 'admin'])) redirect('/app')
 
   const params = await searchParams
   const [connection, settings, connectionAlert] = await Promise.all([
@@ -88,11 +79,6 @@ export default async function XeroAccountingPage({
   ])
   const errorCode = value(params.error)
   const error = errorMessage(errorCode)
-  const advancedControlsOpen = [
-    'handover-required',
-    'invalid-handover-reason',
-    'unsafe-export-state',
-  ].includes(errorCode)
   const dateTimeFormatter = new Intl.DateTimeFormat(settings.locale, {
     dateStyle: settings.dateDisplayStyle,
     timeStyle: 'short',
@@ -112,7 +98,7 @@ export default async function XeroAccountingPage({
     <div className="narrow-page page-stack">
       <PageHeader
         breadcrumb={{ current: 'Xero accounting', href: '/app/settings', label: 'Settings' }}
-        description="Connect the one Xero organisation used for customer mapping and draft invoice exports. This is separate from optional user sign-in with Xero."
+        description="Connect the one Xero organisation used for customer mapping and draft invoice exports."
         title="Xero accounting"
       />
 
@@ -238,10 +224,6 @@ export default async function XeroAccountingPage({
                   ? 'A secret is stored. Enter a value only to replace it.'
                   : 'The plaintext value is accepted only by this protected server action.'}
               </small>
-            </label>
-            <label className="field">
-              <span>Current account password</span>
-              <input autoComplete="current-password" name="password" required type="password" />
             </label>
             <PendingSubmitButton
               className="button button-secondary"
@@ -383,13 +365,10 @@ export default async function XeroAccountingPage({
                   sign out first.
                 </li>
                 <li>
-                  Select <strong>Reconnect Xero</strong> below and confirm your password. In Xero,
-                  choose <strong>{organisationName}</strong> and allow access. If Xero says the
-                  organisation is already connected, continue anyway.
-                </li>
-                <li>
-                  If the Xero user who connected it before has left or lost access, tick{' '}
-                  <strong>I am reconnecting as a different Xero user</strong> and give a reason.
+                  Select <strong>Reconnect Xero</strong> below. In Xero, choose{' '}
+                  <strong>{organisationName}</strong> and allow access. If Xero says the
+                  organisation is already connected, continue anyway. Any Xero user who can create
+                  invoices there will do; it does not have to be the one who connected it before.
                 </li>
                 <li>
                   {waitingExports > 0
@@ -410,7 +389,7 @@ export default async function XeroAccountingPage({
                 <h2>{connectLabel}</h2>
                 <p>
                   You will be sent to Xero to authorize invoices, contacts, settings read access,
-                  and offline token refresh. Confirm your local password first.
+                  and offline token refresh.
                 </p>
                 <p>
                   If Xero says the organisation is already connected, continue through that screen
@@ -423,38 +402,6 @@ export default async function XeroAccountingPage({
                   <strong>{connection.tenantName}</strong>.
                 </div>
               )}
-              {connection.tenantId && (
-                <details
-                  className="settings-disclosure"
-                  open={['handover-required', 'invalid-handover-reason'].includes(errorCode)}
-                >
-                  <summary>Reconnecting as a different Xero user?</summary>
-                  <div className="settings-disclosure-content">
-                    <label className="confirmation-field">
-                      <input name="differentAuthorizer" type="checkbox" value="yes" />
-                      <span>I am reconnecting as a different Xero user</span>
-                    </label>
-                    <label className="field">
-                      <span>Reason for changing the Xero user</span>
-                      <textarea maxLength={1_000} name="reason" rows={2} />
-                      <small>
-                        At least 10 characters, for example who left and who takes over. The change
-                        is recorded in the audit log.
-                      </small>
-                    </label>
-                  </div>
-                </details>
-              )}
-              <label className="field" htmlFor="connectPassword">
-                <span>Current password</span>
-                <input
-                  autoComplete="current-password"
-                  id="connectPassword"
-                  name="password"
-                  required
-                  type="password"
-                />
-              </label>
               <div className="form-actions">
                 <PendingSubmitButton
                   className="button button-primary"
@@ -467,52 +414,9 @@ export default async function XeroAccountingPage({
           )}
 
           {connection.status === 'connected' && (
-            <details
-              className="settings-disclosure settings-disclosure-danger"
-              open={advancedControlsOpen}
-            >
-              <summary>Advanced Xero controls</summary>
+            <details className="settings-disclosure settings-disclosure-danger">
+              <summary>Disconnect Xero</summary>
               <div className="settings-disclosure-content">
-                <PendingNavigationForm
-                  action="/api/integrations/xero/accounting/handover"
-                  className="settings-disclosure-section integration-form"
-                  method="post"
-                >
-                  <div>
-                    <h2>Change accounting authorizer</h2>
-                    <p>
-                      Explicitly replace the server-held grant while pinning the same organisation.
-                      The old grant remains active unless the new tenant, scopes, token identity,
-                      and local transaction all validate.
-                    </p>
-                  </div>
-                  <label className="field">
-                    <span>Reason</span>
-                    <textarea maxLength={1_000} minLength={10} name="reason" required rows={3} />
-                  </label>
-                  <label className="field">
-                    <span>Current password</span>
-                    <input
-                      autoComplete="current-password"
-                      name="password"
-                      required
-                      type="password"
-                    />
-                  </label>
-                  <label className="confirmation-field">
-                    <input name="confirmation" required type="checkbox" value="handover" />
-                    <span>
-                      I understand the new Xero login must authorize this same organisation.
-                    </span>
-                  </label>
-                  <PendingSubmitButton
-                    className="button button-secondary"
-                    pendingLabel="Starting authorizer handover…"
-                  >
-                    Start authorizer handover
-                  </PendingSubmitButton>
-                </PendingNavigationForm>
-
                 <PendingNavigationForm
                   action="/api/integrations/xero/accounting/disconnect"
                   className="danger-zone integration-disconnect"
@@ -526,26 +430,6 @@ export default async function XeroAccountingPage({
                     </p>
                   </div>
                   <div className="disconnect-fields">
-                    <label className="field" htmlFor="disconnectReason">
-                      <span>Reason</span>
-                      <textarea
-                        id="disconnectReason"
-                        minLength={10}
-                        name="reason"
-                        required
-                        rows={3}
-                      />
-                    </label>
-                    <label className="field" htmlFor="disconnectPassword">
-                      <span>Current password</span>
-                      <input
-                        autoComplete="current-password"
-                        id="disconnectPassword"
-                        name="password"
-                        required
-                        type="password"
-                      />
-                    </label>
                     <label className="confirmation-field">
                       <input name="confirmation" required type="checkbox" value="disconnect" />
                       <span>I understand this stops Xero exports until reconnection.</span>

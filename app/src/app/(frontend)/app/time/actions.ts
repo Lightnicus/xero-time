@@ -5,7 +5,6 @@ import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { ValidationError } from 'payload'
 
-import { hasActiveRole } from '@/access/roles'
 import {
   isValidCalendarDate,
   isValidIanaTimezone,
@@ -13,12 +12,8 @@ import {
 } from '@/lib/domain/validation'
 import { findMyTimeEntry } from '@/lib/member-app/data'
 import { localDateTimeToISOString } from '@/lib/member-app/date-time'
-import { canLogTime, requireAppSession } from '@/lib/member-app/session'
+import { requireAppSession } from '@/lib/member-app/session'
 import { enforceRateLimit, rateLimitKey } from '@/lib/security/rate-limit'
-import {
-  deleteUnbilledTimeEntryAsAdministrator,
-  TimeEntryAdministrationError,
-} from '@/lib/time-entry/administration'
 
 import type { Where } from 'payload'
 
@@ -29,7 +24,6 @@ export type TimeEntryField =
   | 'enteredMinutes'
   | 'inputMode'
   | 'project'
-  | 'privilegedCorrectionReason'
   | 'startLocal'
   | 'timezone'
   | 'workDate'
@@ -105,8 +99,6 @@ const parseTimeEntry = (formData: FormData): ParsedTimeEntry => {
     project,
     timezone,
   }
-  const correctionReason = stringValue(formData, 'privilegedCorrectionReason').trim()
-  if (correctionReason) data.privilegedCorrectionReason = correctionReason
 
   if (inputMode === 'duration') {
     const workDate = stringValue(formData, 'workDate')
@@ -187,13 +179,6 @@ const stateFromError = (error: unknown): TimeEntryActionState => {
     }
   }
 
-  if (error instanceof TimeEntryAdministrationError) {
-    // These are expected, user-correctable refusals (short reason, locked entry), not failures.
-    return error.code === 'invalid-reason'
-      ? { fieldErrors: { privilegedCorrectionReason: error.message }, message: error.message }
-      : { message: error.message }
-  }
-
   return { message: 'The time entry could not be saved. Please try again.' }
 }
 
@@ -241,10 +226,6 @@ export async function createTimeEntryAction(
 ): Promise<TimeEntryActionState> {
   const session = await requireAppSession()
 
-  if (!canLogTime(session.user)) {
-    return { message: 'Your account does not have permission to record time.' }
-  }
-
   const parsed = parseTimeEntry(formData)
   if (!parsed.data) return parsed.state ?? emptyState
 
@@ -272,10 +253,6 @@ export async function updateTimeEntryAction(
 ): Promise<TimeEntryActionState> {
   const session = await requireAppSession()
 
-  if (!canLogTime(session.user)) {
-    return { message: 'Your account does not have permission to change time.' }
-  }
-
   const id = stringValue(formData, 'entryID')
   if (id.length === 0 || id.length > 100) return { message: 'The time entry was not found.' }
 
@@ -289,15 +266,6 @@ export async function updateTimeEntryAction(
     if (!existing) return { message: 'The time entry was not found.' }
     if (existing.billingStatus !== 'unbilled') {
       return { message: 'This entry is locked because it is reserved or exported.' }
-    }
-
-    if (
-      hasActiveRole(session.user, ['owner', 'admin']) &&
-      stringValue(formData, 'privilegedCorrectionReason').trim().length < 10
-    ) {
-      return validationState({
-        privilegedCorrectionReason: 'Enter an audit reason of at least 10 characters.',
-      })
     }
 
     const warning = await overlapWarning(session, parsed.data, formData, id)
@@ -324,10 +292,6 @@ export async function deleteTimeEntryAction(
 ): Promise<TimeEntryActionState> {
   const session = await requireAppSession()
 
-  if (!canLogTime(session.user)) {
-    return { message: 'Your account does not have permission to delete time.' }
-  }
-
   const id = stringValue(formData, 'entryID')
   if (id.length === 0 || id.length > 100) return { message: 'The time entry was not found.' }
 
@@ -337,22 +301,15 @@ export async function deleteTimeEntryAction(
 
     if (!existing) return { message: 'The time entry was not found.' }
     if (existing.billingStatus !== 'unbilled') {
-      return { message: 'Locked time cannot be deleted. An administrator must release it first.' }
+      return { message: 'Locked time cannot be deleted. Release it from its export first.' }
     }
 
-    if (hasActiveRole(session.user, ['owner', 'admin'])) {
-      await deleteUnbilledTimeEntryAsAdministrator(session, {
-        entryID: id,
-        reason: stringValue(formData, 'privilegedCorrectionReason'),
-      })
-    } else {
-      await session.payload.delete({
-        collection: 'time-entries',
-        id,
-        overrideAccess: false,
-        req: session.req,
-      })
-    }
+    await session.payload.delete({
+      collection: 'time-entries',
+      id,
+      overrideAccess: false,
+      req: session.req,
+    })
   } catch (error) {
     return stateFromError(error)
   }

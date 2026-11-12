@@ -1,14 +1,14 @@
-import { hasActiveRole, isActiveOwnerOrAdmin } from '@/access/roles'
+import { isSignedIn } from '@/access/roles'
 
 import type { Access, CollectionConfig } from 'payload'
 
 const denyAll = () => false
-const readBilling: Access = ({ req }) => hasActiveRole(req.user, ['owner', 'admin', 'biller'])
+const readBilling: Access = ({ req }) => isSignedIn(req.user)
 
 export const InvoiceExportEntries: CollectionConfig = {
   slug: 'invoice-export-entries',
   access: {
-    admin: ({ req }) => isActiveOwnerOrAdmin(req.user),
+    admin: ({ req }) => isSignedIn(req.user),
     create: denyAll,
     delete: denyAll,
     read: readBilling,

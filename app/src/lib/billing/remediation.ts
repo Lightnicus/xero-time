@@ -127,7 +127,7 @@ const setupPresentation: Record<
     action: 'xero-settings',
     actionLabel: 'Reconnect Xero',
     description:
-      'Xero stopped accepting the saved connection. An owner or admin needs to reconnect the same organisation before invoices can be created.',
+      'Xero stopped accepting the saved connection. Reconnect the same organisation before invoices can be created.',
     title: 'Xero needs to be reconnected',
   },
 }

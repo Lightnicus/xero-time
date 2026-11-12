@@ -1,7 +1,5 @@
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
 
-import { hasActiveRole } from '@/access/roles'
 import { PendingSubmitButton } from '@/app/(frontend)/_components/PendingControls'
 import { exportStateLabel } from '@/lib/billing/export-presentation'
 import { formatScaledAmount } from '@/lib/domain/money'
@@ -26,7 +24,6 @@ export default async function ExportHistoryPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const session = await requireAppSession()
-  if (!hasActiveRole(session.user, ['owner', 'admin', 'biller'])) redirect('/app')
   const params = await searchParams
   const batch =
     typeof params.batch === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(params.batch)
@@ -91,16 +88,11 @@ export default async function ExportHistoryPage({
           <Link className="button button-secondary" href={releasedToggleHref}>
             {includeReleased ? 'Hide released exports' : 'Show released exports'}
           </Link>
-          {hasActiveRole(session.user, ['owner', 'admin']) && (
-            <form action={runXeroQueueNowAction}>
-              <PendingSubmitButton
-                className="button button-secondary"
-                pendingLabel="Running queue…"
-              >
-                Run Xero queue now
-              </PendingSubmitButton>
-            </form>
-          )}
+          <form action={runXeroQueueNowAction}>
+            <PendingSubmitButton className="button button-secondary" pendingLabel="Running queue…">
+              Run Xero queue now
+            </PendingSubmitButton>
+          </form>
         </div>
       </section>
       {params.status && (
