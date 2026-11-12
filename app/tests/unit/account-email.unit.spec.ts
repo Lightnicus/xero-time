@@ -67,10 +67,12 @@ describe('account email configuration', () => {
   })
 
   it('initializes the official adapter and maps the configured sender', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      json: async () => ({ id: 'email-id' }),
-      status: 200,
-    })
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: 'email-id' }), {
+        headers: { 'Content-Type': 'application/json' },
+        status: 200,
+      }),
+    )
     vi.stubGlobal('fetch', fetchMock)
 
     const adapter = createAccountEmailAdapter(resendConfig)
