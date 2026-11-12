@@ -1,7 +1,5 @@
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
 
-import { hasActiveRole } from '@/access/roles'
 import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import { getBillingDefaultSettingsView } from '@/lib/billing/default-settings'
 import { requireAppSession } from '@/lib/member-app/session'
@@ -24,7 +22,6 @@ export default async function BillingSettingsPage({
   searchParams: Promise<SearchParams>
 }) {
   const session = await requireAppSession()
-  if (!hasActiveRole(session.user, ['owner', 'admin'])) redirect('/app')
 
   const [params, view] = await Promise.all([searchParams, getBillingDefaultSettingsView(session)])
   const lastSync = view.lastReferenceDataSyncAt

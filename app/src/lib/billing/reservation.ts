@@ -2,7 +2,6 @@ import 'server-only'
 
 import { randomUUID } from 'node:crypto'
 
-import { hasActiveRole } from '@/access/roles'
 import { TIME_ENTRY_BILLING_MUTATION_CONTEXT } from '@/collections/TimeEntries'
 import { recordAuditEvent } from '@/lib/audit/service'
 import type { AppSession } from '@/lib/member-app/session'
@@ -32,7 +31,8 @@ export type BillingReservationResult = {
   actualMode: 'background' | 'wait-for-result'
   batchID: string
   exportIDs: string[]
-  status: 'continuing-in-background' | 'queued'
+  /** `dispatch-pending`: reserved and saved, but job attachment failed; the dispatcher retries. */
+  status: 'continuing-in-background' | 'dispatch-pending' | 'queued'
 }
 
 const batchReference = (): string => randomUUID().toUpperCase()
@@ -66,8 +66,6 @@ export async function createBillingPreview(
     selection: BillingSelection
   },
 ): Promise<BillingPreview> {
-  if (!hasActiveRole(session.user, ['owner', 'admin', 'biller']))
-    throw new Error('Billing access is required.')
   const selection = normalizeBillingSelection(input.selection)
   const eligibility = await getBillingEligibility(
     session,
@@ -95,26 +93,22 @@ const executionMode = (
 } => {
   const configured =
     settings.xeroExportMode === 'wait-for-result' ? 'wait-for-result' : 'background'
-  let requested = input.requestedMode
-  const override = requested !== configured
-  if (override) {
-    const billerCanOverride =
-      session.user.role !== 'biller' || settings.allowBillerModeOverride === true
-    if (!billerCanOverride) requested = configured
-    else if ((input.modeOverrideReason?.trim().length ?? 0) < 10) {
-      throw new Error('Explain why this export should use a different execution mode.')
-    }
-  }
   const tooLarge =
     preview.summary.invoiceCount > Number(settings.maxWaitInvoices ?? 1) ||
     preview.summary.entryCount > Number(settings.maxWaitLines ?? 50)
-  const actual =
-    requested === 'wait-for-result' && settings.waitForResultEnabled === true && !tooLarge
-      ? 'wait-for-result'
-      : 'background'
+  const waitAvailable = settings.waitForResultEnabled === true && !tooLarge
+  // The mode the server runs without any user choice: the configured mode, downgraded to
+  // background when waiting is off or this batch exceeds the wait limits.
+  const serverChoice =
+    configured === 'wait-for-result' && waitAvailable ? 'wait-for-result' : 'background'
+  const requested = input.requestedMode
+  // Asking for the configured mode, or for the mode the server would fall back to anyway, is not
+  // an override.
+  const override = requested !== configured && requested !== serverChoice
+  const actual = requested === 'wait-for-result' && waitAvailable ? 'wait-for-result' : 'background'
   return {
     actual,
-    reason: override ? input.modeOverrideReason?.trim() : undefined,
+    reason: override ? input.modeOverrideReason?.trim() || undefined : undefined,
     requested,
   }
 }
@@ -122,9 +116,8 @@ const executionMode = (
 export async function confirmBillingPreview(
   session: AppSession,
   input: ConfirmBillingInput,
+  overrides: { dispatch?: typeof dispatchInvoiceExport } = {},
 ): Promise<BillingReservationResult> {
-  if (!hasActiveRole(session.user, ['owner', 'admin', 'biller']))
-    throw new Error('Billing access is required.')
   const selection = normalizeBillingSelection(input.selection)
 
   const transactionResult = await withPayloadTransaction(
@@ -142,7 +135,7 @@ export async function confirmBillingPreview(
         selection.type === 'explicit' ? { entryIDs: selection.explicitEntryIDs } : {},
       )
       if (eligibility.settingsDocument.acceptingNewExports !== true) {
-        throw new Error('New exports are currently paused by the owner.')
+        throw new Error('New exports are currently paused in billing settings.')
       }
       const selectedEntries = selectEligibleEntries(eligibility, selection)
       const preview = buildBillingPreview({
@@ -348,22 +341,50 @@ export async function confirmBillingPreview(
     { user: session.user },
   )
 
-  const jobs: string[] = []
-  for (const exportID of transactionResult.exportIDs) {
-    const dispatch = await dispatchInvoiceExport(session.payload, exportID, session.req)
-    if (dispatch.jobID) jobs.push(dispatch.jobID)
+  // Everything below runs after the reservation committed. A failure here must not be reported as
+  // if nothing happened: the exports stay 'preparing' and the durable dispatcher attaches their jobs.
+  const dispatch = overrides.dispatch ?? dispatchInvoiceExport
+  const logPostCommitFailure = (step: string, error: unknown): void => {
+    session.payload.logger.error({
+      batchID: transactionResult.batchID,
+      err: error,
+      msg: `Billing reservation committed but ${step} failed; the dispatcher will retry.`,
+    })
   }
-  await session.payload.update({
-    collection: 'export-batches',
-    id: transactionResult.batchID,
-    data: { status: jobs.length === transactionResult.exportIDs.length ? 'queued' : 'preparing' },
-    depth: 0,
-    overrideAccess: true,
-    req: session.req,
-  })
+  const jobs: string[] = []
+  let dispatchFailed = false
+  for (const exportID of transactionResult.exportIDs) {
+    try {
+      const result = await dispatch(session.payload, exportID, session.req)
+      if (result.jobID) jobs.push(result.jobID)
+    } catch (error) {
+      dispatchFailed = true
+      logPostCommitFailure('job dispatch', error)
+    }
+  }
+  const allDispatched = !dispatchFailed && jobs.length === transactionResult.exportIDs.length
+  try {
+    await session.payload.update({
+      collection: 'export-batches',
+      id: transactionResult.batchID,
+      data: { status: allDispatched ? 'queued' : 'preparing' },
+      depth: 0,
+      overrideAccess: true,
+      req: session.req,
+    })
+  } catch (error) {
+    // The batch stays 'preparing'; export processing recomputes the batch status later.
+    logPostCommitFailure('the batch status update', error)
+  }
+  if (dispatchFailed) return { ...transactionResult, status: 'dispatch-pending' }
   if (transactionResult.actualMode === 'wait-for-result' && jobs.length === 1) {
-    const status = await runExportJobWithTimeout(session.payload, jobs[0] as string, session.req)
-    return { ...transactionResult, status: status === 'completed' ? 'queued' : status }
+    try {
+      const status = await runExportJobWithTimeout(session.payload, jobs[0] as string, session.req)
+      return { ...transactionResult, status: status === 'completed' ? 'queued' : status }
+    } catch (error) {
+      logPostCommitFailure('the wait-for-result run', error)
+      return { ...transactionResult, status: 'continuing-in-background' }
+    }
   }
   return { ...transactionResult, status: 'queued' }
 }

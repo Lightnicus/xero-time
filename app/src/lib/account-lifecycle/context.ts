@@ -1,2 +1,0 @@
-export const ACCOUNT_INVITATION_ACCEPTANCE_CONTEXT = 'allowAccountInvitationAcceptance'
-export const OWNER_TRANSITION_CONTEXT = 'allowExplicitOwnerTransition'

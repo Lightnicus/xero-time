@@ -149,10 +149,13 @@ export function buildBillingPreview(input: {
       )
     }
     const lines = entries.map((entry, ordinal) => previewLine(entry, ordinal, input.settings))
-    const subtotalScaled = lines.reduce((total, line) => total + line.amountScaled, 0)
+    // Line amounts and tax are already rounded to cents per line, as Xero does. For tax-inclusive
+    // invoices the line amounts include tax, so the subtotal is what remains after removing it.
+    const lineTotalScaled = lines.reduce((total, line) => total + line.amountScaled, 0)
     const taxScaled = lines.reduce((total, line) => total + line.taxScaled, 0)
-    const totalScaled =
-      input.settings.lineAmountType === 'Inclusive' ? subtotalScaled : subtotalScaled + taxScaled
+    const inclusive = input.settings.lineAmountType === 'Inclusive'
+    const subtotalScaled = inclusive ? lineTotalScaled - taxScaled : lineTotalScaled
+    const totalScaled = inclusive ? lineTotalScaled : lineTotalScaled + taxScaled
     const dueDate = dueDateFor(input.invoiceDate, input.settings.paymentTerms)
     const payload = {
       Contact: { ContactID: first.contactID },

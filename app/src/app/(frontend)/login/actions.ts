@@ -7,10 +7,8 @@ import { after } from 'next/server'
 import { generateExpiredPayloadCookie, generatePayloadCookie, getPayload } from 'payload'
 
 import { recordAuditEvent } from '@/lib/audit/service'
-import { defaultAppHome } from '@/lib/member-app/navigation'
 import { enforceRateLimit, rateLimitKey } from '@/lib/security/rate-limit'
 import { enqueueStaleAccountingHealthCheck } from '@/lib/xero/accounting/health-scheduling'
-import { EXTERNAL_SESSION_COOKIE, revokeCurrentExternalSession } from '@/lib/xero/identity/service'
 import config from '@/payload.config'
 
 export type LoginActionState = {
@@ -33,7 +31,7 @@ export async function loginAction(
 ): Promise<LoginActionState> {
   const emailValue = formData.get('email')
   const passwordValue = formData.get('password')
-  let destination = safeAppPath(formData.get('next'))
+  const destination = safeAppPath(formData.get('next'))
 
   if (
     typeof emailValue !== 'string' ||
@@ -67,17 +65,6 @@ export async function loginAction(
       throw new Error('Login did not create a session token.')
     }
 
-    if (destination === '/app') destination = defaultAppHome(result.user.role)
-
-    await payload.update({
-      collection: 'users',
-      id: result.user.id,
-      data: {
-        lastLoginAt: new Date().toISOString(),
-        lastLoginProvider: 'email-password',
-      },
-      overrideAccess: true,
-    })
     await recordAuditEvent(payload, {
       actor: result.user.id,
       eventType: 'authentication.login-succeeded',
@@ -115,7 +102,7 @@ export async function loginAction(
       machineActor: 'email-login',
       metadata: { email: emailValue, provider: 'email-password' },
     })
-    // Invalid, inactive, and locked accounts deliberately receive the same response.
+    // Invalid and locked accounts deliberately receive the same response.
     return { message: genericLoginError }
   }
 
@@ -125,7 +112,6 @@ export async function loginAction(
 export async function logoutAction(_formData: FormData): Promise<void> {
   const payload = await getPayload({ config })
   const cookieStore = await cookies()
-  await revokeCurrentExternalSession(payload, cookieStore.get(EXTERNAL_SESSION_COOKIE)?.value)
   await logout({ config })
 
   // Expire the root-scoped cookie explicitly so logout is independent of the action URL.
@@ -146,15 +132,6 @@ export async function logoutAction(_formData: FormData): Promise<void> {
       secure: payloadCookie.secure,
     })
   }
-
-  cookieStore.set(EXTERNAL_SESSION_COOKIE, '', {
-    expires: new Date(0),
-    httpOnly: true,
-    maxAge: 0,
-    path: '/',
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-  })
 
   redirect('/login')
 }

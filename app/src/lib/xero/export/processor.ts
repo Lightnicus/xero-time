@@ -11,6 +11,11 @@ import { withPayloadTransaction } from '@/lib/payload/withTransaction'
 import type { XeroAccountingClient } from '@/lib/xero/accounting/client'
 import { AccountingIntegrationError } from '@/lib/xero/accounting/contracts'
 import {
+  XERO_RECONNECT_EXPORT_CODE,
+  XERO_RECONNECT_EXPORT_MESSAGE,
+  XERO_RECONNECT_RECHECK_SECONDS,
+} from '@/lib/xero/accounting/recovery'
+import {
   createAccountingSystemSession,
   getValidAccountingAccessToken,
   resolveAccountingRuntime,
@@ -665,14 +670,45 @@ const queueFollowUp = async (
   return String(job.id)
 }
 
+/** After this many automatic retries in a row, an export stops and waits for the user. */
+export const MAX_CONSECUTIVE_RETRIES = 8
+export const RETRY_LIMIT_ERROR_CODE = 'retry-limit-reached'
+
+/**
+ * How many times in a row the export has gone back to `state` for another automatic try. Waiting
+ * for Xero to be reconnected is not a failed try, so those entries are skipped without counting.
+ */
+export const consecutiveRetries = (
+  exportDocument: Pick<InvoiceExport, 'stateHistory'>,
+  state: 'reconciling' | 'retry-wait',
+): number => {
+  const history = Array.isArray(exportDocument.stateHistory) ? exportDocument.stateHistory : []
+  let count = 0
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const entry = history[index]
+    if (!isRecord(entry) || entry.to !== state) break
+    const metadata = isRecord(entry.metadata) ? entry.metadata : {}
+    if (metadata.errorCode !== XERO_RECONNECT_EXPORT_CODE) count += 1
+  }
+  return count
+}
+
+export const consecutiveRetryWaits = (exportDocument: Pick<InvoiceExport, 'stateHistory'>) =>
+  consecutiveRetries(exportDocument, 'retry-wait')
+
+export const retryLimitMessage = (lastError: string): string =>
+  `Stopped after ${MAX_CONSECUTIVE_RETRIES} automatic retries in a row. Its time stays reserved. Last error: ${lastError} Fix the cause, then use Request recovery on the export page.`
+
 const retryDelaySeconds = (
   exportDocument: InvoiceExport,
   error: AccountingIntegrationError,
 ): number => {
   if (error.retryAfterSeconds && error.retryAfterSeconds >= 0)
     return Math.min(error.retryAfterSeconds, 3_600)
-  const exponent = Math.min(Math.max(exportDocument.currentAttemptNumber ?? 1, 1), 6)
-  return BASE_RETRY_SECONDS * 2 ** (exponent - 1) + Math.floor(Math.random() * 10)
+  // Back off by how many retries in a row this export has already waited through; the attempt
+  // number only changes when a replacement is approved, so it never grew on its own.
+  const exponent = Math.min(consecutiveRetryWaits(exportDocument), 5)
+  return BASE_RETRY_SECONDS * 2 ** exponent + Math.floor(Math.random() * 10)
 }
 
 const deferExport = async (
@@ -682,8 +718,10 @@ const deferExport = async (
   attempt: XeroAttempt,
   error: AccountingIntegrationError,
   state: 'reconciling' | 'retry-wait',
+  delaySeconds?: number,
 ): Promise<void> => {
-  const delay = state === 'reconciling' ? 30 : retryDelaySeconds(exportDocument, error)
+  const delay =
+    delaySeconds ?? (state === 'reconciling' ? 30 : retryDelaySeconds(exportDocument, error))
   const nextAttemptAt = new Date(Date.now() + delay * 1_000)
   const jobID = await queueFollowUp(
     payload,
@@ -718,7 +756,10 @@ const deferExport = async (
       processingLeaseExpiresAt: null,
       processingLeaseId: null,
       state,
-      stateHistory: stateHistory(exportDocument, state, { retryAt: nextAttemptAt.toISOString() }),
+      stateHistory: stateHistory(exportDocument, state, {
+        errorCode: error.code,
+        retryAt: nextAttemptAt.toISOString(),
+      }),
     },
     overrideAccess: true,
     req,
@@ -935,6 +976,23 @@ export async function processInvoiceExport(
               retryable: true,
             },
           )
+    if (error.reconnectRequired) {
+      // The connection, not this invoice, is the problem: keep the reservation and wait for a
+      // Xero reconnection rather than failing the export.
+      const state = requestMayHaveBeenSent ? 'reconciling' : 'retry-wait'
+      await deferExport(
+        payload,
+        req,
+        claimed,
+        attempt,
+        new AccountingIntegrationError(XERO_RECONNECT_EXPORT_CODE, XERO_RECONNECT_EXPORT_MESSAGE, {
+          requestMayHaveBeenSent: error.requestMayHaveBeenSent,
+        }),
+        state,
+        XERO_RECONNECT_RECHECK_SECONDS,
+      )
+      return { state }
+    }
     const failureState = classifyExportFailure(error, requestMayHaveBeenSent)
     if (failureState === 'action-required') {
       await releaseAfterDefiniteFailure(payload, req, claimed, attempt, error)
@@ -944,7 +1002,68 @@ export async function processInvoiceExport(
       await deferExport(payload, req, claimed, attempt, error, 'reconciling')
       return { state: 'reconciling' }
     }
+    if (consecutiveRetries(claimed, 'retry-wait') >= MAX_CONSECUTIVE_RETRIES) {
+      await stopAfterRetryLimit(payload, req, claimed, attempt, error)
+      return { state: 'manual-review' }
+    }
     await deferExport(payload, req, claimed, attempt, error, 'retry-wait')
     return { state: 'retry-wait' }
   }
+}
+
+/** Parks an export that keeps failing in manual review, keeping its time reserved. */
+const stopAfterRetryLimit = async (
+  payload: Payload,
+  req: PayloadRequest,
+  exportDocument: InvoiceExport,
+  attempt: XeroAttempt,
+  error: AccountingIntegrationError,
+): Promise<void> => {
+  await payload.update({
+    collection: 'xero-attempts',
+    id: attempt.id,
+    data: {
+      errorCode: error.code,
+      errorMessage: error.message,
+      httpStatus: error.status,
+      requestMayHaveBeenSent: attempt.requestMayHaveBeenSent || error.requestMayHaveBeenSent,
+      result: 'retryable-before-send',
+      xeroCorrelationId: error.correlationID,
+    },
+    overrideAccess: true,
+    req,
+  })
+  await payload.update({
+    collection: 'invoice-exports',
+    id: exportDocument.id,
+    data: {
+      jobId: null,
+      lastErrorCode: RETRY_LIMIT_ERROR_CODE,
+      lastErrorMessage: retryLimitMessage(error.message).slice(0, 500),
+      nextAttemptAt: null,
+      processingLeaseExpiresAt: null,
+      processingLeaseId: null,
+      state: 'manual-review',
+      stateHistory: stateHistory(exportDocument, 'manual-review', { errorCode: error.code }),
+    },
+    overrideAccess: true,
+    req,
+  })
+  await recordAuditEvent(
+    payload,
+    {
+      correlationId: error.correlationID,
+      eventType: 'export.state-changed',
+      exportId: exportDocument.id,
+      machineActor: 'xero-export-worker',
+      metadata: {
+        errorCode: RETRY_LIMIT_ERROR_CODE,
+        lastErrorCode: error.code,
+        to: 'manual-review',
+      },
+      targetCollection: 'invoice-exports',
+      targetId: exportDocument.id,
+    },
+    req,
+  )
 }

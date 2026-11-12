@@ -1,7 +1,5 @@
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
 
-import { hasActiveRole } from '@/access/roles'
 import { PendingSubmitButton } from '@/app/(frontend)/_components/PendingControls'
 import { exportStateLabel } from '@/lib/billing/export-presentation'
 import { formatScaledAmount } from '@/lib/domain/money'
@@ -26,7 +24,6 @@ export default async function ExportHistoryPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const session = await requireAppSession()
-  if (!hasActiveRole(session.user, ['owner', 'admin', 'biller'])) redirect('/app')
   const params = await searchParams
   const batch =
     typeof params.batch === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(params.batch)
@@ -91,16 +88,11 @@ export default async function ExportHistoryPage({
           <Link className="button button-secondary" href={releasedToggleHref}>
             {includeReleased ? 'Hide released exports' : 'Show released exports'}
           </Link>
-          {hasActiveRole(session.user, ['owner', 'admin']) && (
-            <form action={runXeroQueueNowAction}>
-              <PendingSubmitButton
-                className="button button-secondary"
-                pendingLabel="Running queue…"
-              >
-                Run Xero queue now
-              </PendingSubmitButton>
-            </form>
-          )}
+          <form action={runXeroQueueNowAction}>
+            <PendingSubmitButton className="button button-secondary" pendingLabel="Running queue…">
+              Run Xero queue now
+            </PendingSubmitButton>
+          </form>
         </div>
       </section>
       {params.status && (
@@ -118,7 +110,9 @@ export default async function ExportHistoryPage({
               ? 'The dispatcher and bounded Xero queue run completed.'
               : params.status === 'queue-failed'
                 ? 'The queue run failed safely; durable work remains available for the next runner.'
-                : 'Export history updated.'}
+                : params.status === 'dispatch-pending'
+                  ? 'The entries are reserved. Sending to Xero will start automatically within a minute or two.'
+                  : 'Export history updated.'}
         </div>
       )}
       <section className="panel page-stack">
@@ -149,7 +143,7 @@ export default async function ExportHistoryPage({
                     <td>{customerName ?? `Customer ${customerID ?? 'unavailable'}`}</td>
                     <td>
                       <span className={`status-pill status-export-${item.state}`}>
-                        {exportStateLabel(item.state)}
+                        {exportStateLabel(item.state, item.lastErrorCode)}
                       </span>
                       {item.lastErrorMessage && <small>{item.lastErrorMessage}</small>}
                     </td>

@@ -12,14 +12,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { TIME_ENTRY_BILLING_MUTATION_CONTEXT } from '@/collections/TimeEntries'
-import { transitionOwner } from '@/lib/account-lifecycle/owner-transition'
-import {
-  acceptInvitation,
-  changeOwnPassword,
-  completePasswordReset,
-  issueInvitation,
-  revokeInvitation,
-} from '@/lib/account-lifecycle/service'
+import { changeOwnPassword, completePasswordReset } from '@/lib/account-lifecycle/service'
 import { getAppSessionForOAuthCallback, type AppSession } from '@/lib/member-app/session'
 import { requireMongoModel } from '@/lib/payload/mongo'
 import { withPayloadTransaction } from '@/lib/payload/withTransaction'
@@ -27,7 +20,6 @@ import {
   confirmProjectRateRecalculation,
   previewProjectRateRecalculation,
 } from '@/lib/projects/rate-recalculation'
-import { deleteUnbilledTimeEntryAsAdministrator } from '@/lib/time-entry/administration'
 import type { XeroAccountingClient } from '@/lib/xero/accounting/client'
 import { REQUIRED_ACCOUNTING_SCOPES } from '@/lib/xero/accounting/contracts'
 import {
@@ -42,19 +34,15 @@ import {
   resolveAccountingRuntime,
   selectAccountingTenant,
 } from '@/lib/xero/accounting/service'
-import type { AuthenticationSetting, BillingSetting } from '@/payload-types'
 import config from '@/payload.config'
 
 type DocumentID = number | string
-type UserRole = 'admin' | 'biller' | 'member' | 'owner'
 
 type TestUser = {
-  active: boolean
   collection?: 'users'
   displayName: string
   email: string
   id: DocumentID
-  role: UserRole
   timezone: string
 }
 
@@ -81,6 +69,7 @@ type TestTimeEntry = {
   currencySnapshot: string
   customer: unknown
   customerNameSnapshot: string
+  description?: string
   durationSeconds: number
   endAt?: null | string
   id: DocumentID
@@ -98,7 +87,7 @@ type WriteOptions = {
   req?: PayloadRequest
 }
 
-const OWNER_EMAIL = 'owner.integration@example.test'
+const USER_EMAIL = 'user.integration@example.test'
 const PASSWORD = 'integration-password-123!'
 const accountingCredentials = {
   clientID: 'integration-accounting-client',
@@ -106,23 +95,16 @@ const accountingCredentials = {
 } as const
 
 let payload: Payload
-let owner: TestUser
-let admin: TestUser
-let biller: TestUser
-let member: TestUser
-let secondMember: TestUser
-let ownerReq: PayloadRequest
-let adminReq: PayloadRequest
-let billerReq: PayloadRequest
-let memberReq: PayloadRequest
-let secondMemberReq: PayloadRequest
+let user: TestUser
+let userReq: PayloadRequest
+let anonymousReq: PayloadRequest
 let trustedBillingReq: PayloadRequest
 let trustedReleaseReq: PayloadRequest
 let customer: TestCustomer
 let otherCustomer: TestCustomer
 let project: TestProject
-let memberEntry: TestTimeEntry
-let secondMemberEntry: TestTimeEntry
+let reservedEntry: TestTimeEntry
+let unbilledEntry: TestTimeEntry
 let postRateEntry: TestTimeEntry
 
 const relationshipID = (value: unknown): DocumentID | null => {
@@ -216,16 +198,19 @@ const updateGlobal = async <T>(
     req,
   })) as unknown as T
 
-const requestFor = (user: TestUser): Promise<PayloadRequest> =>
+const requestFor = (account: TestUser): Promise<PayloadRequest> =>
   createLocalReq(
     {
       user: {
-        ...user,
+        ...account,
         collection: 'users',
       } as never,
     },
     payload,
   )
+
+const sessionFor = async (account: TestUser): Promise<AppSession> =>
+  ({ payload, req: await requestFor(account), user: account }) as unknown as AppSession
 
 const clearCollections = async (): Promise<void> => {
   for (const collection of [
@@ -234,34 +219,11 @@ const clearCollections = async (): Promise<void> => {
     'time-entries',
     'projects',
     'customers',
-    'invitations',
     'users',
   ]) {
     await payload.db.collections[collection]?.deleteMany({})
     await payload.db.versions[collection]?.deleteMany({})
   }
-
-  await payload.db.connection.db?.collection('application_bootstrap_locks').deleteMany({})
-}
-
-const createUser = async (
-  role: Exclude<UserRole, 'owner'>,
-  displayName: string,
-): Promise<TestUser> => {
-  const email = `${role}-${displayName.toLowerCase().replaceAll(' ', '-')}@example.test`
-
-  return createDocument<TestUser>(
-    'users',
-    {
-      active: true,
-      displayName,
-      email,
-      password: PASSWORD,
-      role,
-      timezone: 'Pacific/Auckland',
-    },
-    { overrideAccess: false, req: ownerReq },
-  )
 }
 
 describe.sequential('Payload authorization and domain integration', () => {
@@ -286,32 +248,24 @@ describe.sequential('Payload authorization and domain integration', () => {
     payload = await getPayload({ config: await config })
     await clearCollections()
 
-    const anonymousReq = await createLocalReq({}, payload)
+    // registerFirstUser signs the new user into the request it is given, so the
+    // bootstrap request must not be reused as the anonymous request.
     const firstUser = await registerFirstUserOperation({
       collection: payload.collections.users,
       data: {
-        active: false,
-        displayName: 'Integration Owner',
-        email: OWNER_EMAIL,
+        displayName: 'Integration User',
+        email: USER_EMAIL,
         password: PASSWORD,
-        role: 'member',
         timezone: 'Pacific/Auckland',
       } as never,
-      req: anonymousReq,
+      req: await createLocalReq({}, payload),
     })
 
-    if (!firstUser.user) throw new Error('Payload did not return the bootstrapped owner.')
+    if (!firstUser.user) throw new Error('Payload did not return the first user.')
 
-    owner = firstUser.user as unknown as TestUser
-    ownerReq = await requestFor(owner)
-    admin = await createUser('admin', 'Integration Admin')
-    biller = await createUser('biller', 'Integration Biller')
-    member = await createUser('member', 'Integration Member')
-    secondMember = await createUser('member', 'Second Member')
-    adminReq = await requestFor(admin)
-    billerReq = await requestFor(biller)
-    memberReq = await requestFor(member)
-    secondMemberReq = await requestFor(secondMember)
+    user = firstUser.user as unknown as TestUser
+    userReq = await requestFor(user)
+    anonymousReq = await createLocalReq({}, payload)
     trustedBillingReq = await createLocalReq(
       {
         context: {
@@ -337,7 +291,7 @@ describe.sequential('Payload authorization and domain integration', () => {
         name: 'Primary Customer',
         notes: 'Financial team only',
       },
-      { overrideAccess: false, req: ownerReq },
+      { overrideAccess: false, req: userReq },
     )
     otherCustomer = await createDocument<TestCustomer>(
       'customers',
@@ -345,7 +299,7 @@ describe.sequential('Payload authorization and domain integration', () => {
         currency: 'NZD',
         name: 'Unrelated Customer',
       },
-      { overrideAccess: false, req: ownerReq },
+      { overrideAccess: false, req: userReq },
     )
     project = await createDocument<TestProject>(
       'projects',
@@ -357,10 +311,11 @@ describe.sequential('Payload authorization and domain integration', () => {
         hourlyRateScaled: 1_250_000,
         name: 'Core Integration Project',
       },
-      { overrideAccess: false, req: ownerReq },
+      { overrideAccess: false, req: userReq },
     )
 
-    await createDocument<TestTimeEntry>(
+    // System-derived fields submitted by an ordinary request are ignored.
+    const tamperedEntry = await createDocument<TestTimeEntry>(
       'time-entries',
       {
         billingStatus: 'exported',
@@ -372,7 +327,6 @@ describe.sequential('Payload authorization and domain integration', () => {
         enteredHours: 1,
         enteredMinutes: 30,
         inputMode: 'duration',
-        owner: owner.id,
         project: project.id,
         projectCodeSnapshot: 'TAMPERED',
         projectNameSnapshot: 'Tampered project',
@@ -380,17 +334,16 @@ describe.sequential('Payload authorization and domain integration', () => {
         timezone: 'Pacific/Auckland',
         workDate: '2026-07-18',
       },
-      { overrideAccess: false, req: memberReq },
-    ).then(async (entry) => {
-      memberEntry = await findDocument<TestTimeEntry>('time-entries', entry.id, {
-        overrideAccess: true,
-      })
+      { overrideAccess: false, req: userReq },
+    )
+    reservedEntry = await findDocument<TestTimeEntry>('time-entries', tamperedEntry.id, {
+      overrideAccess: true,
     })
 
-    secondMemberEntry = await createDocument<TestTimeEntry>(
+    unbilledEntry = await createDocument<TestTimeEntry>(
       'time-entries',
       {
-        description: 'Second member entry',
+        description: 'Unbilled integration entry',
         enteredHours: 0,
         enteredMinutes: 45,
         inputMode: 'duration',
@@ -398,15 +351,15 @@ describe.sequential('Payload authorization and domain integration', () => {
         timezone: 'Pacific/Auckland',
         workDate: '2026-07-18',
       },
-      { overrideAccess: false, req: secondMemberReq },
+      { overrideAccess: false, req: userReq },
     )
 
     await updateDocument<TestTimeEntry>(
       'time-entries',
-      memberEntry.id,
+      reservedEntry.id,
       {
         billingStatus: 'reserved',
-        currentExport: owner.id,
+        currentExport: user.id,
         exportedAt: null,
         reservedAt: new Date().toISOString(),
       },
@@ -421,17 +374,6 @@ describe.sequential('Payload authorization and domain integration', () => {
     await payload.destroy()
   })
 
-  it('forces the first user to be an active owner', () => {
-    expect(owner).toMatchObject({
-      active: true,
-      displayName: 'Integration Owner',
-      email: OWNER_EMAIL,
-      role: 'owner',
-      timezone: 'Pacific/Auckland',
-    })
-    expect(owner).not.toHaveProperty('bootstrapMarker')
-  })
-
   it('authenticates a state-protected OAuth callback from a cross-site session cookie', async () => {
     await expect(getAppSessionForOAuthCallback(new Headers())).resolves.toBeNull()
     await expect(
@@ -444,9 +386,9 @@ describe.sequential('Payload authorization and domain integration', () => {
 
     const login = await payload.login({
       collection: 'users',
-      data: { email: OWNER_EMAIL, password: PASSWORD },
+      data: { email: USER_EMAIL, password: PASSWORD },
     })
-    if (!login.token) throw new Error('Payload did not return an owner session token.')
+    if (!login.token) throw new Error('Payload did not return a session token.')
 
     const authConfig = payload.collections.users.config.auth
     if (!authConfig) throw new Error('The users collection is not configured for authentication.')
@@ -467,37 +409,11 @@ describe.sequential('Payload authorization and domain integration', () => {
     callbackHeaders.set('Origin', 'https://untrusted.example')
 
     await expect(getAppSessionForOAuthCallback(callbackHeaders)).resolves.toMatchObject({
-      user: { id: owner.id },
+      user: { id: user.id },
     })
   })
 
-  it('persists the hidden marker, atomic lock, and unique marker index', async () => {
-    const initialOwner = (await payload.findByID({
-      collection: 'users',
-      id: owner.id,
-      overrideAccess: true,
-      showHiddenFields: true,
-    })) as unknown as Record<string, unknown>
-    const indexes = await requireMongoModel(payload, 'users').collection.indexes()
-    const bootstrapLock = await payload.db.connection.db
-      ?.collection<{ _id: string; createdAt: Date }>('application_bootstrap_locks')
-      .findOne({ _id: 'initial-owner' })
-
-    expect(initialOwner.bootstrapMarker).toBe('initial-owner')
-    expect(bootstrapLock).toMatchObject({ _id: 'initial-owner' })
-    expect(indexes).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          key: { bootstrapMarker: 1 },
-          sparse: true,
-          unique: true,
-        }),
-      ]),
-    )
-  })
-
-  it('denies every later anonymous user-creation path', async () => {
-    const anonymousReq = await createLocalReq({}, payload)
+  it('denies anonymous user creation once the first user exists', async () => {
     const data = {
       displayName: 'Anonymous User',
       email: 'anonymous@example.test',
@@ -518,32 +434,83 @@ describe.sequential('Payload authorization and domain integration', () => {
     ).rejects.toMatchObject({ status: 403 })
   })
 
-  it('does not issue an email/password session to an inactive user', async () => {
-    const inactiveEmail = 'inactive.integration@example.test'
+  it('opens the app and Payload Admin to the signed-in user and denies anonymous requests', async () => {
+    await expect(canAccessAdmin({ req: userReq })).resolves.toBeUndefined()
+    await expect(canAccessAdmin({ req: anonymousReq })).rejects.toMatchObject({ status: 401 })
 
-    await createDocument(
-      'users',
-      {
-        active: false,
-        _verified: true,
-        displayName: 'Inactive Integration User',
-        email: inactiveEmail,
-        password: PASSWORD,
-        role: 'member',
-        timezone: 'Pacific/Auckland',
-      },
-      { overrideAccess: false, req: ownerReq },
+    const entries = await findDocuments<TestTimeEntry>('time-entries', {
+      overrideAccess: false,
+      req: userReq,
+    })
+    expect(entries.map((entry) => String(entry.id)).sort()).toEqual(
+      [String(reservedEntry.id), String(unbilledEntry.id)].sort(),
     )
-
+    const userProjectView = await findDocument<TestProject>('projects', project.id, {
+      overrideAccess: false,
+      req: userReq,
+    })
+    expect(userProjectView.hourlyRateScaled).toBe(1_250_000)
     await expect(
-      payload.login({
-        collection: 'users',
-        data: {
-          email: inactiveEmail,
-          password: PASSWORD,
-        },
+      findDocument<TestCustomer>('customers', customer.id, {
+        overrideAccess: false,
+        req: userReq,
       }),
-    ).rejects.toMatchObject({ status: 401 })
+    ).resolves.toMatchObject({
+      billingEmail: 'accounts@primary.example.test',
+      notes: 'Financial team only',
+    })
+
+    for (const collection of ['customers', 'projects', 'time-entries', 'users']) {
+      await expect(
+        findDocuments(collection, { overrideAccess: false, req: anonymousReq }),
+      ).rejects.toMatchObject({ status: 403 })
+    }
+    await expect(
+      createDocument(
+        'customers',
+        { currency: 'NZD', name: 'Anonymous Customer' },
+        { overrideAccess: false, req: anonymousReq },
+      ),
+    ).rejects.toMatchObject({ status: 403 })
+    await expect(
+      createDocument(
+        'time-entries',
+        {
+          description: 'Anonymous time',
+          enteredHours: 1,
+          enteredMinutes: 0,
+          inputMode: 'duration',
+          project: project.id,
+          timezone: 'Pacific/Auckland',
+          workDate: '2026-07-19',
+        },
+        { overrideAccess: false, req: anonymousReq },
+      ),
+    ).rejects.toMatchObject({ status: 403 })
+    for (const slug of ['business-settings', 'billing-settings']) {
+      await expect(findGlobal(slug, anonymousReq)).rejects.toMatchObject({ status: 403 })
+      await expect(
+        payload.findGlobalVersions({
+          slug: slug as never,
+          overrideAccess: false,
+          req: anonymousReq,
+        }),
+      ).rejects.toMatchObject({ status: 403 })
+    }
+    await expect(
+      payload.findVersions({
+        collection: 'time-entries',
+        overrideAccess: false,
+        req: anonymousReq,
+      }),
+    ).rejects.toMatchObject({ status: 403 })
+    await expect(
+      payload.findVersions({
+        collection: 'time-entries',
+        overrideAccess: false,
+        req: userReq,
+      }),
+    ).resolves.toMatchObject({ totalDocs: expect.any(Number) })
   })
 
   it('requires eight characters on user creation and password changes', async () => {
@@ -551,364 +518,170 @@ describe.sequential('Payload authorization and domain integration', () => {
       createDocument(
         'users',
         {
-          active: true,
           displayName: 'Short Password User',
           email: 'short-password@example.test',
           password: 'short7!',
-          role: 'member',
           timezone: 'Pacific/Auckland',
         },
-        { overrideAccess: false, req: ownerReq },
+        { overrideAccess: false, req: userReq },
       ),
     ).rejects.toMatchObject({ status: 400 })
 
     await expect(
       updateDocument(
         'users',
-        member.id,
+        user.id,
         { password: 'short7!' },
-        { overrideAccess: false, req: ownerReq },
+        { overrideAccess: false, req: userReq },
       ),
     ).rejects.toMatchObject({ status: 400 })
 
-    await expect(
-      createDocument(
-        'users',
-        {
-          _verified: true,
-          active: true,
-          displayName: 'Minimum Password User',
-          email: 'minimum-password@example.test',
-          password: 'eight888',
-          role: 'member',
-          timezone: 'Pacific/Auckland',
-        },
-        { overrideAccess: false, req: ownerReq },
-      ),
-    ).resolves.toMatchObject({ email: 'minimum-password@example.test' })
+    const minimumPasswordUser = await createDocument<TestUser>(
+      'users',
+      {
+        displayName: 'Minimum Password User',
+        email: 'minimum-password@example.test',
+        password: 'eight888',
+        timezone: 'Pacific/Auckland',
+      },
+      { overrideAccess: false, req: userReq },
+    )
+    expect(minimumPasswordUser).toMatchObject({ email: 'minimum-password@example.test' })
+    await deleteDocument('users', minimumPasswordUser.id, { overrideAccess: false, req: userReq })
   })
 
-  it('allows only active owners and admins into Payload Admin', async () => {
-    await expect(canAccessAdmin({ req: ownerReq })).resolves.toBeUndefined()
-    await expect(canAccessAdmin({ req: adminReq })).resolves.toBeUndefined()
-    await expect(canAccessAdmin({ req: billerReq })).rejects.toMatchObject({ status: 401 })
-    await expect(canAccessAdmin({ req: memberReq })).rejects.toMatchObject({ status: 401 })
-  })
-
-  it('issues, rotates, accepts, resets, and revokes invite-only accounts safely', async () => {
-    const ownerSession = { payload, req: ownerReq, user: owner } as unknown as AppSession
-    const adminSession = { payload, req: adminReq, user: admin } as unknown as AppSession
-    const invitationEmail = 'invited-lifecycle@example.test'
-    const invitationPassword = 'invited-password-123!'
+  it('revokes sessions when the password is changed or reset', async () => {
     const changedPassword = 'changed-password-456!'
+    const directResetPassword = 'direct-reset-password-567!'
     const resetPassword = 'reset-password-789!'
-    const mailer = vi.fn(async () => undefined)
+    const jwtHeaders = (token: string) => new Headers({ Authorization: `JWT ${token}` })
+    const storedUser = async () =>
+      payload.findByID({
+        collection: 'users',
+        id: user.id,
+        overrideAccess: true,
+        showHiddenFields: true,
+      })
 
-    await expect(
-      issueInvitation(
-        adminSession,
-        {
-          displayName: 'Forbidden Invited Admin',
-          email: 'forbidden-invited-admin@example.test',
-          role: 'admin',
-          timezone: 'Pacific/Auckland',
-        },
-        mailer,
-      ),
-    ).rejects.toMatchObject({ code: 'invalid-role' })
-
-    const firstIssue = await issueInvitation(
-      ownerSession,
-      {
-        displayName: 'Invited Lifecycle User',
-        email: invitationEmail,
-        role: 'member',
-        timezone: 'Australia/Sydney',
-      },
-      mailer,
-    )
-    const firstToken = new URL(firstIssue.setupURL).searchParams.get('token') ?? ''
-    const firstStored = await payload.findByID({
-      collection: 'invitations',
-      depth: 0,
-      id: firstIssue.invitation.id,
-      overrideAccess: true,
-      req: ownerReq,
-      showHiddenFields: true,
-    })
-    expect(firstStored.tokenHash).not.toBe(firstToken)
-    expect(JSON.stringify(firstStored)).not.toContain(firstToken)
-    await expect(
-      payload.find({ collection: 'invitations', overrideAccess: false, req: ownerReq }),
-    ).rejects.toMatchObject({ status: 403 })
-
-    const secondIssue = await issueInvitation(
-      ownerSession,
-      {
-        displayName: 'Invited Lifecycle User',
-        email: invitationEmail,
-        role: 'member',
-        timezone: 'Australia/Sydney',
-      },
-      mailer,
-    )
-    const secondToken = new URL(secondIssue.setupURL).searchParams.get('token') ?? ''
-    expect(secondToken).not.toBe(firstToken)
-    await expect(
-      acceptInvitation(payload, { password: invitationPassword, token: firstToken }),
-    ).rejects.toMatchObject({ code: 'invalid-invitation' })
-
-    const acceptanceResults = await Promise.allSettled([
-      acceptInvitation(payload, { password: invitationPassword, token: secondToken }),
-      acceptInvitation(payload, { password: invitationPassword, token: secondToken }),
-    ])
-    expect(acceptanceResults.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
-    expect(acceptanceResults.filter((result) => result.status === 'rejected')).toHaveLength(1)
-
-    const invitedUsers = await payload.find({
+    const earlierLogin = await payload.login({
       collection: 'users',
-      depth: 0,
-      overrideAccess: true,
-      where: { email: { equals: invitationEmail } },
+      data: { email: USER_EMAIL, password: PASSWORD },
     })
-    expect(invitedUsers.docs).toHaveLength(1)
-    const invitedUser = invitedUsers.docs[0]
-    if (!invitedUser) throw new Error('Invitation acceptance did not create a user.')
-    expect(invitedUser).toMatchObject({
-      active: true,
-      displayName: 'Invited Lifecycle User',
-      role: 'member',
-      timezone: 'Australia/Sydney',
+    if (!earlierLogin.token) throw new Error('Payload did not return a session token.')
+    await expect(payload.auth({ headers: jwtHeaders(earlierLogin.token) })).resolves.toMatchObject({
+      user: { id: user.id },
     })
-    await expect(
-      acceptInvitation(payload, { password: invitationPassword, token: secondToken }),
-    ).rejects.toMatchObject({ code: 'invalid-invitation' })
 
-    const invitedReq = await createLocalReq(
-      { user: { ...invitedUser, collection: 'users' } },
-      payload,
-    )
+    await expect(
+      changeOwnPassword(await sessionFor(user), 'wrong-password-000!', changedPassword),
+    ).rejects.toMatchObject({ code: 'password-change-failed' })
+    await expect(
+      changeOwnPassword(await sessionFor(user), PASSWORD, PASSWORD),
+    ).rejects.toMatchObject({ code: 'password-unchanged' })
+    await expect(
+      changeOwnPassword(await sessionFor(user), PASSWORD, 'short7!'),
+    ).rejects.toMatchObject({ code: 'invalid-password' })
+
     const replacementToken = await changeOwnPassword(
-      { payload, req: invitedReq, user: invitedUser } as unknown as AppSession,
-      invitationPassword,
+      await sessionFor(user),
+      PASSWORD,
       changedPassword,
     )
     expect(replacementToken.length).toBeGreaterThan(20)
+    expect((await storedUser()).sessions).toHaveLength(1)
+    await expect(payload.auth({ headers: jwtHeaders(earlierLogin.token) })).resolves.toMatchObject({
+      user: null,
+    })
+    await expect(payload.auth({ headers: jwtHeaders(replacementToken) })).resolves.toMatchObject({
+      user: { id: user.id },
+    })
     await expect(
       payload.login({
         collection: 'users',
-        data: { email: invitationEmail, password: invitationPassword },
+        data: { email: USER_EMAIL, password: PASSWORD },
       }),
     ).rejects.toBeDefined()
-    await expect(
-      payload.login({
-        collection: 'users',
-        data: { email: invitationEmail, password: changedPassword },
-      }),
-    ).resolves.toHaveProperty('token')
 
+    // A direct password update through the collection also ends every session.
+    await updateDocument(
+      'users',
+      user.id,
+      { password: PASSWORD },
+      { overrideAccess: false, req: userReq },
+    )
+    expect((await storedUser()).sessions).toEqual([])
+    await expect(payload.auth({ headers: jwtHeaders(replacementToken) })).resolves.toMatchObject({
+      user: null,
+    })
+
+    // No email delivery is configured, so a reset that would send email is refused.
     await expect(
       payload.forgotPassword({
         collection: 'users',
-        data: { email: invitationEmail },
+        data: { email: USER_EMAIL },
         overrideAccess: true,
       }),
     ).rejects.toBeDefined()
+
+    const sessionBeforeReset = await payload.login({
+      collection: 'users',
+      data: { email: USER_EMAIL, password: PASSWORD },
+    })
     const directResetToken = await payload.forgotPassword({
       collection: 'users',
-      data: { email: invitationEmail },
+      data: { email: USER_EMAIL },
       disableEmail: true,
       overrideAccess: true,
     })
     expect(directResetToken).toBeTypeOf('string')
-    const directResetPassword = 'direct-reset-password-567!'
     await payload.resetPassword({
       collection: 'users',
       data: { password: directResetPassword, token: directResetToken ?? '' },
       overrideAccess: true,
     })
-    const directlyResetUser = await payload.findByID({
-      collection: 'users',
-      id: invitedUser.id,
-      overrideAccess: true,
-      showHiddenFields: true,
-    })
+    const directlyResetUser = await storedUser()
     expect(directlyResetUser.sessions).toHaveLength(1)
     expect(directlyResetUser).toMatchObject({
       resetPasswordExpiration: null,
       resetPasswordToken: null,
     })
+    await expect(
+      payload.auth({ headers: jwtHeaders(sessionBeforeReset.token ?? '') }),
+    ).resolves.toMatchObject({ user: null })
 
+    await expect(
+      completePasswordReset(payload, 'not-a-valid-token', resetPassword),
+    ).rejects.toMatchObject({ code: 'invalid-password-reset' })
     const forgotToken = await payload.forgotPassword({
       collection: 'users',
-      data: { email: invitationEmail },
+      data: { email: USER_EMAIL },
       disableEmail: true,
       overrideAccess: true,
     })
     const resetSessionToken = await completePasswordReset(payload, forgotToken ?? '', resetPassword)
     expect(resetSessionToken.length).toBeGreaterThan(20)
-    await expect(
-      payload.login({
-        collection: 'users',
-        data: { email: invitationEmail, password: directResetPassword },
-      }),
-    ).rejects.toBeDefined()
-
-    await payload.update({
-      collection: 'users',
-      id: invitedUser.id,
-      data: { active: false },
-      overrideAccess: false,
-      req: ownerReq,
-    })
-    const deactivated = await payload.findByID({
-      collection: 'users',
-      depth: 0,
-      id: invitedUser.id,
-      overrideAccess: true,
-      showHiddenFields: true,
-    })
-    expect(deactivated).toMatchObject({
-      active: false,
-      resetPasswordExpiration: null,
-      resetPasswordToken: null,
-      sessions: [],
+    expect((await storedUser()).sessions).toHaveLength(1)
+    await expect(payload.auth({ headers: jwtHeaders(resetSessionToken) })).resolves.toMatchObject({
+      user: { id: user.id },
     })
     await expect(
       payload.login({
         collection: 'users',
-        data: { email: invitationEmail, password: resetPassword },
+        data: { email: USER_EMAIL, password: directResetPassword },
       }),
     ).rejects.toBeDefined()
 
-    const revocable = await issueInvitation(
-      ownerSession,
-      {
-        displayName: 'Revoked Invitation',
-        email: 'revoked-invitation@example.test',
-        role: 'biller',
-        timezone: 'Pacific/Auckland',
-      },
-      mailer,
-    )
-    const revokedToken = new URL(revocable.setupURL).searchParams.get('token') ?? ''
-    await revokeInvitation(ownerSession, String(revocable.invitation.id), 'No longer required.')
-    await expect(
-      acceptInvitation(payload, { password: invitationPassword, token: revokedToken }),
-    ).rejects.toMatchObject({ code: 'invalid-invitation' })
-
-    const [invitationIndexes, invitations] = await Promise.all([
-      requireMongoModel(payload, 'invitations').collection.indexes(),
-      payload.find({ collection: 'invitations', overrideAccess: true, pagination: false }),
-    ])
-    expect(invitationIndexes).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ key: { email: 1 }, unique: true }),
-        expect.objectContaining({ key: { tokenHash: 1 }, unique: true }),
-        expect.objectContaining({ expireAfterSeconds: 0, key: { cleanupAt: 1 } }),
-      ]),
-    )
-    expect(invitations.docs).toHaveLength(2)
-    expect(mailer).toHaveBeenCalledTimes(3)
-  })
-
-  it('keeps owner records protected from deactivation, demotion, and deletion', async () => {
-    const updated = await payload.update({
-      collection: 'users',
-      id: owner.id,
-      data: { active: false, role: 'member' },
-      overrideAccess: false,
-      req: ownerReq,
-    })
-    expect(updated).toMatchObject({ active: true, role: 'owner' })
-    await expect(
-      payload.delete({
-        collection: 'users',
-        id: owner.id,
-        overrideAccess: false,
-        req: ownerReq,
-      }),
-    ).rejects.toMatchObject({ status: 403 })
-  })
-
-  it('transitions ownership only through the audited password-capable command', async () => {
-    const ownerSession = { payload, req: ownerReq, user: owner } as unknown as AppSession
-    await expect(
-      transitionOwner(ownerSession, {
-        action: 'promote',
-        password: 'incorrect-owner-password',
-        reason: 'Verify that ownership changes require recent password confirmation.',
-        targetUserID: String(admin.id),
-      }),
-    ).rejects.toMatchObject({ code: 'reauthentication-failed' })
-
-    await expect(
-      transitionOwner(ownerSession, {
-        action: 'promote',
-        password: PASSWORD,
-        reason: 'Promote the tested administrator as a recovery-capable owner.',
-        targetUserID: String(admin.id),
-      }),
-    ).resolves.toBeUndefined()
-    const promoted = await payload.findByID({
-      collection: 'users',
-      depth: 0,
-      id: admin.id,
-      overrideAccess: true,
-    })
-    expect(promoted.role).toBe('owner')
-
-    const parallelOwnerSession = {
-      payload,
-      req: await requestFor(owner),
-      user: owner,
-    } as unknown as AppSession
-    const demotion = {
-      action: 'demote' as const,
-      password: PASSWORD,
-      reason: 'Return the temporary recovery owner to administrator after verification.',
-      targetUserID: String(admin.id),
-    }
-    const attempts = await Promise.allSettled([
-      transitionOwner(ownerSession, demotion),
-      transitionOwner(parallelOwnerSession, demotion),
-    ])
-    expect(attempts.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
-    expect(attempts.filter((result) => result.status === 'rejected')).toHaveLength(1)
-    const restored = await payload.findByID({
-      collection: 'users',
-      depth: 0,
-      id: admin.id,
-      overrideAccess: true,
-    })
-    expect(restored.role).toBe('admin')
-    const audits = await payload.find({
-      collection: 'audit-events',
-      depth: 0,
-      overrideAccess: true,
-      where: {
-        and: [
-          { eventType: { equals: 'user.owner-transitioned' } },
-          { targetId: { equals: String(admin.id) } },
-        ],
-      },
-    })
-    expect(audits.docs).toHaveLength(2)
+    // Restore the shared password for the remaining tests.
+    await changeOwnPassword(await sessionFor(user), resetPassword, PASSWORD)
   })
 
   it('pins an explicitly selected Xero tenant, serializes refresh, and disconnects safely', async () => {
-    const session = { payload, req: ownerReq, user: owner } as unknown as AppSession
+    const session = { payload, req: userReq, user } as unknown as AppSession
     await expect(getAccountingConnectionView(session)).resolves.toMatchObject({
       callbackURI: 'http://localhost:3000/api/integrations/xero/accounting/callback',
       configured: false,
       status: 'not-configured',
     })
-    await expect(
-      configureAccountingOAuth(
-        { payload, req: memberReq, user: member } as unknown as AppSession,
-        accountingCredentials,
-      ),
-    ).rejects.toMatchObject({ code: 'forbidden' })
     await configureAccountingOAuth(session, accountingCredentials)
     const storedRuntime = await resolveAccountingRuntime(session)
     const accountingConfig = storedRuntime.config
@@ -931,7 +704,7 @@ describe.sequential('Payload authorization and domain integration', () => {
         collection: 'xero-connections',
         depth: 0,
         overrideAccess: true,
-        req: ownerReq,
+        req: userReq,
         showHiddenFields: true,
       })
     ).docs[0]
@@ -1029,17 +802,6 @@ describe.sequential('Payload authorization and domain integration', () => {
 
     await expect(
       completeAccountingCallback(
-        { payload, req: adminReq, user: admin } as unknown as AppSession,
-        {
-          browserBinding: authorization.browserBinding,
-          code: 'wrong-user-code',
-          state: authorizationURL.searchParams.get('state') ?? '',
-        },
-        { client, config: accountingConfig, validateAccessToken },
-      ),
-    ).rejects.toMatchObject({ code: 'invalid-state' })
-    await expect(
-      completeAccountingCallback(
         session,
         {
           browserBinding: 'different-browser-binding',
@@ -1084,7 +846,7 @@ describe.sequential('Payload authorization and domain integration', () => {
       collection: 'xero-oauth-states',
       id: callback.flowID ?? '',
       overrideAccess: true,
-      req: ownerReq,
+      req: userReq,
       showHiddenFields: true,
     })
     expect(JSON.stringify(pendingState)).not.toContain(initialTokenSet.accessToken)
@@ -1114,7 +876,7 @@ describe.sequential('Payload authorization and domain integration', () => {
       collection: 'xero-connections',
       depth: 0,
       overrideAccess: true,
-      req: ownerReq,
+      req: userReq,
       showHiddenFields: true,
     })
     const connection = privateConnections.docs[0]
@@ -1166,22 +928,22 @@ describe.sequential('Payload authorization and domain integration', () => {
       payload.find({
         collection: 'xero-connections',
         overrideAccess: false,
-        req: ownerReq,
+        req: userReq,
       }),
     ).rejects.toMatchObject({ status: 403 })
     await expect(
       payload.find({
         collection: 'xero-oauth-states',
         overrideAccess: false,
-        req: ownerReq,
+        req: userReq,
       }),
     ).rejects.toMatchObject({ status: 403 })
     await expect(
       payload.create({
         collection: 'xero-connections',
-        data: { singletonKey: 'owner-created', status: 'disconnected', tokenVersion: 0 },
+        data: { singletonKey: 'user-created', status: 'disconnected', tokenVersion: 0 },
         overrideAccess: false,
-        req: ownerReq,
+        req: userReq,
       }),
     ).rejects.toMatchObject({ status: 403 })
 
@@ -1190,20 +952,12 @@ describe.sequential('Payload authorization and domain integration', () => {
       id: connection.id,
       data: { accessTokenExpiresAt: new Date(Date.now() - 1_000).toISOString() },
       overrideAccess: true,
-      req: ownerReq,
+      req: userReq,
     })
     // Concurrent HTTP requests never share a mutable Payload request object.
     // Use independent requests here while exercising the shared database lock.
-    const firstRefreshSession = {
-      payload,
-      req: await requestFor(owner),
-      user: owner,
-    } as unknown as AppSession
-    const secondRefreshSession = {
-      payload,
-      req: await requestFor(owner),
-      user: owner,
-    } as unknown as AppSession
+    const firstRefreshSession = await sessionFor(user)
+    const secondRefreshSession = await sessionFor(user)
     const accessResults = await Promise.all([
       getValidAccountingAccessToken(firstRefreshSession, {
         client,
@@ -1231,7 +985,7 @@ describe.sequential('Payload authorization and domain integration', () => {
     ).resolves.toMatchObject({ status: 'connected', tenantId: selectedConnection.tenantId })
 
     await expect(
-      disconnectAccountingConnection(session, 'Integration test disconnect reason.', {
+      disconnectAccountingConnection(session, undefined, {
         client,
         config: accountingConfig,
         validateAccessToken,
@@ -1247,7 +1001,7 @@ describe.sequential('Payload authorization and domain integration', () => {
       collection: 'xero-connections',
       id: connection.id,
       overrideAccess: true,
-      req: ownerReq,
+      req: userReq,
       showHiddenFields: true,
     })
     expect(disconnected).toMatchObject({
@@ -1282,28 +1036,63 @@ describe.sequential('Payload authorization and domain integration', () => {
     expect(JSON.stringify(configurationAudits.docs)).not.toContain(
       accountingCredentials.clientSecret,
     )
+
+    // Reconnecting works as any Xero user who can reach the pinned organisation: the person who
+    // connected it originally may have left. A different organisation is still refused.
+    const replacementXeroUserId = '77777777-7777-4777-8777-777777777777'
+    const replacementValidate = vi.fn(async () => ({
+      authenticationEventId,
+      scopes: [...REQUIRED_ACCOUNTING_SCOPES],
+      xeroUserId: replacementXeroUserId,
+    }))
+    const reconnectWith = async (tenants: typeof connections) => {
+      const reconnect = await createAccountingAuthorization(session, { config: accountingConfig })
+      listConnections.mockImplementation(async () => tenants)
+      return completeAccountingCallback(
+        session,
+        {
+          browserBinding: reconnect.browserBinding,
+          code: `reconnect-${tenants.length}`,
+          state: new URL(reconnect.authorizationURL).searchParams.get('state') ?? '',
+        },
+        { client, config: accountingConfig, validateAccessToken: replacementValidate },
+      )
+    }
+    await expect(
+      reconnectWith([connections[0] as (typeof connections)[number]]),
+    ).rejects.toMatchObject({ code: 'wrong-tenant' })
+    await expect(reconnectWith(connections)).resolves.toEqual({ status: 'connected' })
+    const reconnected = await payload.findByID({
+      collection: 'xero-connections',
+      id: connection.id,
+      overrideAccess: true,
+      req: userReq,
+      showHiddenFields: true,
+    })
+    expect(reconnected).toMatchObject({
+      authorizingXeroUserId: replacementXeroUserId,
+      status: 'connected',
+      tenantId: selectedConnection.tenantId,
+    })
   })
 
-  it('lets a member update their own profile without changing privileges or entry snapshots', async () => {
+  it('lets the user update their profile without changing existing entry snapshots', async () => {
     const updated = await updateDocument<TestUser>(
       'users',
-      member.id,
+      user.id,
       {
-        active: false,
-        displayName: 'Updated Integration Member',
-        role: 'owner',
+        displayName: '  Updated Integration User  ',
         timezone: 'Australia/Sydney',
       },
-      { overrideAccess: false, req: memberReq },
+      { overrideAccess: false, req: userReq },
     )
-    const existingEntry = await findDocument<TestTimeEntry>('time-entries', memberEntry.id, {
+    const existingEntry = await findDocument<TestTimeEntry>('time-entries', reservedEntry.id, {
       overrideAccess: true,
     })
 
     expect(updated).toMatchObject({
-      active: true,
-      displayName: 'Updated Integration Member',
-      role: 'member',
+      displayName: 'Updated Integration User',
+      email: USER_EMAIL,
       timezone: 'Australia/Sydney',
     })
     expect(existingEntry.timezone).toBe('Pacific/Auckland')
@@ -1311,70 +1100,26 @@ describe.sequential('Payload authorization and domain integration', () => {
     await expect(
       updateDocument(
         'users',
-        member.id,
-        { displayName: 'Changed by another member' },
-        { overrideAccess: false, req: secondMemberReq },
+        user.id,
+        { timezone: 'Not/A_Timezone' },
+        { overrideAccess: false, req: userReq },
+      ),
+    ).rejects.toMatchObject({ status: 400 })
+    await expect(
+      updateDocument(
+        'users',
+        user.id,
+        { displayName: 'Changed anonymously' },
+        { overrideAccess: false, req: anonymousReq },
       ),
     ).rejects.toMatchObject({ status: 403 })
 
     await updateDocument(
       'users',
-      member.id,
-      { displayName: member.displayName, timezone: member.timezone },
-      { overrideAccess: false, req: memberReq },
+      user.id,
+      { displayName: user.displayName, timezone: user.timezone },
+      { overrideAccess: false, req: userReq },
     )
-  })
-
-  it('keeps customer and project management privileged and hides rates from members', async () => {
-    await expect(
-      createDocument(
-        'customers',
-        { currency: 'NZD', name: 'Member Customer' },
-        { overrideAccess: false, req: memberReq },
-      ),
-    ).rejects.toMatchObject({ status: 403 })
-
-    await expect(
-      createDocument(
-        'projects',
-        {
-          code: 'MEMBER',
-          currency: 'NZD',
-          customer: customer.id,
-          hourlyRateScaled: 500_000,
-          name: 'Member Project',
-        },
-        { overrideAccess: false, req: memberReq },
-      ),
-    ).rejects.toMatchObject({ status: 403 })
-
-    const ownerView = await findDocument<TestProject>('projects', project.id, {
-      overrideAccess: false,
-      req: ownerReq,
-    })
-    const memberView = await findDocument<TestProject>('projects', project.id, {
-      overrideAccess: false,
-      req: memberReq,
-    })
-
-    expect(ownerView.hourlyRateScaled).toBe(1_250_000)
-    expect(memberView).not.toHaveProperty('hourlyRateScaled')
-
-    const ownerCustomerView = await findDocument<TestCustomer>('customers', customer.id, {
-      overrideAccess: false,
-      req: ownerReq,
-    })
-    const memberCustomerView = await findDocument<TestCustomer>('customers', customer.id, {
-      overrideAccess: false,
-      req: memberReq,
-    })
-
-    expect(ownerCustomerView).toMatchObject({
-      billingEmail: 'accounts@primary.example.test',
-      notes: 'Financial team only',
-    })
-    expect(memberCustomerView).not.toHaveProperty('billingEmail')
-    expect(memberCustomerView).not.toHaveProperty('notes')
   })
 
   it('normalizes currency and project code while rejecting cross-currency projects', async () => {
@@ -1396,7 +1141,7 @@ describe.sequential('Payload authorization and domain integration', () => {
           hourlyRateScaled: 1_000_000,
           name: 'Wrong Currency',
         },
-        { overrideAccess: false, req: ownerReq },
+        { overrideAccess: false, req: userReq },
       ),
     ).rejects.toMatchObject({
       data: {
@@ -1415,7 +1160,7 @@ describe.sequential('Payload authorization and domain integration', () => {
         'customers',
         customer.id,
         { currency: 'USD' },
-        { overrideAccess: false, req: ownerReq },
+        { overrideAccess: false, req: userReq },
       ),
     ).rejects.toMatchObject({ status: 400 })
 
@@ -1424,7 +1169,7 @@ describe.sequential('Payload authorization and domain integration', () => {
         'customers',
         customer.id,
         { currency: 'USD' },
-        { overrideAccess: false, req: ownerReq },
+        { overrideAccess: false, req: userReq },
       ),
     ).rejects.toMatchObject({
       data: {
@@ -1439,8 +1184,8 @@ describe.sequential('Payload authorization and domain integration', () => {
     })
   })
 
-  it('derives protected duration-entry ownership and immutable billing snapshots', () => {
-    expect(memberEntry).toMatchObject({
+  it('defaults entry ownership to the signed-in user and derives billing snapshots', () => {
+    expect(reservedEntry).toMatchObject({
       billingStatus: 'unbilled',
       currencySnapshot: 'NZD',
       customerNameSnapshot: 'Primary Customer',
@@ -1449,38 +1194,8 @@ describe.sequential('Payload authorization and domain integration', () => {
       projectNameSnapshot: 'Core Integration Project',
       rateSnapshotScaled: 1_250_000,
     })
-    expect(relationshipID(memberEntry.owner)).toBe(member.id)
-    expect(relationshipID(memberEntry.customer)).toBe(customer.id)
-  })
-
-  it('restricts members to their own time entries', async () => {
-    const memberEntries = await findDocuments<TestTimeEntry>('time-entries', {
-      overrideAccess: false,
-      req: memberReq,
-    })
-    const secondMemberEntries = await findDocuments<TestTimeEntry>('time-entries', {
-      overrideAccess: false,
-      req: secondMemberReq,
-    })
-    const ownerEntries = await findDocuments<TestTimeEntry>('time-entries', {
-      overrideAccess: false,
-      req: ownerReq,
-    })
-
-    expect(memberEntries.map((entry) => entry.id)).toEqual([memberEntry.id])
-    expect(secondMemberEntries.map((entry) => entry.id)).toEqual([secondMemberEntry.id])
-    expect(ownerEntries.map((entry) => entry.id).sort()).toEqual(
-      [memberEntry.id, secondMemberEntry.id].sort(),
-    )
-
-    await expect(
-      updateDocument(
-        'time-entries',
-        secondMemberEntry.id,
-        { description: 'Member tried to edit another user entry' },
-        { overrideAccess: false, req: memberReq },
-      ),
-    ).rejects.toMatchObject({ status: 403 })
+    expect(relationshipID(reservedEntry.owner)).toBe(user.id)
+    expect(relationshipID(reservedEntry.customer)).toBe(customer.id)
   })
 
   it('keeps an existing rate snapshot when an unchanged project is resubmitted', async () => {
@@ -1488,21 +1203,20 @@ describe.sequential('Payload authorization and domain integration', () => {
       'projects',
       project.id,
       {
-        commercialChangeReason: 'Integration test commercial rate change.',
         confirmUnbilledImpact: true,
         hourlyRateScaled: 2_000_000,
       },
-      { overrideAccess: false, req: ownerReq },
+      { overrideAccess: false, req: userReq },
     )
 
     await updateDocument<TestTimeEntry>(
       'time-entries',
-      secondMemberEntry.id,
+      unbilledEntry.id,
       {
         description: 'Description changed after the project rate',
         project: project.id,
       },
-      { overrideAccess: false, req: secondMemberReq },
+      { overrideAccess: false, req: userReq },
     )
     const createdEntry = await createDocument<TestTimeEntry>(
       'time-entries',
@@ -1515,10 +1229,10 @@ describe.sequential('Payload authorization and domain integration', () => {
         timezone: 'Pacific/Auckland',
         workDate: '2026-07-19',
       },
-      { overrideAccess: false, req: secondMemberReq },
+      { overrideAccess: false, req: userReq },
     )
     postRateEntry = createdEntry
-    const existingEntry = await findDocument<TestTimeEntry>('time-entries', secondMemberEntry.id, {
+    const existingEntry = await findDocument<TestTimeEntry>('time-entries', unbilledEntry.id, {
       overrideAccess: true,
     })
     const newEntry = await findDocument<TestTimeEntry>('time-entries', createdEntry.id, {
@@ -1532,11 +1246,10 @@ describe.sequential('Payload authorization and domain integration', () => {
       'projects',
       project.id,
       {
-        commercialChangeReason: 'Restore integration test project rate.',
         confirmUnbilledImpact: true,
         hourlyRateScaled: 1_250_000,
       },
-      { overrideAccess: false, req: ownerReq },
+      { overrideAccess: false, req: userReq },
     )
   })
 
@@ -1545,21 +1258,16 @@ describe.sequential('Payload authorization and domain integration', () => {
       'projects',
       project.id,
       {
-        commercialChangeReason: 'Set a new integration rate for explicit recalculation.',
         confirmUnbilledImpact: true,
         hourlyRateScaled: 1_500_000,
       },
-      { overrideAccess: false, req: ownerReq },
+      { overrideAccess: false, req: userReq },
     )
-    const ownerSession = { payload, req: ownerReq, user: owner } as unknown as AppSession
-    const memberSession = { payload, req: memberReq, user: member } as unknown as AppSession
-    await expect(
-      previewProjectRateRecalculation(memberSession, String(project.id)),
-    ).rejects.toThrow('Only an owner or administrator')
-    const preview = await previewProjectRateRecalculation(ownerSession, String(project.id))
+    const session = await sessionFor(user)
+    const preview = await previewProjectRateRecalculation(session, String(project.id))
     expect(preview).toMatchObject({ affectedCount: 2, currentRateScaled: 1_500_000 })
     await expect(
-      confirmProjectRateRecalculation(ownerSession, {
+      confirmProjectRateRecalculation(session, {
         confirmation: 'RECALCULATE',
         expectedHash: 'stale-preview-hash',
         projectID: String(project.id),
@@ -1567,19 +1275,19 @@ describe.sequential('Payload authorization and domain integration', () => {
       }),
     ).rejects.toThrow('changed')
     await expect(
-      confirmProjectRateRecalculation(ownerSession, {
+      confirmProjectRateRecalculation(session, {
         confirmation: 'RECALCULATE',
         expectedHash: preview.hash,
         projectID: String(project.id),
-        reason: 'Apply the approved project rate to unbilled integration entries.',
+        reason: '',
       }),
     ).resolves.toBe(2)
 
-    const reserved = await findDocument<TestTimeEntry>('time-entries', memberEntry.id, {
+    const reserved = await findDocument<TestTimeEntry>('time-entries', reservedEntry.id, {
       overrideAccess: true,
     })
     const recalculated = await Promise.all([
-      findDocument<TestTimeEntry>('time-entries', secondMemberEntry.id, { overrideAccess: true }),
+      findDocument<TestTimeEntry>('time-entries', unbilledEntry.id, { overrideAccess: true }),
       findDocument<TestTimeEntry>('time-entries', postRateEntry.id, { overrideAccess: true }),
     ])
     expect(reserved.rateSnapshotScaled).toBe(1_250_000)
@@ -1601,77 +1309,38 @@ describe.sequential('Payload authorization and domain integration', () => {
       'projects',
       project.id,
       {
-        commercialChangeReason: 'Restore the project rate after recalculation coverage.',
         confirmUnbilledImpact: true,
         hourlyRateScaled: 1_250_000,
       },
-      { overrideAccess: false, req: ownerReq },
+      { overrideAccess: false, req: userReq },
     )
   })
 
-  it('requires and audits privileged time corrections and deletions', async () => {
-    await expect(
-      updateDocument(
-        'time-entries',
-        secondMemberEntry.id,
-        { description: 'Owner correction without a reason.' },
-        { overrideAccess: false, req: ownerReq },
-      ),
-    ).rejects.toMatchObject({ status: 400 })
-    await expect(
-      updateDocument<TestTimeEntry>(
-        'time-entries',
-        secondMemberEntry.id,
-        {
-          description: 'Corrected by the owner with an audit reason.',
-          privilegedCorrectionReason: 'Correct the integration entry description after review.',
-        },
-        { overrideAccess: false, req: ownerReq },
-      ),
-    ).resolves.toMatchObject({ description: 'Corrected by the owner with an audit reason.' })
+  it('lets the user correct and delete unbilled time without touching system snapshots', async () => {
+    const corrected = await updateDocument<TestTimeEntry>(
+      'time-entries',
+      unbilledEntry.id,
+      {
+        description: '  Corrected integration entry  ',
+        durationSeconds: 60,
+        rateSnapshotScaled: 1,
+      },
+      { overrideAccess: false, req: userReq },
+    )
+    expect(corrected).toMatchObject({
+      description: 'Corrected integration entry',
+      durationSeconds: 2_700,
+      rateSnapshotScaled: 1_500_000,
+    })
 
-    const ownerSession = { payload, req: ownerReq, user: owner } as unknown as AppSession
-    const lockedAuditBefore = await payload.count({
-      collection: 'audit-events',
-      overrideAccess: true,
-      where: { targetId: { equals: String(memberEntry.id) } },
-    })
-    await expect(
-      deleteUnbilledTimeEntryAsAdministrator(ownerSession, {
-        entryID: String(memberEntry.id),
-        reason: 'Attempt to delete locked integration time should roll back.',
-      }),
-    ).rejects.toThrow('Reserved or exported time cannot be deleted')
-    const lockedAuditAfter = await payload.count({
-      collection: 'audit-events',
-      overrideAccess: true,
-      where: { targetId: { equals: String(memberEntry.id) } },
-    })
-    expect(lockedAuditAfter.totalDocs).toBe(lockedAuditBefore.totalDocs)
-
-    await deleteUnbilledTimeEntryAsAdministrator(ownerSession, {
-      entryID: String(secondMemberEntry.id),
-      reason: 'Remove the obsolete integration entry after correction review.',
-    })
+    await deleteDocument('time-entries', unbilledEntry.id, { overrideAccess: false, req: userReq })
     await expect(
       payload.findByID({
         collection: 'time-entries',
-        id: secondMemberEntry.id,
+        id: unbilledEntry.id,
         overrideAccess: true,
       }),
     ).rejects.toMatchObject({ status: 404 })
-    const correctionAudits = await payload.find({
-      collection: 'audit-events',
-      depth: 0,
-      overrideAccess: true,
-      where: {
-        and: [
-          { eventType: { equals: 'time-entry.privileged-correction' } },
-          { targetId: { equals: String(secondMemberEntry.id) } },
-        ],
-      },
-    })
-    expect(correctionAudits.docs).toHaveLength(2)
   })
 
   it('derives a minute-precise range duration and local work date', async () => {
@@ -1685,7 +1354,7 @@ describe.sequential('Payload authorization and domain integration', () => {
         startAt: '2026-07-18T12:00:00.000Z',
         timezone: 'Pacific/Auckland',
       },
-      { overrideAccess: false, req: memberReq },
+      { overrideAccess: false, req: userReq },
     )
 
     expect(entry).toMatchObject({
@@ -1709,7 +1378,7 @@ describe.sequential('Payload authorization and domain integration', () => {
       createDocument(
         'time-entries',
         { ...durationInput, enteredHours: 0, enteredMinutes: 0 },
-        { overrideAccess: false, req: memberReq },
+        { overrideAccess: false, req: userReq },
       ),
     ).rejects.toMatchObject({ status: 400 })
 
@@ -1717,7 +1386,7 @@ describe.sequential('Payload authorization and domain integration', () => {
       createDocument(
         'time-entries',
         { ...durationInput, enteredHours: 24, enteredMinutes: 1 },
-        { overrideAccess: false, req: memberReq },
+        { overrideAccess: false, req: userReq },
       ),
     ).rejects.toMatchObject({ status: 400 })
 
@@ -1732,7 +1401,7 @@ describe.sequential('Payload authorization and domain integration', () => {
           startAt: '2026-07-18T12:00:01.000Z',
           timezone: 'Pacific/Auckland',
         },
-        { overrideAccess: false, req: memberReq },
+        { overrideAccess: false, req: userReq },
       ),
     ).rejects.toMatchObject({ status: 400 })
   })
@@ -1741,35 +1410,27 @@ describe.sequential('Payload authorization and domain integration', () => {
     await expect(
       updateDocument(
         'time-entries',
-        memberEntry.id,
-        { description: 'Member tried to change locked time' },
-        { overrideAccess: false, req: memberReq },
+        reservedEntry.id,
+        { description: 'Tried to change locked time' },
+        { overrideAccess: false, req: userReq },
       ),
     ).rejects.toMatchObject({ status: 403 })
     await expect(
-      updateDocument(
-        'time-entries',
-        memberEntry.id,
-        { description: 'Owner tried to change locked time' },
-        { overrideAccess: false, req: ownerReq },
-      ),
-    ).rejects.toMatchObject({ status: 403 })
-    await expect(
-      deleteDocument('time-entries', memberEntry.id, {
+      deleteDocument('time-entries', reservedEntry.id, {
         overrideAccess: false,
-        req: memberReq,
+        req: userReq,
       }),
     ).rejects.toMatchObject({ status: 403 })
     await expect(
       updateDocument(
         'time-entries',
-        memberEntry.id,
+        reservedEntry.id,
         { description: 'overrideAccess alone cannot bypass the billing lock' },
         { overrideAccess: true },
       ),
     ).rejects.toMatchObject({ status: 400 })
     await expect(
-      deleteDocument('time-entries', memberEntry.id, {
+      deleteDocument('time-entries', reservedEntry.id, {
         overrideAccess: true,
         req: trustedBillingReq,
       }),
@@ -1777,7 +1438,7 @@ describe.sequential('Payload authorization and domain integration', () => {
     await expect(
       updateDocument(
         'time-entries',
-        memberEntry.id,
+        reservedEntry.id,
         {
           billingStatus: 'unbilled',
           description: 'A billing context must not change ordinary entry data',
@@ -1787,14 +1448,8 @@ describe.sequential('Payload authorization and domain integration', () => {
         { overrideAccess: true, req: trustedReleaseReq },
       ),
     ).rejects.toMatchObject({ status: 400 })
-    await expect(
-      deleteDocument('time-entries', memberEntry.id, {
-        overrideAccess: false,
-        req: ownerReq,
-      }),
-    ).rejects.toMatchObject({ status: 403 })
 
-    const lockedEntry = await findDocument<TestTimeEntry>('time-entries', memberEntry.id, {
+    const lockedEntry = await findDocument<TestTimeEntry>('time-entries', reservedEntry.id, {
       overrideAccess: true,
     })
     expect(lockedEntry.billingStatus).toBe('reserved')
@@ -1802,7 +1457,7 @@ describe.sequential('Payload authorization and domain integration', () => {
     await expect(
       updateDocument(
         'time-entries',
-        memberEntry.id,
+        reservedEntry.id,
         {
           billingStatus: 'unbilled',
           currentExport: null,
@@ -1814,110 +1469,100 @@ describe.sequential('Payload authorization and domain integration', () => {
     ).resolves.toMatchObject({ billingStatus: 'unbilled' })
   })
 
-  it('enforces role boundaries on all three settings globals', async () => {
+  it('lets the signed-in user update both settings globals', async () => {
     await expect(
-      updateGlobal('business-settings', { businessName: 'Owner Business' }, ownerReq),
-    ).resolves.toMatchObject({ businessName: 'Owner Business' })
-    await expect(
-      updateGlobal('business-settings', { businessName: 'Admin Business' }, adminReq),
-    ).resolves.toMatchObject({ businessName: 'Admin Business' })
-    await expect(findGlobal('business-settings', memberReq)).resolves.toMatchObject({
-      businessName: 'Admin Business',
+      updateGlobal('business-settings', { businessName: 'Integration Business' }, userReq),
+    ).resolves.toMatchObject({ businessName: 'Integration Business' })
+    await expect(findGlobal('business-settings', userReq)).resolves.toMatchObject({
+      businessName: 'Integration Business',
     })
-    await expect(findGlobal('business-settings', billerReq)).resolves.toBeDefined()
     await expect(
-      updateGlobal('business-settings', { businessName: 'Member Business' }, memberReq),
-    ).rejects.toMatchObject({ status: 403 })
-
-    await expect(
-      updateGlobal('authentication-settings', { staleAccountingHealthCheckHours: 12 }, ownerReq),
-    ).resolves.toMatchObject({ staleAccountingHealthCheckHours: 12 })
-    const authenticationBefore = await findGlobal<AuthenticationSetting>(
-      'authentication-settings',
-      ownerReq,
-    )
-    const identityTarget = authenticationBefore.xeroIdentityLoginEnabled !== true
-    await expect(
-      updateGlobal(
-        'authentication-settings',
-        { xeroIdentityLoginEnabled: identityTarget },
-        ownerReq,
-      ),
-    ).resolves.toMatchObject({ xeroIdentityLoginEnabled: identityTarget })
-    await expect(
-      updateGlobal(
-        'authentication-settings',
-        {
-          xeroIdentityLoginEnabled: authenticationBefore.xeroIdentityLoginEnabled === true,
-        },
-        ownerReq,
-      ),
-    ).resolves.toMatchObject({
-      xeroIdentityLoginEnabled: authenticationBefore.xeroIdentityLoginEnabled === true,
-    })
-    await expect(findGlobal('authentication-settings', adminReq)).resolves.toBeDefined()
-    await expect(findGlobal('authentication-settings', memberReq)).rejects.toMatchObject({
-      status: 403,
-    })
-    await expect(findGlobal('authentication-settings', billerReq)).rejects.toMatchObject({
-      status: 403,
-    })
-
-    await expect(
-      updateGlobal('billing-settings', { invoiceReferencePrefix: ' TEST- ' }, adminReq),
+      updateGlobal('billing-settings', { invoiceReferencePrefix: ' TEST- ' }, userReq),
     ).resolves.toMatchObject({ invoiceReferencePrefix: 'TEST-' })
-    const billingBefore = await findGlobal<BillingSetting>('billing-settings', ownerReq)
-    const processingTarget = billingBefore.processingEnabled !== true
     await expect(
-      updateGlobal('billing-settings', { processingEnabled: processingTarget }, ownerReq),
-    ).resolves.toMatchObject({ processingEnabled: processingTarget })
-    await expect(
-      updateGlobal(
-        'billing-settings',
-        {
-          processingEnabled: billingBefore.processingEnabled === true,
-        },
-        ownerReq,
-      ),
-    ).resolves.toMatchObject({ processingEnabled: billingBefore.processingEnabled === true })
-    await expect(findGlobal('billing-settings', ownerReq)).resolves.toBeDefined()
-    await expect(findGlobal('billing-settings', billerReq)).resolves.toBeDefined()
-    await expect(
-      updateGlobal('billing-settings', { invoiceReferencePrefix: 'BILLER-' }, billerReq),
+      updateGlobal('billing-settings', { invoiceReferencePrefix: 'ANON-' }, anonymousReq),
     ).rejects.toMatchObject({ status: 403 })
-    await expect(findGlobal('billing-settings', memberReq)).rejects.toMatchObject({ status: 403 })
+    await expect(
+      payload.findGlobalVersions({
+        slug: 'billing-settings',
+        overrideAccess: false,
+        req: userReq,
+      }),
+    ).resolves.toMatchObject({ totalDocs: expect.any(Number) })
   })
 
-  it('limits collection and global version history to owners and admins', async () => {
-    await expect(
-      payload.findVersions({
-        collection: 'time-entries',
-        overrideAccess: false,
-        req: memberReq,
-      }),
-    ).rejects.toMatchObject({ status: 403 })
-    await expect(
-      payload.findVersions({
-        collection: 'time-entries',
-        overrideAccess: false,
-        req: ownerReq,
-      }),
-    ).resolves.toMatchObject({ totalDocs: expect.any(Number) })
+  it('moves unbilled time with a project that changes customer', async () => {
+    const movable = await createDocument<TestTimeEntry>(
+      'time-entries',
+      {
+        description: 'Unbilled time that follows its project',
+        enteredHours: 1,
+        enteredMinutes: 0,
+        inputMode: 'duration',
+        project: project.id,
+        timezone: 'Pacific/Auckland',
+        workDate: '2026-07-19',
+      },
+      { overrideAccess: false, req: userReq },
+    )
+    const held = await createDocument<TestTimeEntry>(
+      'time-entries',
+      {
+        description: 'Reserved time that stays with its invoice customer',
+        enteredHours: 1,
+        enteredMinutes: 0,
+        inputMode: 'duration',
+        project: project.id,
+        timezone: 'Pacific/Auckland',
+        workDate: '2026-07-19',
+      },
+      { overrideAccess: false, req: userReq },
+    )
+    await requireMongoModel(payload, 'time-entries').updateOne(
+      { _id: held.id },
+      { $set: { billingStatus: 'reserved' } },
+    )
+    const reservedBefore = await findDocument<TestTimeEntry>('time-entries', held.id, {
+      overrideAccess: true,
+    })
+    expect(reservedBefore.billingStatus).toBe('reserved')
 
-    await expect(
-      payload.findGlobalVersions({
-        slug: 'billing-settings',
-        overrideAccess: false,
-        req: billerReq,
-      }),
-    ).rejects.toMatchObject({ status: 403 })
-    await expect(
-      payload.findGlobalVersions({
-        slug: 'billing-settings',
-        overrideAccess: false,
-        req: adminReq,
-      }),
-    ).resolves.toMatchObject({ totalDocs: expect.any(Number) })
+    try {
+      await updateDocument(
+        'projects',
+        project.id,
+        { customer: otherCustomer.id },
+        {
+          overrideAccess: false,
+          req: userReq,
+        },
+      )
+      const [moved, reservedAfter] = await Promise.all([
+        findDocument<TestTimeEntry>('time-entries', movable.id, { overrideAccess: true }),
+        findDocument<TestTimeEntry>('time-entries', held.id, { overrideAccess: true }),
+      ])
+      expect(moved).toMatchObject({
+        customer: otherCustomer.id,
+        customerNameSnapshot: 'Unrelated Customer',
+      })
+      // Reserved time stays with the customer it is being invoiced to.
+      expect(reservedAfter).toMatchObject({
+        customer: reservedBefore.customer,
+        customerNameSnapshot: reservedBefore.customerNameSnapshot,
+      })
+    } finally {
+      await updateDocument(
+        'projects',
+        project.id,
+        { customer: customer.id },
+        {
+          overrideAccess: false,
+          req: userReq,
+        },
+      )
+      await deleteDocument('time-entries', movable.id, { overrideAccess: true })
+      await requireMongoModel(payload, 'time-entries').deleteOne({ _id: held.id })
+    }
   })
 
   it('rejects new time when the project customer is archived', async () => {
@@ -1925,7 +1570,7 @@ describe.sequential('Payload authorization and domain integration', () => {
       'customers',
       customer.id,
       { status: 'archived' },
-      { overrideAccess: false, req: ownerReq },
+      { overrideAccess: false, req: userReq },
     )
 
     await expect(
@@ -1933,7 +1578,7 @@ describe.sequential('Payload authorization and domain integration', () => {
         'projects',
         project.id,
         { description: 'The project remains editable after its customer is archived.' },
-        { overrideAccess: false, req: ownerReq },
+        { overrideAccess: false, req: userReq },
       ),
     ).resolves.toMatchObject({ id: project.id })
 
@@ -1949,7 +1594,7 @@ describe.sequential('Payload authorization and domain integration', () => {
           timezone: 'Pacific/Auckland',
           workDate: '2026-07-19',
         },
-        { overrideAccess: false, req: memberReq },
+        { overrideAccess: false, req: userReq },
       ),
     ).rejects.toMatchObject({ status: 400 })
   })
@@ -1977,7 +1622,7 @@ describe.sequential('Payload authorization and domain integration', () => {
           { overrideAccess: false, req },
         )
       },
-      { user: { ...owner, collection: 'users' } as never },
+      { user: { ...user, collection: 'users' } as never },
     )
 
     const matches = await payload.find({
@@ -2030,7 +1675,7 @@ describe.sequential('Payload authorization and domain integration', () => {
           )
           throw new Error('force rollback')
         },
-        { user: { ...owner, collection: 'users' } as never },
+        { user: { ...user, collection: 'users' } as never },
       ),
     ).rejects.toThrow('force rollback')
 

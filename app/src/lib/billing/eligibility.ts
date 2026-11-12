@@ -1,6 +1,5 @@
 import 'server-only'
 
-import { hasActiveRole } from '@/access/roles'
 import { isRecord, isValidCurrencyCode, relationshipID } from '@/lib/domain/validation'
 import type { AppSession } from '@/lib/member-app/session'
 
@@ -37,12 +36,6 @@ const blocker = (
   message: string,
   remediationHref?: string,
 ): BillingBlocker => ({ code, message, remediationHref })
-
-const assertBillingRole = (session: AppSession): void => {
-  if (!hasActiveRole(session.user, ['owner', 'admin', 'biller'])) {
-    throw new Error('You do not have access to billing.')
-  }
-}
 
 const chunks = <T>(values: T[], size: number): T[][] => {
   const result: T[][] = []
@@ -302,7 +295,6 @@ export async function getBillingEligibility(
     settingsDocument: Record<string, unknown>
   }
 > {
-  assertBillingRole(session)
   const filter = normalizeBillingFilter(filterInput)
   const entries = await findEntries(session, filter, options.entryIDs)
   const customerIDs = entries.map((entry) => relation(entry.customer)).filter(Boolean) as string[]
@@ -331,6 +323,9 @@ export async function getBillingEligibility(
   })
   const connection = connectionResult.docs[0] as unknown as Record<string, unknown> | undefined
   const tenantID = connection?.status === 'connected' ? stringValue(connection.tenantId, 100) : ''
+  // A pinned organisation whose connection stopped working needs a reconnect, not a first connect.
+  const xeroReconnectRequired =
+    connection?.status === 'action-required' && Boolean(stringValue(connection.tenantId, 100))
   const references = await referenceMaps(session, tenantID || null)
   const settingsRecord = settingsDocument as unknown as Record<string, unknown>
   const settings = billingSettingsSnapshot(settingsRecord)
@@ -473,7 +468,13 @@ export async function getBillingEligibility(
       reasons.push(blocker('stale-source-data', 'The source user is unavailable.'))
 
     const contactID = stringValue(customer?.xeroContactId, 100)
-    reasons.push(...xeroConnectionBlockers(tenantID || null, references.capabilityAvailable))
+    reasons.push(
+      ...xeroConnectionBlockers(
+        tenantID || null,
+        references.capabilityAvailable,
+        xeroReconnectRequired,
+      ),
+    )
     if (!contactID || customer?.xeroMappingStatus === 'unmapped') {
       reasons.push(
         blocker(

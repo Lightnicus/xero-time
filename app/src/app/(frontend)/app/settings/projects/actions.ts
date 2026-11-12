@@ -5,7 +5,6 @@ import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { ValidationError } from 'payload'
 
-import { hasActiveRole } from '@/access/roles'
 import { validateOptionalXeroID } from '@/lib/domain/validation'
 import { requireAppSession } from '@/lib/member-app/session'
 import { confirmProjectRateRecalculation } from '@/lib/projects/rate-recalculation'
@@ -16,7 +15,7 @@ const value = (formData: FormData, name: string): string => {
   return typeof item === 'string' ? item : ''
 }
 
-export type ProjectXeroItemField = 'commercialChangeReason' | 'confirmUnbilledImpact' | 'xeroItemId'
+export type ProjectXeroItemField = 'confirmUnbilledImpact' | 'xeroItemId'
 
 export type ProjectXeroItemActionState = {
   fieldErrors?: Partial<Record<ProjectXeroItemField, string>>
@@ -28,13 +27,8 @@ export async function updateProjectXeroItemAction(
   formData: FormData,
 ): Promise<ProjectXeroItemActionState> {
   const session = await requireAppSession()
-  if (!hasActiveRole(session.user, ['owner', 'admin'])) {
-    return { message: 'Only an owner or administrator can change project invoice items.' }
-  }
-
   const projectID = value(formData, 'projectID').trim()
   const xeroItemId = value(formData, 'xeroItemId').trim()
-  const commercialChangeReason = value(formData, 'commercialChangeReason').trim()
   const fieldErrors: NonNullable<ProjectXeroItemActionState['fieldErrors']> = {}
   if (!projectID || projectID.length > 100) {
     return { message: 'The selected project is unavailable.' }
@@ -43,9 +37,6 @@ export async function updateProjectXeroItemAction(
     fieldErrors.xeroItemId = 'Choose a Xero invoice item.'
   } else if (validateOptionalXeroID(xeroItemId) !== true) {
     fieldErrors.xeroItemId = 'Choose a Xero invoice item from the refreshed list.'
-  }
-  if (commercialChangeReason.length > 1_000) {
-    fieldErrors.commercialChangeReason = 'Keep the commercial reason to 1,000 characters or fewer.'
   }
   if (Object.keys(fieldErrors).length > 0) {
     return { fieldErrors, message: 'Check the project item settings and try again.' }
@@ -61,7 +52,6 @@ export async function updateProjectXeroItemAction(
     await session.payload.update({
       collection: 'projects',
       data: {
-        commercialChangeReason,
         confirmUnbilledImpact: value(formData, 'confirmUnbilledImpact') === 'yes',
         xeroItemId: xeroItemId || null,
       } as never,
@@ -74,11 +64,7 @@ export async function updateProjectXeroItemAction(
     if (error instanceof ValidationError) {
       const payloadErrors: NonNullable<ProjectXeroItemActionState['fieldErrors']> = {}
       for (const item of error.data.errors) {
-        if (
-          item.path === 'xeroItemId' ||
-          item.path === 'confirmUnbilledImpact' ||
-          item.path === 'commercialChangeReason'
-        ) {
+        if (item.path === 'xeroItemId' || item.path === 'confirmUnbilledImpact') {
           payloadErrors[item.path] = item.message
         }
       }
@@ -102,7 +88,6 @@ export async function updateProjectXeroItemAction(
 
 export async function recalculateProjectRatesAction(formData: FormData): Promise<void> {
   const session = await requireAppSession()
-  if (!hasActiveRole(session.user, ['owner', 'admin'])) redirect('/app')
 
   try {
     await enforceRateLimit(session.payload, {

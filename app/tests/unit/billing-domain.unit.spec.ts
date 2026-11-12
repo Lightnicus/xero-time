@@ -55,8 +55,17 @@ const settings = {
 describe('billing scaled arithmetic', () => {
   it('uses the visible four-decimal Xero quantity boundary for one minute', () => {
     expect(durationToQuantityScaled(60)).toBe(167)
-    expect(quantityRateAmountScaled(167, 1_500_000)).toBe(25_050)
-    expect(taxForLine(25_050, 15, 'Exclusive')).toBe(3_758)
+    // 0.0167 h x $150 = $2.505, which Xero stores as a $2.51 line with $0.38 tax at 15%.
+    expect(quantityRateAmountScaled(167, 1_500_000)).toBe(25_100)
+    expect(taxForLine(25_100, 15, 'Exclusive')).toBe(3_800)
+  })
+
+  it('rounds each line and its tax to cents like Xero', () => {
+    // $2.51 including 15% tax: $2.18 excluding tax, so $0.33 tax.
+    expect(taxForLine(25_100, 15, 'Inclusive')).toBe(3_300)
+    // Exclusive tax on $0.33 is $0.0495, rounded to $0.05.
+    expect(taxForLine(3_300, 15, 'Exclusive')).toBe(500)
+    expect(quantityRateAmountScaled(10_000, 1_234_567)).toBe(1_234_600)
   })
 
   it('rejects fractional minutes, invalid rates, and unsafe values', () => {
@@ -106,6 +115,24 @@ describe('billing selection semantics', () => {
         explicitEntryIDs: ['missing-entry'],
       }),
     ).toThrow(/no longer eligible/)
+  })
+
+  it('keeps explicit selections in the eligibility sort order, not ID order', () => {
+    const sorted = {
+      ...eligibility,
+      eligible: [
+        entry({ entryID: 'z-entry', workDate: '2026-07-17' }),
+        entry({ entryID: 'a-entry', workDate: '2026-07-18' }),
+        entry({ entryID: 'm-entry', workDate: '2026-07-19' }),
+      ],
+    }
+    const selected = selectEligibleEntries(sorted, {
+      excludedEntryIDs: [],
+      explicitEntryIDs: ['m-entry', 'a-entry', 'z-entry'],
+      filter: normalizeBillingFilter({}),
+      type: 'explicit',
+    })
+    expect(selected.map((item) => item.entryID)).toEqual(['z-entry', 'a-entry', 'm-entry'])
   })
 
   it('applies all-matching exclusions to the complete resolved set', () => {
@@ -164,6 +191,35 @@ describe('invoice preview construction', () => {
       LineItems: expect.arrayContaining([expect.objectContaining({ ItemCode: 'TIME' })]),
       Status: 'DRAFT',
       Type: 'ACCREC',
+    })
+  })
+
+  it('totals invoices from cent-rounded lines and keeps tax out of an inclusive subtotal', () => {
+    const entries = [entry(), entry({ entryID: 'entry-2' })]
+    const exclusive = buildBillingPreview({
+      batchReference: 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE',
+      entries,
+      invoiceDate: '2026-07-18',
+      settings,
+    }).invoices[0]
+    // Two one-minute lines at $150/h: each $2.51 with $0.38 tax.
+    expect(exclusive).toMatchObject({
+      subtotalScaled: 50_200,
+      taxScaled: 7_600,
+      totalScaled: 57_800,
+    })
+
+    const inclusive = buildBillingPreview({
+      batchReference: 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE',
+      entries,
+      invoiceDate: '2026-07-18',
+      settings: { ...settings, lineAmountType: 'Inclusive' as never },
+    }).invoices[0]
+    // Each $2.51 line includes $0.33 tax, so the subtotal excludes $0.66 of tax.
+    expect(inclusive).toMatchObject({
+      subtotalScaled: 43_600,
+      taxScaled: 6_600,
+      totalScaled: 50_200,
     })
   })
 

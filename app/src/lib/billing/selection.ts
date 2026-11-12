@@ -75,18 +75,20 @@ export function selectEligibleEntries(
 ): EligibleBillingEntry[] {
   const selection = normalizeBillingSelection(selectionInput)
   const excluded = new Set(selection.excludedEntryIDs)
-  const byID = new Map(result.eligible.map((entry) => [entry.entryID, entry]))
-
   if (selection.type === 'explicit') {
-    const missing = selection.explicitEntryIDs.filter((id) => !byID.has(id))
+    const eligibleIDs = new Set(result.eligible.map((entry) => entry.entryID))
+    const missing = selection.explicitEntryIDs.filter((id) => !eligibleIDs.has(id))
     if (missing.length > 0) {
       throw new Error(
         `Some selected entries are no longer eligible or accessible: ${missing.join(', ')}. Refresh the billing queue.`,
       )
     }
-    return selection.explicitEntryIDs
-      .filter((id) => !excluded.has(id))
-      .map((id) => byID.get(id) as EligibleBillingEntry)
+    // Keep the eligibility sort (customer, currency, work date, ...) so invoice lines are in the
+    // same order as an all-matching selection, not in the (ID-sorted) order of the request.
+    const selected = new Set(selection.explicitEntryIDs)
+    return result.eligible.filter(
+      (entry) => selected.has(entry.entryID) && !excluded.has(entry.entryID),
+    )
   }
 
   return result.eligible.filter((entry) => !excluded.has(entry.entryID))

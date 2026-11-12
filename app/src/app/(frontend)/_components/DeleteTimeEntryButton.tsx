@@ -7,13 +7,7 @@ import { deleteTimeEntryAction, type TimeEntryActionState } from '../app/time/ac
 
 const initialState: TimeEntryActionState = { message: null }
 
-export function DeleteTimeEntryButton({
-  entryID,
-  requiresReason = false,
-}: {
-  entryID: string
-  requiresReason?: boolean
-}) {
+export function DeleteTimeEntryButton({ entryID }: { entryID: string }) {
   const [state, formAction] = useActionState(deleteTimeEntryAction, initialState)
 
   return (
@@ -27,19 +21,6 @@ export function DeleteTimeEntryButton({
       }}
     >
       <input name="entryID" type="hidden" value={entryID} />
-      {requiresReason && (
-        <label className="field" htmlFor="deleteCorrectionReason">
-          <span>Deletion reason</span>
-          <textarea
-            id="deleteCorrectionReason"
-            maxLength={1_000}
-            minLength={10}
-            name="privilegedCorrectionReason"
-            required
-            rows={3}
-          />
-        </label>
-      )}
       <PendingSubmitButton className="button button-danger" pendingLabel="Deleting…">
         Delete entry
       </PendingSubmitButton>

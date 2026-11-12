@@ -65,11 +65,9 @@ describe.sequential('billing reservation saga', () => {
     const bootstrapped = await registerFirstUserOperation({
       collection: payload.collections.users,
       data: {
-        active: true,
         displayName: 'Billing Owner',
         email: 'billing-owner@example.test',
         password: PASSWORD,
-        role: 'owner',
         timezone: 'Pacific/Auckland',
       } as never,
       req: anonymousReq,
@@ -80,12 +78,9 @@ describe.sequential('billing reservation saga', () => {
     const biller = await payload.create({
       collection: 'users',
       data: {
-        _verified: true,
-        active: true,
         displayName: 'Billing Operator',
         email: 'billing-operator@example.test',
         password: PASSWORD,
-        role: 'biller',
         timezone: 'Pacific/Auckland',
       },
       overrideAccess: false,
@@ -94,12 +89,9 @@ describe.sequential('billing reservation saga', () => {
     const member = await payload.create({
       collection: 'users',
       data: {
-        _verified: true,
-        active: true,
         displayName: 'Time Member',
         email: 'billing-member@example.test',
         password: PASSWORD,
-        role: 'member',
         timezone: 'Pacific/Auckland',
       },
       overrideAccess: false,
@@ -263,7 +255,6 @@ describe.sequential('billing reservation saga', () => {
     await payload.update({
       collection: 'projects',
       data: {
-        commercialChangeReason: 'Verify the required Xero item billing blocker.',
         confirmUnbilledImpact: true,
         xeroItemId: null,
       },
@@ -291,7 +282,6 @@ describe.sequential('billing reservation saga', () => {
     await payload.update({
       collection: 'projects',
       data: {
-        commercialChangeReason: 'Restore the active Xero item billing mapping.',
         confirmUnbilledImpact: true,
         xeroItemId: '44444444-4444-4444-8444-444444444444',
       },
@@ -675,20 +665,161 @@ describe.sequential('billing reservation saga', () => {
     })
   })
 
-  it('denies billing collections to members through ordinary APIs', async () => {
+  it('denies billing collections to anonymous requests', async () => {
+    const anonymousReq = await createLocalReq({}, payload)
+    await expect(
+      payload.find({ collection: 'invoice-exports', overrideAccess: false, req: anonymousReq }),
+    ).rejects.toMatchObject({ status: 403 })
+    await expect(
+      payload.find({ collection: 'xero-attempts', overrideAccess: false, req: anonymousReq }),
+    ).rejects.toMatchObject({ status: 403 })
+  })
+
+  const createUnbilledEntry = async (description: string): Promise<string> => {
     const member = await payload.find({
       collection: 'users',
       depth: 0,
       limit: 1,
       overrideAccess: true,
-      where: { role: { equals: 'member' } },
+      where: { email: { equals: 'billing-member@example.test' } },
     })
-    const memberReq = await reqFor(member.docs[0])
-    await expect(
-      payload.find({ collection: 'invoice-exports', overrideAccess: false, req: memberReq }),
-    ).rejects.toMatchObject({ status: 403 })
-    await expect(
-      payload.find({ collection: 'xero-attempts', overrideAccess: false, req: memberReq }),
-    ).rejects.toMatchObject({ status: 403 })
+    const timeEntry = await payload.create({
+      collection: 'time-entries',
+      data: {
+        billable: true,
+        description,
+        enteredHours: 0,
+        enteredMinutes: 30,
+        inputMode: 'duration',
+        project: projectID,
+        timezone: 'Pacific/Auckland',
+        workDate: '2026-07-22',
+      } as never,
+      overrideAccess: false,
+      req: await reqFor(member.docs[0]),
+    })
+    return String(timeEntry.id)
+  }
+
+  const previewOne = async (entryID: string, batchReference: string) => {
+    const selection = {
+      excludedEntryIDs: [],
+      explicitEntryIDs: [entryID],
+      filter: normalizeBillingFilter({ timezone: 'Pacific/Auckland' }),
+      type: 'explicit' as const,
+    }
+    const preview = await createBillingPreview(ownerSession, {
+      batchReference,
+      invoiceDate: '2026-07-22',
+      selection,
+    })
+    return { preview, selection }
+  }
+
+  it('confirms a forced-background or overridden mode without a reason', async () => {
+    await payload.updateGlobal({
+      slug: 'billing-settings',
+      data: { waitForResultEnabled: false, xeroExportMode: 'wait-for-result' },
+      overrideAccess: true,
+      req: ownerSession.req,
+    })
+    try {
+      const entryID = await createUnbilledEntry('Forced background mode entry')
+      for (const [requestedMode, batchReference] of [
+        // The preview form's hidden field (configured mode) and the old forced value both work.
+        ['wait-for-result', 'ABABABAB-0000-4000-8000-000000000001'],
+        ['background', 'ABABABAB-0000-4000-8000-000000000002'],
+      ] as const) {
+        const { preview, selection } = await previewOne(entryID, batchReference)
+        const result = await confirmBillingPreview(ownerSession, {
+          batchReference: preview.batchReference,
+          checksum: preview.checksum,
+          invoiceDate: '2026-07-22',
+          modeOverrideReason: '',
+          requestedMode,
+          selection,
+        })
+        expect(result).toMatchObject({ actualMode: 'background', status: 'queued' })
+        const saved = await payload.findByID({
+          collection: 'invoice-exports',
+          depth: 0,
+          id: result.exportIDs[0] as string,
+          overrideAccess: true,
+        })
+        expect(saved.modeOverrideReason ?? null).toBeNull()
+        await cancelInvoiceExport(ownerSession, { exportID: result.exportIDs[0] as string })
+      }
+
+      // A real override (background configured, wait requested) no longer needs a reason.
+      await payload.updateGlobal({
+        slug: 'billing-settings',
+        data: { xeroExportMode: 'background' },
+        overrideAccess: true,
+        req: ownerSession.req,
+      })
+      const { preview, selection } = await previewOne(
+        entryID,
+        'ABABABAB-0000-4000-8000-000000000003',
+      )
+      const overridden = await confirmBillingPreview(ownerSession, {
+        batchReference: preview.batchReference,
+        checksum: preview.checksum,
+        invoiceDate: '2026-07-22',
+        modeOverrideReason: '',
+        requestedMode: 'wait-for-result',
+        selection,
+      })
+      expect(overridden).toMatchObject({ status: 'queued' })
+      await cancelInvoiceExport(ownerSession, { exportID: overridden.exportIDs[0] as string })
+    } finally {
+      await payload.updateGlobal({
+        slug: 'billing-settings',
+        data: { waitForResultEnabled: false, xeroExportMode: 'background' },
+        overrideAccess: true,
+        req: ownerSession.req,
+      })
+    }
+  })
+
+  it('reports a committed reservation whose job dispatch failed as dispatch-pending', async () => {
+    const entryID = await createUnbilledEntry('Dispatch failure entry')
+    const { preview, selection } = await previewOne(entryID, 'ABABABAB-0000-4000-8000-000000000004')
+    const result = await confirmBillingPreview(
+      ownerSession,
+      {
+        batchReference: preview.batchReference,
+        checksum: preview.checksum,
+        invoiceDate: '2026-07-22',
+        requestedMode: 'background',
+        selection,
+      },
+      {
+        dispatch: async () => {
+          throw new Error('Simulated job queue outage.')
+        },
+      },
+    )
+    expect(result.status).toBe('dispatch-pending')
+    const exportID = result.exportIDs[0] as string
+    const [batch, invoiceExport, entry] = await Promise.all([
+      payload.findByID({
+        collection: 'export-batches',
+        depth: 0,
+        id: result.batchID,
+        overrideAccess: true,
+      }),
+      payload.findByID({
+        collection: 'invoice-exports',
+        depth: 0,
+        id: exportID,
+        overrideAccess: true,
+      }),
+      payload.findByID({ collection: 'time-entries', depth: 0, id: entryID, overrideAccess: true }),
+    ])
+    expect(batch.status).toBe('preparing')
+    expect(invoiceExport).toMatchObject({ dispatchState: 'pending', state: 'preparing' })
+    expect(entry).toMatchObject({ billingStatus: 'reserved' })
+    expect(String(entry.currentExport)).toBe(exportID)
+    await cancelInvoiceExport(ownerSession, { exportID })
   })
 })

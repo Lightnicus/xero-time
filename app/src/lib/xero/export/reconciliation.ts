@@ -9,6 +9,11 @@ import { requireMongoModel } from '@/lib/payload/mongo'
 import type { XeroAccountingClient } from '@/lib/xero/accounting/client'
 import { AccountingIntegrationError } from '@/lib/xero/accounting/contracts'
 import {
+  XERO_RECONNECT_EXPORT_CODE,
+  XERO_RECONNECT_EXPORT_MESSAGE,
+  XERO_RECONNECT_RECHECK_SECONDS,
+} from '@/lib/xero/accounting/recovery'
+import {
   createAccountingSystemSession,
   getValidAccountingAccessToken,
   resolveAccountingRuntime,
@@ -16,11 +21,15 @@ import {
 import type { InvoiceExport, InvoiceExportEntry, XeroAttempt } from '@/payload-types'
 
 import {
+  consecutiveRetries,
   finalizeInvoiceSuccess,
+  MAX_CONSECUTIVE_RETRIES,
   materiallyMatches,
   parseRemoteInvoices,
   remoteDerivedValuesHash,
   remoteDerivedValuesMatchAttempt,
+  RETRY_LIMIT_ERROR_CODE,
+  retryLimitMessage,
 } from './processor'
 
 import type { Payload, PayloadRequest } from 'payload'
@@ -226,6 +235,12 @@ export async function fetchRemoteInvoiceForExport(
   return { remote, response }
 }
 
+/** Error codes the status refresh sets itself, and may therefore clear again. */
+const STATUS_REFRESH_ERROR_CODES = new Set([
+  'remote-invoice-mismatch',
+  'remote-invoice-requires-action',
+])
+
 export async function refreshInvoiceExportStatus(
   jobReq: PayloadRequest,
   exportID: string,
@@ -289,42 +304,66 @@ export async function refreshInvoiceExportStatus(
     })
   }
   const actionRequired = !matches || remote.status === 'DELETED' || remote.status === 'VOIDED'
-  const nextState =
-    document.state === 'released'
-      ? 'released'
-      : actionRequired
-        ? 'action-required'
-        : document.state === 'succeeded' || document.state === 'action-required'
-          ? 'succeeded'
-          : document.state
+  // A refresh decides the state of a finished export, or one it flagged itself. An export waiting
+  // for review (or flagged for another reason) only moves when Xero reports its invoice deleted or
+  // voided, which is what makes its time eligible for release. Exports a worker is handling keep
+  // their state; the refresh then only records what Xero reports.
+  const remoteClosed = remote.status === 'DELETED' || remote.status === 'VOIDED'
+  const refreshOwnsState =
+    document.state === 'succeeded' ||
+    (document.state === 'action-required' &&
+      STATUS_REFRESH_ERROR_CODES.has(document.lastErrorCode ?? '')) ||
+    ((document.state === 'manual-review' || document.state === 'action-required') && remoteClosed)
+  const nextState = refreshOwnsState
+    ? actionRequired
+      ? 'action-required'
+      : 'succeeded'
+    : document.state
   const now = new Date().toISOString()
-  await payload.update({
+  const stateFields = refreshOwnsState
+    ? {
+        lastErrorCode: actionRequired
+          ? matches
+            ? 'remote-invoice-requires-action'
+            : 'remote-invoice-mismatch'
+          : null,
+        lastErrorMessage: actionRequired
+          ? matches
+            ? `The Xero invoice is ${remote.status}; review release eligibility.`
+            : 'The Xero invoice no longer matches its immutable local snapshot.'
+          : null,
+        state: nextState,
+        stateHistory:
+          nextState === document.state
+            ? document.stateHistory
+            : history(document, nextState, { remoteStatus: remote.status }),
+      }
+    : {}
+  // Write only if nothing else changed the export since it was read, so a concurrent release,
+  // reconciliation, or recovery action is never overwritten by this slower Xero round trip.
+  const written = await payload.update({
     collection: 'invoice-exports',
-    id: exportID,
     data: {
-      lastErrorCode: actionRequired
-        ? matches
-          ? 'remote-invoice-requires-action'
-          : 'remote-invoice-mismatch'
-        : null,
-      lastErrorMessage: actionRequired
-        ? matches
-          ? `The Xero invoice is ${remote.status}; review release eligibility.`
-          : 'The Xero invoice no longer matches its immutable local snapshot.'
-        : null,
+      ...stateFields,
       lastReconciledAt: now,
       lastRemoteUpdateAt: now,
       remoteStatus: remote.status,
-      state: nextState,
-      stateHistory:
-        nextState === document.state
-          ? document.stateHistory
-          : history(document, nextState, { remoteStatus: remote.status }),
       xeroInvoiceNumber: remote.invoiceNumber ?? document.xeroInvoiceNumber,
     },
+    depth: 0,
     overrideAccess: true,
     req: session.req,
+    where: {
+      and: [
+        { id: { equals: exportID } },
+        { state: { equals: document.state } },
+        { updatedAt: { equals: document.updatedAt } },
+      ],
+    },
   })
+  if (written.docs.length === 0) {
+    return { remoteStatus: remote.status, state: 'superseded' }
+  }
   await recordAuditEvent(
     payload,
     {
@@ -355,8 +394,9 @@ const retryReconciliation = async (
   document: InvoiceExport,
   code: string,
   message: string,
+  delaySeconds = 60,
 ): Promise<void> => {
-  const next = await queue(payload, String(document.id), 'reconcile-xero-invoice', 60)
+  const next = await queue(payload, String(document.id), 'reconcile-xero-invoice', delaySeconds)
   await payload.update({
     collection: 'invoice-exports',
     id: document.id,
@@ -368,7 +408,7 @@ const retryReconciliation = async (
       processingLeaseExpiresAt: null,
       processingLeaseId: null,
       state: 'reconciling',
-      stateHistory: history(document, 'reconciling', { retryAt: next.waitUntil }),
+      stateHistory: history(document, 'reconciling', { errorCode: code, retryAt: next.waitUntil }),
     },
     overrideAccess: true,
     req,
@@ -448,6 +488,9 @@ export async function reconcileInvoiceExport(
           { unitdp: '4' },
         )
       : await client.accountingGet(token.accessToken, token.connection.tenantId, 'Invoices', {
+          // Xero only includes line items in an invoice list when the request is paged, and
+          // the snapshot comparison needs them.
+          page: '1',
           unitdp: '4',
           where: `Reference=="${document.applicationReference.replaceAll('"', '\\"')}"`,
         })
@@ -540,7 +583,7 @@ export async function reconcileInvoiceExport(
       req,
       document,
       'confirmed-absent-replacement-approval-required',
-      'No invoice was found after the original idempotency window. An owner must authorize a linked replacement attempt.',
+      'No invoice was found after the original idempotency window. Approve a linked replacement attempt from the export page.',
     )
     return { state: 'manual-review' }
   } catch (unknownError) {
@@ -552,7 +595,28 @@ export async function reconcileInvoiceExport(
             'Xero reconciliation is temporarily unavailable.',
             { cause: unknownError, retryable: true },
           )
+    if (error.reconnectRequired) {
+      await retryReconciliation(
+        payload,
+        req,
+        document,
+        XERO_RECONNECT_EXPORT_CODE,
+        XERO_RECONNECT_EXPORT_MESSAGE,
+        XERO_RECONNECT_RECHECK_SECONDS,
+      )
+      return { state: 'reconciling' }
+    }
     if (error.retryable || error.status === 429 || (error.status && error.status >= 500)) {
+      if (consecutiveRetries(document, 'reconciling') >= MAX_CONSECUTIVE_RETRIES) {
+        await markManualReview(
+          payload,
+          req,
+          document,
+          RETRY_LIMIT_ERROR_CODE,
+          retryLimitMessage(error.message).slice(0, 500),
+        )
+        return { state: 'manual-review' }
+      }
       await retryReconciliation(payload, req, document, error.code, error.message)
       return { state: 'reconciling' }
     }

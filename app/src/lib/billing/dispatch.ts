@@ -28,7 +28,8 @@ const findAttachedJob = async (
   const collection = payload.db.collections['payload-jobs']
   if (!collection) return null
   return (await collection.findOne({
-    'meta.exportID': exportID,
+    // Job `meta` is only persisted when Payload job stats are enabled; the input always is.
+    'input.exportID': exportID,
     queue: XERO_QUEUE,
     taskSlug: 'create-xero-invoice',
   })) as { _id: number | string } | null
@@ -162,9 +163,16 @@ export async function runExportJobWithTimeout(
   timeoutMS = 8_000,
 ): Promise<'completed' | 'continuing-in-background'> {
   const run = payload.jobs.runByID({ id: jobID, overrideAccess: true, req, silent: true })
+  let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<'continuing-in-background'>((resolve) => {
-    setTimeout(() => resolve('continuing-in-background'), timeoutMS)
+    timer = setTimeout(() => resolve('continuing-in-background'), timeoutMS)
   })
-  const result = await Promise.race([run.then(() => 'completed' as const), timeout])
-  return result
+  // Once the timeout wins nobody awaits the run any more; a later rejection must not surface as
+  // an unhandled rejection. The job's own state records the failure for the durable runners.
+  run.catch(() => undefined)
+  try {
+    return await Promise.race([run.then(() => 'completed' as const), timeout])
+  } finally {
+    clearTimeout(timer)
+  }
 }

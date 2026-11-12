@@ -1,24 +1,13 @@
-import { cookies } from 'next/headers'
-import { getPayload } from 'payload'
-
-import { IdentitySecurityPanel } from '@/app/(frontend)/_components/IdentitySecurityPanel'
 import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import { PasswordChangeForm } from '@/app/(frontend)/_components/PasswordChangeForm'
 import { ProfileForm } from '@/app/(frontend)/_components/ProfileForm'
 import { timezoneOptionsIncluding } from '@/lib/member-app/date-time'
-import { defaultAppHome } from '@/lib/member-app/navigation'
 import { requireAppSession } from '@/lib/member-app/session'
-import {
-  EXTERNAL_SESSION_COOKIE,
-  getIdentitySecurityView,
-  identityFeatureView,
-} from '@/lib/xero/identity/service'
-import config from '@/payload.config'
 
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Profile & security | Project Time',
+  title: 'Profile | Project Time',
 }
 
 export default async function ProfilePage({
@@ -27,29 +16,22 @@ export default async function ProfilePage({
   searchParams: Promise<{
     password?: string | string[]
     saved?: string | string[]
-    security?: string | string[]
-    xero?: string | string[]
   }>
 }) {
   const session = await requireAppSession()
   const params = await searchParams
   const saved = params.saved === '1'
-  const rawExternalToken = (await cookies()).get(EXTERNAL_SESSION_COOKIE)?.value
-  const [security, identityFeatures] = await Promise.all([
-    getIdentitySecurityView(session, rawExternalToken),
-    identityFeatureView(await getPayload({ config })),
-  ])
 
   return (
     <div className="narrow-page page-stack account-workflow-page">
       <PageHeader
         breadcrumb={{
-          current: 'Profile & security',
-          href: defaultAppHome(session.user.role),
-          label: session.user.role === 'biller' ? 'Billing' : 'My time',
+          current: 'Profile',
+          href: '/app',
+          label: 'My time',
         }}
-        description="Manage how your account appears, its default timezone, and sign-in security."
-        title="Profile & security"
+        description="Your name, default timezone, and password."
+        title="Profile"
       />
 
       {saved && (
@@ -67,39 +49,13 @@ export default async function ProfilePage({
           Password reset complete. Other browser sessions were revoked.
         </div>
       )}
-      {params.xero === 'linked' && (
-        <div aria-live="polite" className="notice notice-success" role="status">
-          Xero identity linked. The business accounting connection was not changed.
-        </div>
-      )}
-      {params.xero && params.xero !== 'linked' && (
-        <div aria-live="polite" className="notice notice-warning" role="alert">
-          Xero identity could not be linked. Your existing login methods are unchanged.
-        </div>
-      )}
-      {params.security === 'identity-unlinked' && (
-        <div aria-live="polite" className="notice notice-success" role="status">
-          Xero identity unlinked and its local sessions revoked.
-        </div>
-      )}
-      {params.security && params.security !== 'identity-unlinked' && (
-        <div aria-live="polite" className="notice notice-warning" role="alert">
-          The security change could not be completed.
-        </div>
-      )}
-
       <section aria-label="Account access" className="panel account-summary">
         <dl className="detail-list">
           <div>
             <dt>Email</dt>
             <dd>{session.user.email}</dd>
           </div>
-          <div>
-            <dt>Role</dt>
-            <dd className="text-capitalize">{session.user.role}</dd>
-          </div>
         </dl>
-        <p>Email addresses and roles are managed by an administrator.</p>
       </section>
 
       <ProfileForm
@@ -110,15 +66,9 @@ export default async function ProfilePage({
 
       <section aria-labelledby="account-security-heading" className="account-security-stack">
         <div className="account-section-heading">
-          <h2 id="account-security-heading">Security</h2>
-          <p>Manage your password, linked sign-in methods, and active external sessions.</p>
+          <h2 id="account-security-heading">Password</h2>
         </div>
         <PasswordChangeForm />
-        <IdentitySecurityPanel
-          canLink={identityFeatures.loginEnabled && identityFeatures.linkingEnabled}
-          configured={identityFeatures.configured}
-          security={security}
-        />
       </section>
     </div>
   )

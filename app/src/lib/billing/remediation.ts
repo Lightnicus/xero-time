@@ -2,6 +2,7 @@ import type { BillingBlocker, BillingBlockerCode, BlockedBillingEntry } from './
 
 const BILLING_SETUP_BLOCKER_CODES = [
   'xero-not-connected',
+  'xero-reconnect-required',
   'missing-xero-capability',
   'missing-account',
   'invalid-account',
@@ -48,6 +49,7 @@ const blockerLabels: Record<BillingBlockerCode, string> = {
   'unmapped-contact': 'Customer is not mapped to Xero',
   'unsupported-currency': 'Currency is not enabled in Xero',
   'xero-not-connected': 'Connect Xero',
+  'xero-reconnect-required': 'Reconnect Xero',
 }
 
 const blockerActionLabels: Partial<Record<BillingBlockerCode, string>> = {
@@ -69,6 +71,7 @@ const blockerActionLabels: Partial<Record<BillingBlockerCode, string>> = {
   'unmapped-contact': 'Map customer',
   'unsupported-currency': 'Refresh Xero data',
   'xero-not-connected': 'Connect Xero',
+  'xero-reconnect-required': 'Reconnect Xero',
 }
 
 const setupPresentation: Record<
@@ -120,6 +123,13 @@ const setupPresentation: Record<
     description: 'Connect a Xero organisation before invoice previews can be created.',
     title: 'Xero connection required',
   },
+  'xero-reconnect-required': {
+    action: 'xero-settings',
+    actionLabel: 'Reconnect Xero',
+    description:
+      'Xero stopped accepting the saved connection. Reconnect the same organisation before invoices can be created.',
+    title: 'Xero needs to be reconnected',
+  },
 }
 
 const setupCodes = new Set<BillingBlockerCode>(BILLING_SETUP_BLOCKER_CODES)
@@ -142,7 +152,17 @@ export const isBillingSetupBlocker = (
 export const xeroConnectionBlockers = (
   tenantID: string | null,
   capabilityAvailable: boolean,
+  reconnectRequired = false,
 ): BillingBlocker[] => {
+  if (!tenantID && reconnectRequired) {
+    return [
+      {
+        code: 'xero-reconnect-required',
+        message: 'Reconnect the Xero accounting organisation.',
+        remediationHref: '/app/settings/xero',
+      },
+    ]
+  }
   if (!tenantID) {
     return [
       {

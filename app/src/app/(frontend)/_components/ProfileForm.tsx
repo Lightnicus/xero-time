@@ -43,7 +43,7 @@ export function ProfileForm({ initialDisplayName, initialTimezone, timezones }: 
       </div>
 
       <div className="account-section-heading">
-        <h2 id="profile-details-heading">Profile</h2>
+        <h2 id="profile-details-heading">Name and timezone</h2>
         <p>Choose your display name and the timezone used for new entries and date views.</p>
       </div>
 

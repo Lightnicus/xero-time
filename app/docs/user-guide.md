@@ -1,23 +1,37 @@
 # User and operator guide
 
+Project Time has one user: you. Once signed in, you can use every screen, including Payload Admin from **Advanced → Payload Admin**.
+
+## Sign in
+
+Sign in with your email and password. If you forget the password, use **Forgot your password?** on the sign-in page; a reset email is sent only when Resend email delivery is configured. Change your display name, default timezone, or password under **Profile**. Changing the password signs out your other browser sessions.
+
 ## Record time
 
 Choose **Add time**, a project, and a complete description. For **Hours and minutes**, select the work date/timezone and whole values. For **Start and finish**, enter both local values; the form shows current UTC offset and calculated duration and rejects ambiguous/nonexistent DST times. Entries are completed work only—V1 has no timer. Change the profile timezone to alter future defaults; existing entries retain their snapshot.
 
-Unbilled entries can be edited, duplicated, or deleted. Reserved/exported entries show why they are locked; privileged users can open the export. Owners/admins must supply an audit reason for corrections and deletion.
-
-## Invitations and login
-
-Open the single-use invitation link and choose email/password or, when enabled, Xero identity. Xero acceptance must use the invitation-bound flow and the same verified normalized email. Xero never assigns the role. Password reset remains available independently. In Profile, link/unlink Xero with recent password confirmation and manage local external sessions; unlinking does not disconnect business accounting.
+Unbilled entries can be edited, duplicated, or deleted. Reserved or exported entries are locked and show why; you can open the export from the entry. To change locked time, release it from its export first.
 
 ## Customers, projects, and rates
 
-Owners/admins create local customers/projects in Admin. Customer currency and project currency must match. Use Customer mappings to search/select by Xero ContactID, import a Xero contact, link a local customer, or explicitly create one. Mapping is never inferred from a name. Remapping requires reason/confirmation. After refreshing Xero reference data, use Projects to select an active Xero sales item for every billable project; that item fills Xero's Item column on future invoice lines. A project rate change affects new entries; use Projects to preview/confirm retrospective recalculation of unbilled snapshots only.
+Create local customers and projects in Payload Admin. Customer currency and project currency must match. Use **Customer billing** to search for a Xero contact, import it, link a local customer, or explicitly create one. Mapping is never inferred from a name. Changing a mapping asks you to confirm that historical invoices keep their original contact. After refreshing Xero reference data, use **Project billing** to select an active Xero sales item for every billable project; that item fills Xero's Item column on future invoice lines. A project rate change affects new entries; use **Project billing** to preview and confirm a recalculation of unbilled snapshots only. Moving a project to another customer moves its unbilled time with it; reserved and invoiced time stays with the customer it was billed to. Creating a Xero contact twice in quick succession is refused, and a retry after an uncertain result links the contact Xero already created instead of making a second one.
 
 ## Billing and export
 
-Owners/admins/billers filter eligible and blocked time, select rows/page/all matching/all uninvoiced, and review exact counts/minutes/value/invoice groups. Preview always shows every one-entry/one-line description, quantity, rate, tax, total, dates, contact, currency, and reference. Confirmation rejects changed data.
+On the **Billing queue**, filter eligible and blocked time, select rows, a page, all matching, or all uninvoiced time, and review exact counts, minutes, value, and invoice groups. Preview always shows every one-entry/one-line description, quantity, rate, tax, total, dates, contact, currency, and reference. Confirmation rejects changed data.
 
-Background returns after durable dispatch. **Wait for Xero** uses the same job and may continue in background. Export detail shows state/history and supports safe cancel, status refresh, guided Xero recovery, or a linked replacement. For a verified app-created Xero DRAFT, an owner/admin can delete the exact draft and atomically release all mapped time back to unbilled. A draft that does not match the saved export remains locked; the page explains how to resolve it in Xero and check again. Mapping/configuration blockers must be corrected and previewed again.
+Background returns after durable dispatch. **Wait for Xero** uses the same job and may continue in background. Export detail shows state/history and supports safe cancel, status refresh, guided Xero recovery, or a linked replacement. For a verified app-created Xero DRAFT, you can delete the exact draft and atomically release all mapped time back to unbilled. A draft that does not match the saved export remains locked; the page explains how to resolve it in Xero and check again. Mapping/configuration blockers must be corrected and previewed again. Line amounts and tax are rounded to cents on each line, as Xero does, so preview totals match the invoice in Xero; for tax-inclusive invoices the subtotal excludes tax. If Xero keeps failing, an export stops after 8 automatic retries in a row (waiting for a reconnect does not count), keeps its time reserved, and shows **Request recovery** once you have fixed the cause.
 
-Only owner/admin can release a remotely verified deleted/voided invoice. The full invoice's entries return to the normal queue and replacement preserves lineage.
+You can release an invoice only after Xero confirms it is deleted or voided. The full invoice's entries return to the normal queue and replacement preserves lineage.
+
+## When the Xero connection stops working
+
+Xero can stop accepting the saved connection: someone disconnects the app from Xero's Connected Apps page, the Xero user who connected it loses access, the connection goes unused for 60 days, or the accounting app's client secret is regenerated. When that happens, the connection shows **Action required**, every page shows a banner saying Xero needs to be reconnected, and you get one email about it (when Resend email delivery is configured). The connection is checked every day, even while processing is paused, so leaving the app idle does not let it lapse.
+
+Nothing is lost. Exports that were waiting to go to Xero show **Waiting for Xero to be reconnected**, keep their time reserved, and resume automatically once Xero is reconnected. New exports are blocked with a **Reconnect Xero** setup issue until then.
+
+Fix it from **Settings → Xero accounting**, which explains the cause and the steps:
+
+1. If Xero rejected the client ID or secret, generate a new secret for the accounting app in the Xero developer portal and save it under **Accounting OAuth application**.
+2. Sign in to Xero as a user who can create invoices in the pinned organisation. It does not have to be the Xero user who connected it before.
+3. Select **Reconnect Xero** and choose the same organisation in Xero.

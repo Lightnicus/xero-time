@@ -1,6 +1,5 @@
 import 'server-only'
 
-import { hasActiveRole } from '@/access/roles'
 import { recordAuditEvent } from '@/lib/audit/service'
 import { isRecord } from '@/lib/domain/validation'
 import type { AppSession } from '@/lib/member-app/session'
@@ -353,12 +352,6 @@ export async function refreshXeroReferenceData(
     token?: Awaited<ReturnType<typeof getValidAccountingAccessToken>>
   } = {},
 ): Promise<{ capabilityAvailable: boolean; resourceCount: number }> {
-  if (!hasActiveRole(session.user, ['owner', 'admin'])) {
-    throw new AccountingIntegrationError(
-      'forbidden',
-      'Only an owner or administrator can refresh Xero reference data.',
-    )
-  }
   const runtime = overrides.client ? null : await resolveAccountingRuntime(session)
   const client = overrides.client ?? runtime?.client
   if (!client) {
@@ -386,23 +379,20 @@ const refreshWithClient = async (
   client: XeroAccountingClient,
   machineActor?: string,
 ): Promise<{ capabilityAvailable: boolean; resourceCount: number }> => {
-  const [
-    organisation,
-    organisationActions,
-    accounts,
-    taxRates,
-    currencies,
-    trackingCategories,
-    items,
-  ] = await Promise.all([
-    client.accountingGet(accessToken, tenantID, 'Organisation'),
-    client.accountingGet(accessToken, tenantID, 'Organisation/Actions'),
-    client.accountingGet(accessToken, tenantID, 'Accounts'),
-    client.accountingGet(accessToken, tenantID, 'TaxRates'),
-    client.accountingGet(accessToken, tenantID, 'Currencies'),
-    client.accountingGet(accessToken, tenantID, 'TrackingCategories'),
-    client.accountingGet(accessToken, tenantID, 'Items'),
+  // Xero allows at most five concurrent calls per organisation; three at a time leaves room
+  // for an export or webhook worker running at the same time.
+  const get = (path: string) => client.accountingGet(accessToken, tenantID, path)
+  const [organisation, organisationActions, accounts] = await Promise.all([
+    get('Organisation'),
+    get('Organisation/Actions'),
+    get('Accounts'),
   ])
+  const [taxRates, currencies, trackingCategories] = await Promise.all([
+    get('TaxRates'),
+    get('Currencies'),
+    get('TrackingCategories'),
+  ])
+  const items = await get('Items')
   const resources = [
     ...parseOrganisation(organisation.data, tenantID),
     ...parseOrganisationActions(organisationActions.data),

@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
-import { hasActiveRole } from '@/access/roles'
 import { MetricStrip } from '@/app/(frontend)/_components/MetricStrip'
 import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import { PendingSubmitButton } from '@/app/(frontend)/_components/PendingControls'
@@ -30,13 +29,36 @@ const currencyTotalsLabel = (totals: Map<string, number>): string =>
     .map(([currency, amountScaled]) => formatScaledAmount(amountScaled, currency))
     .join(' · ')
 
+/**
+ * Maps the expected ways a saved selection can stop producing a preview (entries billed, edited or
+ * blocked since selection; a line or invoice beyond Xero's limits) to a billing-queue status.
+ * Anything else is unexpected and goes to the error page.
+ */
+const previewFailureStatus = (error: unknown): string | null => {
+  const message = error instanceof Error ? error.message : ''
+  if (
+    /no longer eligible|no eligible entries|reference sequence is stale|inconsistent customer reference/i.test(
+      message,
+    )
+  ) {
+    return 'stale-selection'
+  }
+  if (/Xero permits \d+\. No text was truncated/i.test(message)) return 'preview-line-too-long'
+  if (/narrow the selection to \d+ or fewer/i.test(message)) return 'preview-too-many-lines'
+  if (
+    /select at least one time entry|invalid entry ID|supported billing selection/i.test(message)
+  ) {
+    return 'invalid-selection'
+  }
+  return null
+}
+
 export default async function BillingPreviewPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const session = await requireAppSession()
-  if (!hasActiveRole(session.user, ['owner', 'admin', 'biller'])) redirect('/app')
   const params = await searchParams
   const token = typeof params.selection === 'string' ? params.selection : ''
   let envelope
@@ -45,11 +67,18 @@ export default async function BillingPreviewPage({
   } catch {
     redirect('/app/billing?status=invalid-selection')
   }
-  const preview = await createBillingPreview(session, {
-    batchReference: randomUUID().toUpperCase(),
-    invoiceDate: envelope.invoiceDate,
-    selection: envelope.selection,
-  })
+  let preview
+  try {
+    preview = await createBillingPreview(session, {
+      batchReference: randomUUID().toUpperCase(),
+      invoiceDate: envelope.invoiceDate,
+      selection: envelope.selection,
+    })
+  } catch (error) {
+    const status = previewFailureStatus(error)
+    if (!status) throw error
+    redirect(`/app/billing?status=${status}`)
+  }
   const settings = await session.payload.findGlobal({
     slug: 'billing-settings',
     depth: 0,
@@ -62,7 +91,6 @@ export default async function BillingPreviewPage({
     preview.summary.invoiceCount > settings.maxWaitInvoices ||
     preview.summary.entryCount > settings.maxWaitLines ||
     settings.waitForResultEnabled !== true
-  const canOverride = session.user.role !== 'biller' || settings.allowBillerModeOverride === true
   const customerCount = new Set(preview.invoices.map((invoice) => invoice.contactID)).size
   const invoiceDates = new Set(preview.invoices.map((invoice) => invoice.invoiceDate))
   const dueDates = new Set(preview.invoices.map((invoice) => invoice.dueDate))
@@ -284,26 +312,18 @@ export default async function BillingPreviewPage({
               <span>Execution mode</span>
               <select
                 defaultValue={forcedBackground ? 'background' : configuredMode}
-                disabled={!canOverride || forcedBackground}
+                disabled={forcedBackground}
                 name="requestedMode"
               >
                 <option value="background">Background</option>
                 <option value="wait-for-result">Wait briefly for Xero</option>
               </select>
-              {(!canOverride || forcedBackground) && (
-                <input
-                  name="requestedMode"
-                  type="hidden"
-                  value={forcedBackground ? 'background' : configuredMode}
-                />
+              {forcedBackground && (
+                // Submit the configured mode, not the forced fallback: the server applies the
+                // background fallback itself.
+                <input name="requestedMode" type="hidden" value={configuredMode} />
               )}
             </label>
-            {canOverride && (
-              <label className="field">
-                <span>Override reason (required only when changing the configured mode)</span>
-                <input maxLength={500} minLength={10} name="modeOverrideReason" />
-              </label>
-            )}
           </div>
         </details>
         <div className="billing-confirmation-actions">

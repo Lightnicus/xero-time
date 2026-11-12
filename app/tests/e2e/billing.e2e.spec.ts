@@ -97,9 +97,7 @@ test.describe.serial('Billing application', () => {
     await expect(page.getByRole('status')).toContainText('Invoice reference settings saved')
   })
 
-  test('previews and confirms a reasoned recalculation of unbilled project rates', async ({
-    page,
-  }) => {
+  test('previews and confirms a recalculation of unbilled project rates', async ({ page }) => {
     await signIn(page)
     await page.goto('/app/settings/projects')
 
@@ -111,10 +109,7 @@ test.describe.serial('Billing application', () => {
     ).toBeVisible()
     await expect(page.getByText('2 unbilled entries have a different snapshot rate.')).toBeVisible()
 
-    await page
-      .locator('#recalculation-preview')
-      .getByLabel('Commercial reason')
-      .fill('Apply the approved browser-test project rate.')
+    await expect(page.locator('#recalculation-preview').getByLabel(/reason/i)).toHaveCount(0)
     await page.getByLabel('Type RECALCULATE').fill('RECALCULATE')
     await page.getByRole('button', { name: 'Recalculate unbilled snapshots' }).click()
 
@@ -258,9 +253,7 @@ test.describe.serial('Billing application', () => {
     await editor
       .getByLabel('Description')
       .fill('Billing discovery workshop revised for stale preview')
-    await editor
-      .getByRole('textbox', { name: 'Reason', exact: true })
-      .fill('Verify stale billing preview rejection safely.')
+    await expect(editor.getByRole('textbox', { name: 'Reason', exact: true })).toHaveCount(0)
     await editor.getByRole('button', { name: 'Save changes' }).click()
     await expect(editor).toHaveURL(/\/app\?updated=1$/)
     await editor.close()

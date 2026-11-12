@@ -1,7 +1,5 @@
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
 
-import { hasActiveRole } from '@/access/roles'
 import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import {
   PendingNavigationForm,
@@ -48,7 +46,6 @@ export default async function CustomerMappingPage({
   searchParams: Promise<Params>
 }) {
   const session = await requireAppSession()
-  if (!hasActiveRole(session.user, ['owner', 'admin'])) redirect('/app')
   const params = await searchParams
   const query = typeof params.query === 'string' ? params.query.trim() : ''
   const page = typeof params.page === 'string' ? Number(params.page) : 1
@@ -291,10 +288,6 @@ export default async function CustomerMappingPage({
                           </option>
                         ))}
                       </select>
-                    </label>
-                    <label className="field">
-                      <span>Remap reason</span>
-                      <textarea maxLength={1_000} minLength={10} name="reason" required rows={2} />
                     </label>
                     <label className="confirmation-field">
                       <input name="confirmHistoricalChange" required type="checkbox" value="yes" />

@@ -3,17 +3,17 @@ import { test, expect, type Page } from '@playwright/test'
 import {
   cleanupTestUser,
   issueE2EPasswordResetToken,
-  memberAppUser,
   resetE2ERateLimits,
-  seedMemberAppFixture,
-  seedMemberTimeEntries,
+  seedTimeAppFixture,
+  seedTimeEntries,
+  testUser,
 } from '../helpers/seedUser'
 
 const datedTimeView = '/app?view=day&date=2026-07-18'
 
 const openAccountMenu = async (
   page: Page,
-  displayName: string = memberAppUser.displayName,
+  displayName: string = testUser.displayName,
 ): Promise<void> => {
   const accountTrigger = page.getByRole('button', { name: displayName })
 
@@ -23,15 +23,15 @@ const openAccountMenu = async (
 
 const openProfileFromAccount = async (
   page: Page,
-  displayName: string = memberAppUser.displayName,
+  displayName: string = testUser.displayName,
 ): Promise<void> => {
   await openAccountMenu(page, displayName)
-  await page.getByRole('link', { name: 'Profile & security' }).click()
+  await page.getByRole('link', { name: 'Profile', exact: true }).click()
 }
 
 const signOutFromAccount = async (
   page: Page,
-  displayName: string = memberAppUser.displayName,
+  displayName: string = testUser.displayName,
 ): Promise<void> => {
   await openAccountMenu(page, displayName)
   await page.getByRole('button', { name: 'Sign out' }).click()
@@ -41,9 +41,9 @@ const openTimezoneDisclosure = async (page: Page): Promise<void> => {
   await page.getByText('Change timezone', { exact: true }).click()
 }
 
-test.describe.serial('Member time application', () => {
+test.describe.serial('Time application', () => {
   test.beforeAll(async () => {
-    await seedMemberAppFixture()
+    await seedTimeAppFixture()
   })
 
   test.afterAll(async () => {
@@ -62,7 +62,7 @@ test.describe.serial('Member time application', () => {
     await expect(page).toHaveURL(/\/login\?next=\/app$/)
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible()
 
-    await page.getByLabel('Email address').fill(memberAppUser.email)
+    await page.getByLabel('Email address').fill(testUser.email)
     await page.getByLabel('Password').fill('wrong-password-value')
     await page.getByRole('button', { name: 'Sign in' }).click()
 
@@ -81,7 +81,7 @@ test.describe.serial('Member time application', () => {
       await route.continue()
     })
     await page.goto('/login')
-    await page.getByLabel('Email address').fill(memberAppUser.email)
+    await page.getByLabel('Email address').fill(testUser.email)
     await page.getByLabel('Password').fill('wrong-password-value')
     const submit = page.locator('form button[type="submit"]')
 
@@ -112,7 +112,7 @@ test.describe.serial('Member time application', () => {
   test('recovers a password and replaces the old credential', async ({ page }) => {
     test.setTimeout(60_000)
     const recoveredPassword = 'eight888'
-    const resetToken = await issueE2EPasswordResetToken(memberAppUser.email)
+    const resetToken = await issueE2EPasswordResetToken(testUser.email)
     await page.goto(`/reset-password?token=${resetToken}`)
     await expect(page.getByRole('heading', { name: 'Choose a new password' })).toBeVisible()
     await page.getByLabel(/^New password/).fill(recoveredPassword)
@@ -121,29 +121,27 @@ test.describe.serial('Member time application', () => {
 
     await expect(page).toHaveURL(/\/app\/profile\?password=reset$/)
     await signOutFromAccount(page)
-    await page.getByLabel('Email address').fill(memberAppUser.email)
-    await page.getByLabel('Password').fill(memberAppUser.password)
+    await page.getByLabel('Email address').fill(testUser.email)
+    await page.getByLabel('Password').fill(testUser.password)
     await page.getByRole('button', { name: 'Sign in' }).click()
     await expect(page.getByText('The email or password is incorrect.')).toBeVisible()
 
-    await page.getByLabel('Email address').fill(memberAppUser.email)
+    await page.getByLabel('Email address').fill(testUser.email)
     await page.getByLabel('Password').fill(recoveredPassword)
     await page.getByRole('button', { name: 'Sign in' }).click()
     await expect(page).toHaveURL(/\/app$/)
     await openProfileFromAccount(page)
     await page.getByLabel('Current password').fill(recoveredPassword)
-    await page.getByLabel('New password', { exact: true }).fill(memberAppUser.password)
-    await page.getByLabel('Confirm new password').fill(memberAppUser.password)
+    await page.getByLabel('New password', { exact: true }).fill(testUser.password)
+    await page.getByLabel('Confirm new password').fill(testUser.password)
     await page.getByRole('button', { name: 'Change password' }).click()
     await expect(page).toHaveURL(/\/app\/profile\?password=changed$/)
   })
 
-  test('logs in a member with a secure cookie and supports the manual time lifecycle', async ({
-    page,
-  }) => {
+  test('logs in with a secure cookie and supports the manual time lifecycle', async ({ page }) => {
     await page.goto('/login')
-    await page.getByLabel('Email address').fill(memberAppUser.email)
-    await page.getByLabel('Password').fill(memberAppUser.password)
+    await page.getByLabel('Email address').fill(testUser.email)
+    await page.getByLabel('Password').fill(testUser.password)
     await page.getByRole('button', { name: 'Sign in' }).click()
 
     await expect(page).toHaveURL(/\/app$/)
@@ -197,8 +195,8 @@ test.describe.serial('Member time application', () => {
 
   test('records a start/finish range and recovers from a daylight-saving gap', async ({ page }) => {
     await page.goto('/login')
-    await page.getByLabel('Email address').fill(memberAppUser.email)
-    await page.getByLabel('Password').fill(memberAppUser.password)
+    await page.getByLabel('Email address').fill(testUser.email)
+    await page.getByLabel('Password').fill(testUser.password)
     await page.getByRole('button', { name: 'Sign in' }).click()
 
     await page.getByRole('link', { name: 'Add time' }).first().click()
@@ -230,8 +228,8 @@ test.describe.serial('Member time application', () => {
 
   test('duplicates an unlocked entry as a separate reviewed copy', async ({ page }) => {
     await page.goto('/login')
-    await page.getByLabel('Email address').fill(memberAppUser.email)
-    await page.getByLabel('Password').fill(memberAppUser.password)
+    await page.getByLabel('Email address').fill(testUser.email)
+    await page.getByLabel('Password').fill(testUser.password)
     await page.getByRole('button', { name: 'Sign in' }).click()
     await expect(page).toHaveURL(/\/app$/)
 
@@ -283,17 +281,15 @@ test.describe.serial('Member time application', () => {
     await expect(page.getByText('Worked through a timezone-sensitive report')).toBeVisible()
   })
 
-  test('updates member profile defaults without changing an existing entry timezone', async ({
-    page,
-  }) => {
+  test('updates profile defaults without changing an existing entry timezone', async ({ page }) => {
     await page.goto('/login')
-    await page.getByLabel('Email address').fill(memberAppUser.email)
-    await page.getByLabel('Password').fill(memberAppUser.password)
+    await page.getByLabel('Email address').fill(testUser.email)
+    await page.getByLabel('Password').fill(testUser.password)
     await page.getByRole('button', { name: 'Sign in' }).click()
 
     await openProfileFromAccount(page)
-    await expect(page.getByText(memberAppUser.email)).toBeVisible()
-    await page.getByLabel('Display name').fill('Updated Time Member')
+    await expect(page.getByText(testUser.email)).toBeVisible()
+    await page.getByLabel('Display name').fill('Updated Time User')
     await page.locator('#profileTimezone').fill('Mars/Olympus')
     await page.getByRole('button', { name: 'Save profile' }).click()
     await expect(page.getByText('Select a valid IANA timezone.')).toBeVisible()
@@ -303,7 +299,7 @@ test.describe.serial('Member time application', () => {
 
     await expect(page).toHaveURL(/\/app\/profile\?saved=1$/)
     await expect(page.getByText('Profile saved.')).toBeVisible()
-    await expect(page.locator('.account-copy strong')).toHaveText('Updated Time Member')
+    await expect(page.locator('.account-copy strong')).toHaveText('Updated Time User')
 
     await page.getByRole('link', { name: 'Add time' }).first().click()
     await openTimezoneDisclosure(page)
@@ -319,19 +315,19 @@ test.describe.serial('Member time application', () => {
     await openTimezoneDisclosure(page)
     await expect(page.locator('#timezone')).toHaveValue('Pacific/Auckland')
 
-    await openProfileFromAccount(page, 'Updated Time Member')
-    await page.getByLabel('Display name').fill(memberAppUser.displayName)
-    await page.locator('#profileTimezone').fill(memberAppUser.timezone)
+    await openProfileFromAccount(page, 'Updated Time User')
+    await page.getByLabel('Display name').fill(testUser.displayName)
+    await page.locator('#profileTimezone').fill(testUser.timezone)
     await page.getByRole('button', { name: 'Save profile' }).click()
     await expect(page.getByText('Profile saved.')).toBeVisible()
   })
 
-  test('keeps older member entries accessible through pagination', async ({ page }) => {
-    await seedMemberTimeEntries(25)
+  test('keeps older entries accessible through pagination', async ({ page }) => {
+    await seedTimeEntries(25)
 
     await page.goto('/login')
-    await page.getByLabel('Email address').fill(memberAppUser.email)
-    await page.getByLabel('Password').fill(memberAppUser.password)
+    await page.getByLabel('Email address').fill(testUser.email)
+    await page.getByLabel('Password').fill(testUser.password)
     await page.getByRole('button', { name: 'Sign in' }).click()
     await expect(page).toHaveURL(/\/app$/)
 
@@ -352,8 +348,8 @@ test.describe.serial('Member time application', () => {
 
   test('filters a day and reports complete daily and weekly totals', async ({ page }) => {
     await page.goto('/login')
-    await page.getByLabel('Email address').fill(memberAppUser.email)
-    await page.getByLabel('Password').fill(memberAppUser.password)
+    await page.getByLabel('Email address').fill(testUser.email)
+    await page.getByLabel('Password').fill(testUser.password)
     await page.getByRole('button', { name: 'Sign in' }).click()
 
     await page.getByText('More filters', { exact: true }).click()
@@ -390,13 +386,13 @@ test.describe.serial('Member time application', () => {
     await expect(page.getByRole('heading', { name: 'My time' })).toBeVisible()
   })
 
-  test('keeps the critical member flow usable at a phone viewport and by keyboard', async ({
+  test('keeps the critical time flow usable at a phone viewport and by keyboard', async ({
     page,
   }) => {
     await page.setViewportSize({ height: 844, width: 390 })
     await page.goto('/login')
-    await page.getByLabel('Email address').fill(memberAppUser.email)
-    await page.getByLabel('Password').fill(memberAppUser.password)
+    await page.getByLabel('Email address').fill(testUser.email)
+    await page.getByLabel('Password').fill(testUser.password)
     await page.getByRole('button', { name: 'Sign in' }).press('Enter')
     await expect(page).toHaveURL(/\/app$/)
 
@@ -418,14 +414,14 @@ test.describe.serial('Member time application', () => {
   test('changes a password, revokes the old credential, and can restore the fixture password', async ({
     page,
   }) => {
-    const replacementPassword = 'replacement-member-password-123!'
+    const replacementPassword = 'replacement-user-password-123!'
     await page.goto('/login')
-    await page.getByLabel('Email address').fill(memberAppUser.email)
-    await page.getByLabel('Password').fill(memberAppUser.password)
+    await page.getByLabel('Email address').fill(testUser.email)
+    await page.getByLabel('Password').fill(testUser.password)
     await page.getByRole('button', { name: 'Sign in' }).click()
     await openProfileFromAccount(page)
 
-    await page.getByLabel('Current password').fill(memberAppUser.password)
+    await page.getByLabel('Current password').fill(testUser.password)
     await page.getByLabel('New password', { exact: true }).fill(replacementPassword)
     await page.getByLabel('Confirm new password').fill(replacementPassword)
     await page.getByRole('button', { name: 'Change password' }).click()
@@ -433,40 +429,29 @@ test.describe.serial('Member time application', () => {
     await expect(page.getByText('Other browser sessions were revoked.')).toBeVisible()
 
     await signOutFromAccount(page)
-    await page.getByLabel('Email address').fill(memberAppUser.email)
-    await page.getByLabel('Password').fill(memberAppUser.password)
+    await page.getByLabel('Email address').fill(testUser.email)
+    await page.getByLabel('Password').fill(testUser.password)
     await page.getByRole('button', { name: 'Sign in' }).click()
     await expect(page.getByText('The email or password is incorrect.')).toBeVisible()
 
-    await page.getByLabel('Email address').fill(memberAppUser.email)
+    await page.getByLabel('Email address').fill(testUser.email)
     await page.getByLabel('Password').fill(replacementPassword)
     await page.getByRole('button', { name: 'Sign in' }).click()
     await expect(page).toHaveURL(/\/app$/)
     await openProfileFromAccount(page)
     await page.getByLabel('Current password').fill(replacementPassword)
-    await page.getByLabel('New password', { exact: true }).fill(memberAppUser.password)
-    await page.getByLabel('Confirm new password').fill(memberAppUser.password)
+    await page.getByLabel('New password', { exact: true }).fill(testUser.password)
+    await page.getByLabel('Confirm new password').fill(testUser.password)
     await page.getByRole('button', { name: 'Change password' }).click()
     await expect(page).toHaveURL(/\/app\/profile\?password=changed$/)
   })
 
   test('logs out and revokes access to protected pages', async ({ page }) => {
     await page.goto('/login')
-    await page.getByLabel('Email address').fill(memberAppUser.email)
-    await page.getByLabel('Password').fill(memberAppUser.password)
+    await page.getByLabel('Email address').fill(testUser.email)
+    await page.getByLabel('Password').fill(testUser.password)
     await page.getByRole('button', { name: 'Sign in' }).click()
     await expect(page).toHaveURL(/\/app$/)
-
-    const cookieBeforeDeniedRoute = (await page.context().cookies()).find(
-      (cookie) => cookie.name === 'payload-token',
-    )
-    expect(cookieBeforeDeniedRoute).toBeDefined()
-    await page.goto('/app/settings/xero')
-    const cookieAfterDeniedRoute = (await page.context().cookies()).find(
-      (cookie) => cookie.name === 'payload-token',
-    )
-    expect(cookieAfterDeniedRoute).toBeDefined()
-    await expect(page).toHaveURL(/^http:\/\/localhost:3101\/app$/)
 
     await signOutFromAccount(page)
 
@@ -477,8 +462,8 @@ test.describe.serial('Member time application', () => {
 
   test('rejects a protocol-relative post-login destination', async ({ page }) => {
     await page.goto('/login?next=//example.com')
-    await page.getByLabel('Email address').fill(memberAppUser.email)
-    await page.getByLabel('Password').fill(memberAppUser.password)
+    await page.getByLabel('Email address').fill(testUser.email)
+    await page.getByLabel('Password').fill(testUser.password)
     await page.getByRole('button', { name: 'Sign in' }).click()
 
     await expect(page).toHaveURL(/\/app$/)

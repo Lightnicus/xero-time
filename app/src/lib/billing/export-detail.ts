@@ -1,4 +1,3 @@
-import type { UserRole } from '@/access/roles'
 import type { InvoiceExport } from '@/payload-types'
 
 export type ExportDetailDocument = Pick<
@@ -19,20 +18,7 @@ const REPLACEMENT_APPROVAL_ERROR = 'confirmed-absent-replacement-approval-requir
 
 export const exportDetailActionAvailability = (
   document: ExportDetailDocument,
-  role: UserRole | null | undefined,
 ): ExportDetailActionAvailability => {
-  const isOwnerAdmin = role === 'owner' || role === 'admin'
-  if (!isOwnerAdmin) {
-    return {
-      canAuthorizeReplacement: false,
-      canDeleteDraft: false,
-      canRefresh: false,
-      canRequestRecovery: false,
-      recoveryInProgress: false,
-      showDraftRecovery: false,
-    }
-  }
-
   const canRefresh = Boolean(document.xeroInvoiceId)
   const replacementApprovalRequired = document.lastErrorCode === REPLACEMENT_APPROVAL_ERROR
   const remoteInvoiceIsClosed =

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { exportStateLabel, xeroInvoiceStatusLabel } from '@/lib/billing/export-presentation'
+import {
+  exportStateLabel,
+  isAwaitingXeroReconnect,
+  xeroInvoiceStatusLabel,
+} from '@/lib/billing/export-presentation'
 import type { InvoiceExport } from '@/payload-types'
 
 describe('export status presentation', () => {
@@ -17,6 +21,15 @@ describe('export status presentation', () => {
     ['manual-review', 'Review needed'],
   ] satisfies Array<[InvoiceExport['state'], string]>)('labels %s as %s', (state, label) => {
     expect(exportStateLabel(state)).toBe(label)
+  })
+
+  it('labels an export paused for a Xero reconnect as waiting', () => {
+    expect(exportStateLabel('retry-wait', 'xero-reconnect-required')).toBe('Waiting for Xero')
+    expect(exportStateLabel('reconciling', 'xero-reconnect-required')).toBe('Waiting for Xero')
+    expect(exportStateLabel('retry-wait', 'accounting-post-http-500')).toBe('Retry scheduled')
+    expect(
+      isAwaitingXeroReconnect({ lastErrorCode: 'xero-reconnect-required', state: 'succeeded' }),
+    ).toBe(false)
   })
 
   it.each([

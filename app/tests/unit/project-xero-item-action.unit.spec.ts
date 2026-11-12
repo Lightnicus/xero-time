@@ -33,11 +33,9 @@ const form = (values: Record<string, string>): FormData => {
   return result
 }
 
-const owner = {
-  active: true,
+const user = {
   collection: 'users',
-  id: 'owner-1',
-  role: 'owner',
+  id: 'user-1',
 }
 
 describe('project Xero item action', () => {
@@ -47,7 +45,7 @@ describe('project Xero item action', () => {
 
   it('rejects a missing item before issuing a protected write', async () => {
     const update = vi.fn()
-    mocks.requireAppSession.mockResolvedValue({ payload: { update }, req: {}, user: owner })
+    mocks.requireAppSession.mockResolvedValue({ payload: { update }, req: {}, user })
 
     await expect(
       updateProjectXeroItemAction(
@@ -62,13 +60,12 @@ describe('project Xero item action', () => {
 
   it('uses a system-owned write and redirects to the project resolve anchor', async () => {
     const update = vi.fn(async () => ({ id: 'project-1' }))
-    mocks.requireAppSession.mockResolvedValue({ payload: { update }, req: {}, user: owner })
+    mocks.requireAppSession.mockResolvedValue({ payload: { update }, req: {}, user })
 
     await expect(
       updateProjectXeroItemAction(
         { message: null },
         form({
-          commercialChangeReason: 'Apply the approved Xero services item.',
           confirmUnbilledImpact: 'yes',
           projectID: 'project-1',
           xeroItemId: ITEM_ID,
@@ -82,7 +79,6 @@ describe('project Xero item action', () => {
       expect.objectContaining({
         collection: 'projects',
         data: {
-          commercialChangeReason: 'Apply the approved Xero services item.',
           confirmUnbilledImpact: true,
           xeroItemId: ITEM_ID,
         },
@@ -93,24 +89,5 @@ describe('project Xero item action', () => {
     expect(mocks.enforceRateLimit).toHaveBeenCalledOnce()
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/app/settings/projects')
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/app/billing')
-  })
-
-  it('does not allow a member to invoke the protected project command', async () => {
-    const update = vi.fn()
-    mocks.requireAppSession.mockResolvedValue({
-      payload: { update },
-      req: {},
-      user: { ...owner, role: 'member' },
-    })
-
-    await expect(
-      updateProjectXeroItemAction(
-        { message: null },
-        form({ projectID: 'project-1', xeroItemId: ITEM_ID }),
-      ),
-    ).resolves.toEqual({
-      message: 'Only an owner or administrator can change project invoice items.',
-    })
-    expect(update).not.toHaveBeenCalled()
   })
 })

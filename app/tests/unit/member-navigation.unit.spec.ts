@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import {
-  defaultAppHome,
-  navigationForRole,
-  type MemberNavigation,
-} from '@/lib/member-app/navigation'
+import { appNavigation, type MemberNavigation } from '@/lib/member-app/navigation'
 
 const destinationLabels = (navigation: MemberNavigation) => ({
   account: navigation.accountDestinations.map((destination) => destination.label),
@@ -18,71 +14,22 @@ const destinationLabels = (navigation: MemberNavigation) => ({
 })
 
 describe('member app navigation', () => {
-  it('gives members only the time workflow and account destinations', () => {
-    expect(destinationLabels(navigationForRole('member'))).toEqual({
-      account: ['Profile & security', 'Sign out'],
-      groups: [],
-      primary: ['My time', 'Add time'],
-    })
-  })
-
-  it('makes billing the biller home and only visible workflow', () => {
-    const navigation = navigationForRole('biller')
-
-    expect(navigation.homeHref).toBe('/app/billing')
-    expect(destinationLabels(navigation)).toEqual({
-      account: ['Profile & security', 'Sign out'],
+  it('gives the single user every destination', () => {
+    expect(destinationLabels(appNavigation())).toEqual({
+      account: ['Profile', 'Sign out'],
       groups: [
-        {
-          destinations: ['Billing queue', 'Export history'],
-          label: 'Billing',
-        },
-      ],
-      primary: [],
-    })
-  })
-
-  it.each(['admin', 'owner'] as const)('gives %s users the complete grouped workflow', (role) => {
-    expect(destinationLabels(navigationForRole(role))).toEqual({
-      account: ['Profile & security', 'Sign out'],
-      groups: [
-        {
-          destinations: ['Billing queue', 'Export history'],
-          label: 'Billing',
-        },
-        {
-          destinations: ['People & invitations', 'Customer billing', 'Project billing'],
-          label: 'Manage',
-        },
-        {
-          destinations: ['Invoice defaults', 'Xero accounting'],
-          label: 'Settings',
-        },
-        {
-          destinations: ['Operations', 'Payload Admin'],
-          label: 'Advanced',
-        },
+        { destinations: ['Billing queue', 'Export history'], label: 'Billing' },
+        { destinations: ['Customer billing', 'Project billing'], label: 'Manage' },
+        { destinations: ['Invoice defaults', 'Xero accounting'], label: 'Settings' },
+        { destinations: ['Operations', 'Payload Admin'], label: 'Advanced' },
       ],
       primary: ['My time', 'Add time'],
     })
-  })
-
-  it('uses the expected default home for every role', () => {
-    expect({
-      admin: defaultAppHome('admin'),
-      biller: defaultAppHome('biller'),
-      member: defaultAppHome('member'),
-      owner: defaultAppHome('owner'),
-    }).toEqual({
-      admin: '/app',
-      biller: '/app/billing',
-      member: '/app',
-      owner: '/app',
-    })
+    expect(appNavigation().homeHref).toBe('/app')
   })
 
   it('keeps every route and the non-link account action explicit', () => {
-    const navigation = navigationForRole('owner')
+    const navigation = appNavigation()
     const hrefsByID = Object.fromEntries(
       [
         ...navigation.primaryDestinations,
@@ -106,7 +53,6 @@ describe('member app navigation', () => {
       'my-time': '/app',
       operations: '/app/operations',
       'payload-admin': '/admin',
-      people: '/app/settings/users',
       profile: '/app/profile',
       projects: '/app/settings/projects',
       'xero-accounting': '/app/settings/xero',
@@ -126,7 +72,7 @@ describe('member app navigation', () => {
   })
 
   it('is safe to pass across the server-client boundary', () => {
-    const navigation = navigationForRole('owner')
+    const navigation = appNavigation()
 
     expect(JSON.parse(JSON.stringify(navigation))).toEqual(navigation)
   })

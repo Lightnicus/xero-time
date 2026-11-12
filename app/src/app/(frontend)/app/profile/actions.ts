@@ -10,8 +10,6 @@ import { isValidIanaTimezone } from '@/lib/domain/validation'
 import { setPayloadSessionCookie } from '@/lib/member-app/auth-cookie'
 import { requireAppSession } from '@/lib/member-app/session'
 import { enforceRateLimit, rateLimitKey } from '@/lib/security/rate-limit'
-import { IdentityIntegrationError } from '@/lib/xero/identity/contracts'
-import { revokeExternalSession, unlinkIdentity } from '@/lib/xero/identity/service'
 
 export type ProfileField = 'displayName' | 'timezone'
 
@@ -115,43 +113,4 @@ export async function changePasswordAction(
   }
 
   redirect('/app/profile?password=changed')
-}
-
-export async function revokeExternalSessionAction(formData: FormData): Promise<void> {
-  const session = await requireAppSession()
-  const sessionID = stringValue(formData, 'sessionID')
-  try {
-    await enforceRateLimit(session.payload, {
-      key: rateLimitKey(await headers(), String(session.user.id)),
-      limit: 20,
-      scope: 'authentication.session-revocation',
-      windowMs: 30 * 60_000,
-    })
-    await revokeExternalSession(session, sessionID)
-  } catch {
-    redirect('/app/profile?security=failed')
-  }
-  revalidatePath('/app/profile')
-  redirect('/app/profile?security=session-revoked')
-}
-
-export async function unlinkXeroIdentityAction(formData: FormData): Promise<void> {
-  const session = await requireAppSession()
-  try {
-    await enforceRateLimit(session.payload, {
-      key: rateLimitKey(await headers(), String(session.user.id)),
-      limit: 8,
-      scope: 'authentication.identity-unlink',
-      windowMs: 30 * 60_000,
-    })
-    await unlinkIdentity(session, {
-      password: stringValue(formData, 'password'),
-      reason: stringValue(formData, 'reason'),
-    })
-  } catch (error) {
-    const code = error instanceof IdentityIntegrationError ? error.code : 'failed'
-    redirect(`/app/profile?security=${encodeURIComponent(code)}`)
-  }
-  revalidatePath('/app', 'layout')
-  redirect('/app/profile?security=identity-unlinked')
 }

@@ -15,7 +15,6 @@ import type {
 type AppNavigationProps = {
   displayName: string
   navigation: MemberNavigation
-  roleLabel: string
 }
 
 const isActiveDestination = (pathname: string, href: string): boolean => {
@@ -37,7 +36,7 @@ const destinationLabel = (destination: NavigationLinkDestination) => (
   </>
 )
 
-export function AppNavigation({ displayName, navigation, roleLabel }: AppNavigationProps) {
+export function AppNavigation({ displayName, navigation }: AppNavigationProps) {
   const pathname = usePathname()
   const menuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const mobileButtonRef = useRef<HTMLButtonElement>(null)
@@ -199,11 +198,7 @@ export function AppNavigation({ displayName, navigation, roleLabel }: AppNavigat
           </Link>
         )}
 
-        <AccountMenu
-          destinations={navigation.accountDestinations}
-          displayName={displayName}
-          roleLabel={roleLabel}
-        />
+        <AccountMenu destinations={navigation.accountDestinations} displayName={displayName} />
       </div>
 
       <div className="mobile-navigation-controls">
@@ -236,7 +231,6 @@ export function AppNavigation({ displayName, navigation, roleLabel }: AppNavigat
         <nav aria-label="Mobile primary" className="mobile-nav-panel" id="mobile-app-navigation">
           <div className="mobile-account-context">
             <strong>{displayName}</strong>
-            <span>{roleLabel}</span>
           </div>
 
           {primaryLinks.map((destination) => (

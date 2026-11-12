@@ -133,7 +133,7 @@ describe('project Xero item references', () => {
     })
   })
 
-  it('requires confirmation and a reason when an item change affects unbilled time', async () => {
+  it('requires confirmation when an item change affects unbilled time', async () => {
     const find = vi.fn(async () => ({ docs: [{ id: 'entry-1' }] }))
     const req = { context: {}, payload: { find } } as unknown as PayloadRequest
 
@@ -148,7 +148,6 @@ describe('project Xero item references', () => {
       data: {
         errors: expect.arrayContaining([
           expect.objectContaining({ path: 'confirmUnbilledImpact' }),
-          expect.objectContaining({ path: 'commercialChangeReason' }),
         ]),
       },
     })
@@ -156,7 +155,6 @@ describe('project Xero item references', () => {
     await expect(
       protectCommercialChanges({
         data: {
-          commercialChangeReason: 'Map approved professional-services item.',
           confirmUnbilledImpact: true,
           xeroItemId: ITEM_ID,
         },
@@ -165,8 +163,5 @@ describe('project Xero item references', () => {
         req,
       } as never),
     ).resolves.toMatchObject({ xeroItemId: ITEM_ID })
-    expect(req.context).toMatchObject({
-      auditReason: 'Map approved professional-services item.',
-    })
   })
 })

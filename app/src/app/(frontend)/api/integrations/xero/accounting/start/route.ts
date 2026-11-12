@@ -2,18 +2,13 @@ import { NextResponse } from 'next/server'
 
 import { getAppSession } from '@/lib/member-app/session'
 import {
-  hasTrustedOrigin,
   guardAccountingCommand,
-  isAllowedAccountingAdministrator,
+  hasTrustedOrigin,
   safeErrorCode,
   setAccountingFlowCookie,
-  setReauthenticatedPayloadCookie,
   settingsURL,
 } from '@/lib/xero/accounting/route-helpers'
-import {
-  createAccountingAuthorization,
-  verifyAccountingPassword,
-} from '@/lib/xero/accounting/service'
+import { createAccountingAuthorization } from '@/lib/xero/accounting/service'
 
 export const runtime = 'nodejs'
 
@@ -23,21 +18,15 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const session = await getAppSession()
-  if (!isAllowedAccountingAdministrator(session)) {
-    return NextResponse.redirect(settingsURL({ error: 'forbidden' }), 303)
-  }
+  if (!session) return NextResponse.redirect(settingsURL({ error: 'forbidden' }), 303)
 
   try {
-    const formData = await guardAccountingCommand(request, session, 'start', ['password'])
-    const password = formData.get('password')
-    const confirmedToken = await verifyAccountingPassword(
-      session,
-      typeof password === 'string' ? password : '',
-    )
+    await guardAccountingCommand(request, session, 'start')
+    // Whoever signs in to Xero authorizes the connection; reconnecting as a different Xero user
+    // is fine as long as it is the same organisation.
     const authorization = await createAccountingAuthorization(session)
     const response = NextResponse.redirect(authorization.authorizationURL, 303)
     setAccountingFlowCookie(response, authorization.browserBinding)
-    setReauthenticatedPayloadCookie(response, session, confirmedToken)
     return response
   } catch (error) {
     return NextResponse.redirect(settingsURL({ error: safeErrorCode(error) }), 303)

@@ -1,4 +1,4 @@
-import { ownerAdminField, systemFieldWrite } from '@/access/domain'
+import { authenticatedField, systemFieldWrite } from '@/access/domain'
 import { isRecord } from '@/lib/domain/validation'
 
 import type { CollectionBeforeChangeHook, Field } from 'payload'
@@ -9,7 +9,7 @@ export const attributionFields: Field[] = [
     type: 'relationship',
     relationTo: 'users',
     maxDepth: 0,
-    access: { create: systemFieldWrite, read: ownerAdminField, update: systemFieldWrite },
+    access: { create: systemFieldWrite, read: authenticatedField, update: systemFieldWrite },
     admin: { allowCreate: false, allowEdit: false, readOnly: true },
   },
   {
@@ -17,7 +17,7 @@ export const attributionFields: Field[] = [
     type: 'relationship',
     relationTo: 'users',
     maxDepth: 0,
-    access: { create: systemFieldWrite, read: ownerAdminField, update: systemFieldWrite },
+    access: { create: systemFieldWrite, read: authenticatedField, update: systemFieldWrite },
     admin: { allowCreate: false, allowEdit: false, readOnly: true },
   },
 ]

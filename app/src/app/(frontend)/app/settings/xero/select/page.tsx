@@ -2,7 +2,6 @@ import { cookies } from 'next/headers'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
-import { hasActiveRole } from '@/access/roles'
 import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import {
   PendingNavigationForm,
@@ -27,7 +26,6 @@ export default async function SelectXeroTenantPage({
   searchParams: Promise<{ flow?: string | string[] }>
 }) {
   const session = await requireAppSession()
-  if (!hasActiveRole(session.user, ['owner', 'admin'])) redirect('/app')
 
   const params = await searchParams
   const flowID = typeof params.flow === 'string' ? params.flow : ''

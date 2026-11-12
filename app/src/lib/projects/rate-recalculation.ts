@@ -1,7 +1,5 @@
 import 'server-only'
 
-import { hasActiveRole } from '@/access/roles'
-import { TIME_ENTRY_PRIVILEGED_MUTATION_CONTEXT } from '@/collections/TimeEntries'
 import { recordAuditEvent } from '@/lib/audit/service'
 import { durationToQuantityScaled, quantityRateAmountScaled } from '@/lib/billing/math'
 import { stableHash } from '@/lib/billing/stable'
@@ -20,17 +18,10 @@ export type RateRecalculationPreview = {
   projectName: string
 }
 
-const assertAdministrator = (session: AppSession): void => {
-  if (!hasActiveRole(session.user, ['owner', 'admin'])) {
-    throw new Error('Only an owner or administrator can recalculate rate snapshots.')
-  }
-}
-
 export async function previewProjectRateRecalculation(
   session: AppSession,
   projectID: string,
 ): Promise<RateRecalculationPreview> {
-  assertAdministrator(session)
   const project = await session.payload.findByID({
     collection: 'projects',
     depth: 0,
@@ -89,11 +80,7 @@ export async function confirmProjectRateRecalculation(
   session: AppSession,
   input: { confirmation: string; expectedHash: string; projectID: string; reason: string },
 ): Promise<number> {
-  assertAdministrator(session)
-  const reason = input.reason.trim()
-  if (reason.length < 10 || reason.length > 1_000) {
-    throw new Error('Enter a recalculation reason from 10 to 1,000 characters.')
-  }
+  const reason = input.reason.trim().slice(0, 1_000) || undefined
   if (input.confirmation !== 'RECALCULATE') {
     throw new Error('Type RECALCULATE to confirm the commercial-rate change.')
   }
@@ -127,7 +114,6 @@ export async function confirmProjectRateRecalculation(
       for (const entry of entries.docs) {
         await session.payload.update({
           collection: 'time-entries',
-          context: { [TIME_ENTRY_PRIVILEGED_MUTATION_CONTEXT]: 'rate-recalculation' },
           data: { rateSnapshotScaled: preview.currentRateScaled },
           id: entry.id,
           overrideAccess: true,

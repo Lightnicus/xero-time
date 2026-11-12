@@ -1,7 +1,5 @@
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
 
-import { hasActiveRole } from '@/access/roles'
 import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import { PendingSubmitButton } from '@/app/(frontend)/_components/PendingControls'
 import { formatScaledAmount } from '@/lib/domain/money'
@@ -38,7 +36,6 @@ export default async function ProjectSettingsPage({
   searchParams: Promise<SearchParams>
 }) {
   const session = await requireAppSession()
-  if (!hasActiveRole(session.user, ['owner', 'admin'])) redirect('/app')
   const params = await searchParams
   const [projects, connections] = await Promise.all([
     session.payload.find({
@@ -288,10 +285,6 @@ export default async function ProjectSettingsPage({
             <form action={recalculateProjectRatesAction} className="compact-form">
               <input name="expectedHash" type="hidden" value={preview.hash} />
               <input name="projectID" type="hidden" value={preview.projectID} />
-              <label className="field">
-                <span>Commercial reason</span>
-                <textarea maxLength={1_000} minLength={10} name="reason" required rows={3} />
-              </label>
               <label className="field">
                 <span>Type RECALCULATE</span>
                 <input autoComplete="off" name="confirmation" pattern="RECALCULATE" required />

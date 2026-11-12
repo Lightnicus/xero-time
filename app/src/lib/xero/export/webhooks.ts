@@ -304,6 +304,8 @@ export async function processWebhookReceipt(
       data: {
         failureCode: 'processing-failed',
         failureMessage: 'Webhook processing will be retried.',
+        // Clear the finished job so the receipt sweeper schedules the retry.
+        jobId: null,
         processingLeaseExpiresAt: null,
         processingLeaseId: null,
         retryCount: Number(receipt.retryCount ?? 0) + 1,

@@ -1,7 +1,7 @@
 import { ValidationError } from 'payload'
 
-import { adminOnly, financialField, readBusinessDirectory, systemFieldWrite } from '@/access/domain'
-import { ownerOrAdmin } from '@/access/roles'
+import { authenticatedField, systemFieldWrite } from '@/access/domain'
+import { authenticated, signedInAdmin } from '@/access/roles'
 import { auditCollectionChange } from '@/lib/audit/change-hooks'
 import { formatScaledAmount } from '@/lib/domain/money'
 import {
@@ -18,6 +18,7 @@ import { attributeChange, attributionFields } from '@/lib/payload/attribution'
 import { activeSalesItemReference } from '@/lib/projects/xero-items'
 
 import type {
+  CollectionAfterChangeHook,
   CollectionConfig,
   CollectionBeforeChangeHook,
   CollectionBeforeValidateHook,
@@ -110,8 +111,6 @@ export const protectCommercialChanges: CollectionBeforeChangeHook<ProjectHookDoc
     },
   })
   if (entries.docs.length === 0) return data
-  const reason = data.commercialChangeReason
-  const trimmedReason = typeof reason === 'string' ? reason.trim() : ''
   const errors: { message: string; path: string }[] = []
   if (data.confirmUnbilledImpact !== true) {
     errors.push({
@@ -120,16 +119,9 @@ export const protectCommercialChanges: CollectionBeforeChangeHook<ProjectHookDoc
       path: 'confirmUnbilledImpact',
     })
   }
-  if (trimmedReason.length < 10) {
-    errors.push({
-      message: 'Enter a commercial-change reason of at least 10 characters.',
-      path: 'commercialChangeReason',
-    })
-  }
   if (errors.length > 0) {
     throw new ValidationError({ collection: 'projects', errors, req })
   }
-  req.context = { ...(req.context ?? {}), auditReason: trimmedReason }
   return data
 }
 
@@ -215,6 +207,56 @@ export const validateXeroItemMappingChange: CollectionBeforeChangeHook<
   return data
 }
 
+/**
+ * When a project moves to another customer, its unbilled time moves with it so it can be billed
+ * to the new customer. Reserved and exported time keeps the customer it was invoiced under.
+ */
+const moveUnbilledTimeWithProject: CollectionAfterChangeHook<ProjectHookDocument> = async ({
+  doc,
+  operation,
+  previousDoc,
+  req,
+}) => {
+  if (operation !== 'update') return doc
+  const customerID = relationshipID(doc.customer)
+  if (customerID === null || String(customerID) === String(relationshipID(previousDoc?.customer)))
+    return doc
+
+  const customer = await req.payload.findByID({
+    collection: CUSTOMERS_SLUG,
+    depth: 0,
+    id: customerID,
+    overrideAccess: true,
+    req,
+  })
+  const moved = await req.payload.update({
+    collection: 'time-entries' as CollectionSlug,
+    data: {
+      customer: customerID,
+      customerNameSnapshot: isRecord(customer) ? customer.name : undefined,
+    } as never,
+    depth: 0,
+    overrideAccess: true,
+    req,
+    where: {
+      and: [{ project: { equals: doc.id } }, { billingStatus: { equals: 'unbilled' } }],
+    },
+  })
+  if (moved.errors.length > 0) {
+    throw new ValidationError({
+      collection: 'projects',
+      errors: [
+        {
+          message: `${moved.errors.length} unbilled time entries could not be moved to the new customer.`,
+          path: 'customer',
+        },
+      ],
+      req,
+    })
+  }
+  return doc
+}
+
 /** Enforces the currency boundary at write time instead of relying on the admin form. */
 const validateCustomerCurrency: CollectionBeforeValidateHook<ProjectHookDocument> = async ({
   data,
@@ -285,12 +327,12 @@ export const Projects: CollectionConfig = {
     singular: 'Project',
   },
   access: {
-    admin: adminOnly,
-    create: ownerOrAdmin,
+    admin: signedInAdmin,
+    create: authenticated,
     delete: () => false,
-    read: readBusinessDirectory,
-    readVersions: ownerOrAdmin,
-    update: ownerOrAdmin,
+    read: authenticated,
+    readVersions: authenticated,
+    update: authenticated,
   },
   admin: {
     defaultColumns: ['code', 'name', 'customer', 'status', 'currency', 'hourlyRateScaled'],
@@ -320,7 +362,7 @@ export const Projects: CollectionConfig = {
               admin: {
                 allowCreate: false,
                 description:
-                  'Currency is validated against this customer when the project is saved.',
+                  "Currency is validated against this customer when the project is saved. Changing the customer moves the project's unbilled time to the new customer.",
               },
             },
             {
@@ -414,7 +456,7 @@ export const Projects: CollectionConfig = {
                   defaultValue: 0,
                   validate: validateHourlyRate,
                   access: {
-                    read: financialField,
+                    read: authenticatedField,
                   },
                   admin: {
                     components: {
@@ -436,7 +478,7 @@ export const Projects: CollectionConfig = {
                   name: 'hourlyRateDisplay',
                   type: 'text',
                   virtual: true,
-                  access: { read: financialField },
+                  access: { read: authenticatedField },
                   admin: { hidden: true },
                   hooks: {
                     afterRead: [
@@ -483,7 +525,7 @@ export const Projects: CollectionConfig = {
                   validate: validateOptionalXeroID,
                   access: {
                     create: systemFieldWrite,
-                    read: financialField,
+                    read: authenticatedField,
                     update: systemFieldWrite,
                   },
                   admin: {
@@ -505,7 +547,7 @@ export const Projects: CollectionConfig = {
                   maxLength: 30,
                   access: {
                     create: systemFieldWrite,
-                    read: financialField,
+                    read: authenticatedField,
                     update: systemFieldWrite,
                   },
                   admin: {
@@ -521,7 +563,7 @@ export const Projects: CollectionConfig = {
                   maxLength: 50,
                   access: {
                     create: systemFieldWrite,
-                    read: financialField,
+                    read: authenticatedField,
                     update: systemFieldWrite,
                   },
                   admin: {
@@ -539,7 +581,7 @@ export const Projects: CollectionConfig = {
                   name: 'revenueAccountCode',
                   type: 'text',
                   maxLength: 20,
-                  access: { read: financialField },
+                  access: { read: authenticatedField },
                   admin: {
                     description: 'Optional override; otherwise customer then Billing Settings.',
                     width: '50%',
@@ -555,7 +597,7 @@ export const Projects: CollectionConfig = {
                   name: 'taxType',
                   type: 'text',
                   maxLength: 50,
-                  access: { read: financialField },
+                  access: { read: authenticatedField },
                   admin: {
                     description: 'Optional Xero TaxType override.',
                     width: '50%',
@@ -572,7 +614,7 @@ export const Projects: CollectionConfig = {
             {
               name: 'trackingCategories',
               type: 'json',
-              access: { read: financialField },
+              access: { read: authenticatedField },
               admin: {
                 description:
                   'Optional Xero tracking category/option pairs. Empty values inherit future defaults.',
@@ -591,16 +633,6 @@ export const Projects: CollectionConfig = {
                     width: '33%',
                   },
                 },
-                {
-                  name: 'commercialChangeReason',
-                  type: 'text',
-                  virtual: true,
-                  maxLength: 1_000,
-                  admin: {
-                    description: 'Recorded in the audit trail for a confirmed commercial change.',
-                    width: '67%',
-                  },
-                },
               ],
             },
           ],
@@ -611,6 +643,7 @@ export const Projects: CollectionConfig = {
   ],
   hooks: {
     afterChange: [
+      moveUnbilledTimeWithProject,
       auditCollectionChange('project.changed', [
         'billableByDefault',
         'code',

@@ -1,11 +1,11 @@
-import { notFound, redirect } from 'next/navigation'
+import { notFound } from 'next/navigation'
 
 import { PageHeader } from '@/app/(frontend)/_components/PageHeader'
 import { TimeEntryForm, type TimeEntryFormValues } from '@/app/(frontend)/_components/TimeEntryForm'
 import { formatCalendarDateInTimezone, relationshipID } from '@/lib/domain/validation'
 import { findMyTimeEntry, listActiveProjectOptions } from '@/lib/member-app/data'
 import { instantToLocalDateTime, timezoneOptionsIncluding } from '@/lib/member-app/date-time'
-import { canLogTime, requireAppSession } from '@/lib/member-app/session'
+import { requireAppSession } from '@/lib/member-app/session'
 
 import '../../../time-workflow.css'
 
@@ -21,8 +21,6 @@ export default async function NewTimeEntryPage({
   searchParams: Promise<{ duplicate?: string | string[] }>
 }) {
   const session = await requireAppSession()
-
-  if (!canLogTime(session.user)) redirect('/app')
 
   const params = await searchParams
   const duplicateID =

@@ -2,7 +2,6 @@ import 'server-only'
 
 import { randomUUID } from 'node:crypto'
 
-import { hasActiveRole } from '@/access/roles'
 import { TIME_ENTRY_BILLING_MUTATION_CONTEXT } from '@/collections/TimeEntries'
 import { recordAuditEvent } from '@/lib/audit/service'
 import { stableHash } from '@/lib/billing/stable'
@@ -53,12 +52,6 @@ const history = (
   ...(Array.isArray(document.stateHistory) ? document.stateHistory : []),
   { actor, at: new Date().toISOString(), from: document.state, metadata, to },
 ]
-
-const assertOwnerAdmin = (session: AppSession): void => {
-  if (!hasActiveRole(session.user, ['owner', 'admin'])) {
-    throw new Error('Only an owner or administrator can perform this action.')
-  }
-}
 
 const loadExportAllocations = async (session: AppSession, exportID: string) =>
   (
@@ -136,7 +129,6 @@ export async function releaseInvoiceExport(
     fetchRemote?: typeof fetchRemoteInvoiceForExport
   } = {},
 ): Promise<{ entryIDs: string[]; releaseID: string }> {
-  assertOwnerAdmin(session)
   const document = await session.payload.findByID({
     collection: 'invoice-exports',
     depth: 0,
@@ -332,7 +324,6 @@ export async function deleteDraftInvoiceAndRelease(
     token?: Awaited<ReturnType<typeof getValidAccountingAccessToken>>
   } = {},
 ): Promise<{ entryIDs: string[]; releaseID: string }> {
-  assertOwnerAdmin(session)
   const deletionReason = operationReason(
     input.reason,
     'Requested deletion of a verified Xero draft and release of its mapped time entries.',
@@ -529,8 +520,6 @@ export async function cancelInvoiceExport(
   session: AppSession,
   input: { exportID: string; reason?: string },
 ): Promise<void> {
-  if (!hasActiveRole(session.user, ['owner', 'admin', 'biller']))
-    throw new Error('Billing access is required.')
   const cancellationReason = operationReason(
     input.reason,
     'Cancelled the export before any Xero request was sent.',
@@ -558,14 +547,9 @@ export async function cancelInvoiceExport(
   if (attempt.requestMayHaveBeenSent || attempt.requestStartedAt) {
     throw new Error('Cancellation is blocked because a Xero request may already have started.')
   }
-  if (document.jobId && !document.jobId.startsWith('attaching:')) {
-    await session.payload.jobs.cancelByID({
-      id: document.jobId,
-      overrideAccess: true,
-      req: session.req,
-    })
-  }
-  await withPayloadTransaction(
+  // The job is cancelled only after the transaction commits: cancelling first would strand an
+  // export whose state changed meanwhile (for example, a send started) without its job.
+  const cancelledJobID = await withPayloadTransaction(
     session.payload,
     async (req) => {
       const current = await session.payload.findByID({
@@ -665,9 +649,26 @@ export async function cancelInvoiceExport(
         },
         req,
       )
+      return current.jobId ?? null
     },
     { user: session.user },
   )
+  if (cancelledJobID && !cancelledJobID.startsWith('attaching:')) {
+    try {
+      await session.payload.jobs.cancelByID({
+        id: cancelledJobID,
+        overrideAccess: true,
+        req: session.req,
+      })
+    } catch (error) {
+      // The export is already cancelled; a job that still runs finds it cancelled and stops.
+      session.payload.logger.warn({
+        err: error,
+        exportID: input.exportID,
+        msg: 'The export was cancelled but its queued job could not be cancelled.',
+      })
+    }
+  }
 }
 
 type QueueTask = (args: {
@@ -681,7 +682,6 @@ export async function requestInvoiceReconciliation(
   session: AppSession,
   input: { exportID: string; reason?: string },
 ): Promise<string> {
-  assertOwnerAdmin(session)
   const reconciliationReason = operationReason(
     input.reason,
     'Requested an authoritative Xero reconciliation for this export.',
@@ -697,19 +697,49 @@ export async function requestInvoiceReconciliation(
   if (!['action-required', 'manual-review', 'reconciling'].includes(document.state)) {
     throw new Error('This export is not eligible for reconciliation.')
   }
-  await session.payload.update({
-    collection: 'invoice-exports',
-    id: input.exportID,
-    data: {
-      nextAttemptAt: new Date().toISOString(),
-      processingLeaseExpiresAt: null,
-      processingLeaseId: null,
-      state: 'reconciling',
-      stateHistory: history(document, 'reconciling', String(session.user.id), { manual: true }),
+  const reconcilingNow = (): Error =>
+    new Error('A reconciliation is already running for this export. Wait for it to finish.')
+  if (
+    document.state === 'reconciling' &&
+    document.processingLeaseExpiresAt &&
+    new Date(document.processingLeaseExpiresAt).getTime() > Date.now()
+  ) {
+    throw reconcilingNow()
+  }
+  // Conditional claim: the state must be unchanged and no reconcile worker may hold a live lease,
+  // so clearing the lease can never let a second worker run alongside the first.
+  const now = new Date()
+  const claimed = await requireMongoModel(session.payload, 'invoice-exports').findOneAndUpdate(
+    {
+      _id: input.exportID,
+      state: document.state,
+      ...(document.state === 'reconciling'
+        ? {
+            $or: [
+              { processingLeaseExpiresAt: null },
+              { processingLeaseExpiresAt: { $exists: false } },
+              { processingLeaseExpiresAt: { $lte: now } },
+            ],
+          }
+        : {}),
     },
-    overrideAccess: true,
-    req: session.req,
-  })
+    {
+      $set: {
+        nextAttemptAt: now,
+        processingLeaseExpiresAt: null,
+        processingLeaseId: null,
+        state: 'reconciling',
+        stateHistory: history(document, 'reconciling', String(session.user.id), { manual: true }),
+        updatedAt: now,
+      },
+    },
+    { new: true },
+  )
+  if (!claimed) {
+    throw document.state === 'reconciling'
+      ? reconcilingNow()
+      : new Error('The export changed while reconciliation was requested. Refresh and try again.')
+  }
   const job = await (session.payload.jobs.queue as unknown as QueueTask)({
     input: { exportID: input.exportID },
     meta: { exportID: input.exportID, reason: 'manual-reconciliation' },
@@ -742,7 +772,6 @@ export async function authorizeReplacementAttempt(
   session: AppSession,
   input: { exportID: string; reason?: string },
 ): Promise<string> {
-  assertOwnerAdmin(session)
   const replacementReason = operationReason(
     input.reason,
     'Authorized a linked replacement attempt after Xero confirmed the original invoice was absent.',
@@ -829,9 +858,11 @@ export async function authorizeReplacementAttempt(
 export async function acceptExistingInvoice(
   session: AppSession,
   input: { exportID: string; invoiceID: string; reason: string },
-  overrides: { client?: XeroAccountingClient } = {},
+  overrides: {
+    client?: XeroAccountingClient
+    token?: Awaited<ReturnType<typeof getValidAccountingAccessToken>>
+  } = {},
 ): Promise<void> {
-  assertOwnerAdmin(session)
   const acceptanceReason = reason(input.reason)
   if (!/^[0-9a-f-]{36}$/i.test(input.invoiceID)) throw new Error('Enter a valid Xero InvoiceID.')
   const document = await session.payload.findByID({
@@ -847,12 +878,14 @@ export async function acceptExistingInvoice(
   const runtime = overrides.client ? null : await resolveAccountingRuntime(session)
   const client = overrides.client ?? runtime?.client
   if (!client) throw new Error('Xero accounting is not configured.')
-  const token = await getValidAccountingAccessToken(
-    session,
-    runtime ?? {
-      client,
-    },
-  )
+  const token =
+    overrides.token ??
+    (await getValidAccountingAccessToken(
+      session,
+      runtime ?? {
+        client,
+      },
+    ))
   if (!token.connection.tenantId) throw new Error('The Xero tenant is unavailable.')
   const response = await client.accountingGet(
     token.accessToken,
@@ -874,6 +907,11 @@ export async function acceptExistingInvoice(
       where: { invoiceExport: { equals: input.exportID } },
     })
   ).docs
+  if (remote && (remote.status === 'DELETED' || remote.status === 'VOIDED')) {
+    throw new Error(
+      `The selected Xero invoice is ${remote.status.toLowerCase()}; only a live invoice can be accepted.`,
+    )
+  }
   if (!remote || !materiallyMatches(document, remote, allocations))
     throw new Error(
       'The selected Xero invoice does not exactly match the immutable export snapshot.',
@@ -937,6 +975,5 @@ export async function refreshExportForUser(
   session: AppSession,
   exportID: string,
 ): Promise<{ remoteStatus: string; state: string }> {
-  assertOwnerAdmin(session)
   return refreshInvoiceExportStatus(session.req, exportID)
 }

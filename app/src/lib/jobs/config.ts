@@ -1,4 +1,4 @@
-import { hasActiveRole } from '@/access/roles'
+import { isSignedIn } from '@/access/roles'
 
 import type { JobsConfig, TaskConfig } from 'payload'
 
@@ -94,7 +94,7 @@ export const jobsConfig: JobsConfig = {
       ...defaultJobsCollection.access,
       create: () => false,
       delete: () => false,
-      read: ({ req }) => hasActiveRole(req.user, ['owner', 'admin']),
+      read: ({ req }) => isSignedIn(req.user),
       update: () => false,
     },
     admin: { ...defaultJobsCollection.admin, hidden: true },

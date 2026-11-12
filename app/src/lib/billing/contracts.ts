@@ -23,6 +23,7 @@ export const BILLING_BLOCKER_CODES = [
   'unsupported-currency',
   'missing-xero-capability',
   'xero-not-connected',
+  'xero-reconnect-required',
 ] as const
 
 export type BillingBlockerCode = (typeof BILLING_BLOCKER_CODES)[number]

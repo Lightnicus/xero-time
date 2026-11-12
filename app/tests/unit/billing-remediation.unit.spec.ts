@@ -104,6 +104,17 @@ describe('billing blocker remediation', () => {
     expect(xeroConnectionBlockers('tenant-1', true)).toEqual([])
   })
 
+  it('asks for a reconnect rather than a first connection when the pinned connection broke', () => {
+    const blockers = xeroConnectionBlockers(null, false, true)
+    expect(blockers).toEqual([
+      expect.objectContaining({
+        code: 'xero-reconnect-required',
+        remediationHref: '/app/settings/xero',
+      }),
+    ])
+    expect(billingBlockerActionLabel('xero-reconnect-required')).toBe('Reconnect Xero')
+  })
+
   it('provides human-readable labels and action copy instead of exposing machine codes', () => {
     for (const code of BILLING_BLOCKER_CODES) expect(billingBlockerLabel(code)).not.toBe(code)
     expect(billingBlockerActionLabel('unmapped-contact')).toBe('Map customer')

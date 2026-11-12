@@ -1,17 +1,7 @@
 import { ValidationError } from 'payload'
 
-import {
-  adminOnly,
-  authenticatedField,
-  createTimeEntry,
-  deleteOwnUnbilledTime,
-  financialField,
-  ownerAdminField,
-  readTimeEntries,
-  systemFieldWrite,
-  updateOwnUnbilledTime,
-} from '@/access/domain'
-import { isActiveOwnerOrAdmin, isActiveUser, ownerOrAdmin } from '@/access/roles'
+import { authenticatedField, systemFieldWrite, unbilledTimeOnly } from '@/access/domain'
+import { authenticated, isSignedIn, signedInAdmin } from '@/access/roles'
 import {
   DEFAULT_TIMEZONE,
   MAX_TIME_ENTRY_SECONDS,
@@ -27,7 +17,6 @@ import {
 } from '@/lib/domain/validation'
 
 import type {
-  CollectionAfterChangeHook,
   CollectionBeforeChangeHook,
   CollectionBeforeDeleteHook,
   CollectionBeforeOperationHook,
@@ -50,7 +39,6 @@ const requestedUpdateFields = new WeakMap<PayloadRequest, Set<string>>()
 /** Required on trusted Local API calls that perform one exact billing transition. */
 export const TIME_ENTRY_BILLING_MUTATION_CONTEXT = 'allowTimeEntryBillingMutation'
 export type TimeEntryBillingMutation = 'export' | 'release' | 'reserve'
-export const TIME_ENTRY_PRIVILEGED_MUTATION_CONTEXT = 'privilegedTimeEntryMutation'
 
 type TimeEntryHookDocument = Record<string, unknown> & { id: number | string }
 
@@ -81,9 +69,6 @@ const activeOrCurrentTimeRelationship =
     }
   }
 
-const activeOrCurrentOwner = activeOrCurrentTimeRelationship('owner', {
-  active: { equals: true },
-})
 const activeOrCurrentProject = activeOrCurrentTimeRelationship('project', {
   status: { equals: 'active' },
 })
@@ -104,9 +89,7 @@ const parseDate = (value: unknown): Date | null => {
 }
 
 const activeUserTimezone = (user: unknown): string | null => {
-  if (!isRecord(user) || !isActiveUser(user)) {
-    return null
-  }
+  if (!isRecord(user) || !isSignedIn(user)) return null
 
   const timezone = (user as Record<string, unknown>).timezone
 
@@ -221,10 +204,8 @@ const normalizeTimeInput: CollectionBeforeValidateHook<TimeEntryHookDocument> = 
   }
 
   if (operation === 'create') {
-    if (isActiveOwnerOrAdmin(req.user)) {
+    if (isSignedIn(req.user)) {
       data.owner = relationshipID(data.owner) ?? req.user.id
-    } else if (isActiveUser(req.user)) {
-      data.owner = req.user.id
     }
 
     data.billingStatus = 'unbilled'
@@ -449,81 +430,6 @@ const protectBillingLock: CollectionBeforeChangeHook<TimeEntryHookDocument> = ({
   return data
 }
 
-const requirePrivilegedCorrectionReason: CollectionBeforeChangeHook<TimeEntryHookDocument> = ({
-  data,
-  operation,
-  req,
-}) => {
-  if (
-    operation !== 'update' ||
-    !isActiveOwnerOrAdmin(req.user) ||
-    billingMutationIntent(req) !== null ||
-    req.context?.[TIME_ENTRY_PRIVILEGED_MUTATION_CONTEXT] === 'rate-recalculation'
-  ) {
-    return data
-  }
-
-  const reason = data.privilegedCorrectionReason
-  if (typeof reason !== 'string' || reason.trim().length < 10 || reason.trim().length > 1_000) {
-    return timeEntryValidationError(
-      'privilegedCorrectionReason',
-      'Owner/admin corrections require a reason from 10 to 1,000 characters.',
-      req,
-    )
-  }
-  req.context = {
-    ...(req.context ?? {}),
-    auditReason: reason.trim(),
-    [TIME_ENTRY_PRIVILEGED_MUTATION_CONTEXT]: 'correction',
-  }
-  return data
-}
-
-const auditPrivilegedCorrection: CollectionAfterChangeHook<TimeEntryHookDocument> = async ({
-  doc,
-  operation,
-  previousDoc,
-  req,
-}) => {
-  if (
-    operation !== 'update' ||
-    req.context?.[TIME_ENTRY_PRIVILEGED_MUTATION_CONTEXT] !== 'correction'
-  ) {
-    return doc
-  }
-  const { recordAuditEvent } = await import('@/lib/audit/service')
-  await recordAuditEvent(
-    req.payload,
-    {
-      actor: req.user?.id,
-      after: {
-        billable: doc.billable,
-        description: doc.description,
-        durationSeconds: doc.durationSeconds,
-        owner: relationshipID(doc.owner),
-        project: relationshipID(doc.project),
-        timezone: doc.timezone,
-        workDate: doc.workDate,
-      },
-      before: {
-        billable: previousDoc.billable,
-        description: previousDoc.description,
-        durationSeconds: previousDoc.durationSeconds,
-        owner: relationshipID(previousDoc.owner),
-        project: relationshipID(previousDoc.project),
-        timezone: previousDoc.timezone,
-        workDate: previousDoc.workDate,
-      },
-      eventType: 'time-entry.privileged-correction',
-      reason: typeof req.context.auditReason === 'string' ? req.context.auditReason : undefined,
-      targetCollection: 'time-entries',
-      targetId: doc.id,
-    },
-    req,
-  )
-  return doc
-}
-
 const rememberOperationAccessMode: CollectionBeforeOperationHook = ({
   args,
   operation,
@@ -569,12 +475,12 @@ export const TimeEntries: CollectionConfig = {
     singular: 'Time Entry',
   },
   access: {
-    admin: adminOnly,
-    create: createTimeEntry,
-    delete: deleteOwnUnbilledTime,
-    read: readTimeEntries,
-    readVersions: ownerOrAdmin,
-    update: updateOwnUnbilledTime,
+    admin: signedInAdmin,
+    create: authenticated,
+    delete: unbilledTimeOnly,
+    read: authenticated,
+    readVersions: authenticated,
+    update: unbilledTimeOnly,
   },
   admin: {
     defaultColumns: [
@@ -615,17 +521,15 @@ export const TimeEntries: CollectionConfig = {
                   required: true,
                   index: true,
                   maxDepth: 0,
-                  filterOptions: activeOrCurrentOwner,
                   access: {
-                    create: ownerAdminField,
+                    create: authenticatedField,
                     read: authenticatedField,
-                    update: ownerAdminField,
+                    update: authenticatedField,
                   },
                   admin: {
                     allowCreate: false,
                     allowEdit: false,
-                    description:
-                      'Members are always assigned to themselves; an owner or admin may choose another active user.',
+                    description: 'Defaults to the signed-in user.',
                     width: '50%',
                   },
                 },
@@ -652,7 +556,7 @@ export const TimeEntries: CollectionConfig = {
               index: true,
               access: {
                 create: systemFieldWrite,
-                read: financialField,
+                read: authenticatedField,
                 update: systemFieldWrite,
               },
               admin: {
@@ -775,17 +679,6 @@ export const TimeEntries: CollectionConfig = {
                 description: 'Defaults from the selected project when the entry is first created.',
               },
             },
-            {
-              name: 'privilegedCorrectionReason',
-              type: 'textarea',
-              virtual: true,
-              maxLength: 1_000,
-              access: { read: ownerAdminField },
-              admin: {
-                description:
-                  'Required when an owner or administrator corrects an existing unbilled entry. Recorded in the audit trail.',
-              },
-            },
           ],
         },
         {
@@ -821,7 +714,7 @@ export const TimeEntries: CollectionConfig = {
                   min: 0,
                   access: {
                     create: systemFieldWrite,
-                    read: financialField,
+                    read: authenticatedField,
                     update: systemFieldWrite,
                   },
                   admin: {
@@ -947,7 +840,7 @@ export const TimeEntries: CollectionConfig = {
                   type: 'date',
                   access: {
                     create: systemFieldWrite,
-                    read: financialField,
+                    read: authenticatedField,
                     update: systemFieldWrite,
                   },
                   admin: {
@@ -961,7 +854,7 @@ export const TimeEntries: CollectionConfig = {
                   type: 'date',
                   access: {
                     create: systemFieldWrite,
-                    read: financialField,
+                    read: authenticatedField,
                     update: systemFieldWrite,
                   },
                   admin: {
@@ -978,8 +871,7 @@ export const TimeEntries: CollectionConfig = {
     },
   ],
   hooks: {
-    afterChange: [auditPrivilegedCorrection],
-    beforeChange: [protectBillingLock, requirePrivilegedCorrectionReason],
+    beforeChange: [protectBillingLock],
     beforeDelete: [protectLockedDelete],
     beforeOperation: [rememberOperationAccessMode],
     beforeValidate: [normalizeTimeInput, deriveProjectBillingData],

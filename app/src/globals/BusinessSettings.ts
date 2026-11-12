@@ -1,4 +1,4 @@
-import { authenticated, ownerOrAdmin } from '@/access/roles'
+import { authenticated } from '@/access/roles'
 import { auditGlobalChange } from '@/lib/audit/change-hooks'
 import {
   currencyOptions,
@@ -15,8 +15,8 @@ export const BusinessSettings: GlobalConfig = {
   label: 'Business Settings',
   access: {
     read: authenticated,
-    readVersions: ownerOrAdmin,
-    update: ownerOrAdmin,
+    readVersions: authenticated,
+    update: authenticated,
   },
   admin: {
     description:

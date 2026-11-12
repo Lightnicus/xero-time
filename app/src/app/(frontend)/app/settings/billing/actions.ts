@@ -4,7 +4,6 @@ import { revalidatePath } from 'next/cache'
 import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 
-import { hasActiveRole } from '@/access/roles'
 import { billingDefaultFieldErrors, type BillingDefaultField } from '@/lib/billing/default-options'
 import { validateXeroBillingDefaults } from '@/lib/billing/default-validation'
 import { requireAppSession } from '@/lib/member-app/session'
@@ -26,10 +25,6 @@ export async function updateBillingDefaultsAction(
   formData: FormData,
 ): Promise<BillingDefaultsActionState> {
   const session = await requireAppSession()
-  if (!hasActiveRole(session.user, ['owner', 'admin'])) {
-    return { message: 'Only an owner or administrator can change invoice defaults.' }
-  }
-
   const accountCode = value(formData, 'accountCode')
   const taxType = value(formData, 'taxType')
   const settings = await session.payload.findGlobal({

@@ -8,7 +8,6 @@ import {
   connectedSettingsURL,
   guardAccountingCommand,
   hasTrustedOrigin,
-  isAllowedAccountingAdministrator,
   safeErrorCode,
   settingsURL,
 } from '@/lib/xero/accounting/route-helpers'
@@ -22,7 +21,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const session = await getAppSession()
-  if (!isAllowedAccountingAdministrator(session)) {
+  if (!session) {
     return NextResponse.redirect(settingsURL({ error: 'forbidden' }), 303)
   }
 

@@ -6,7 +6,6 @@ import { refreshXeroReferenceData } from '@/lib/xero/accounting/reference-data'
 import {
   clearAccountingFlowCookie,
   connectedSettingsURL,
-  isAllowedAccountingAdministrator,
   safeErrorCode,
   selectionURL,
   settingsURL,
@@ -21,7 +20,7 @@ export const runtime = 'nodejs'
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const session = await getAppSessionForOAuthCallback(request.headers)
-  if (!isAllowedAccountingAdministrator(session)) {
+  if (!session) {
     return NextResponse.redirect(
       new URL('/login?next=/app/settings/xero', environment.serverURL),
       303,
@@ -55,8 +54,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     try {
       completionURL = connectedSettingsURL(await refreshXeroReferenceData(session))
     } catch {
-      // The validated grant is already committed. Report the partial setup so an
-      // administrator can retry instead of presenting the connection as ready.
+      // The validated grant is already committed. Report the partial setup so the
+      // user can retry instead of presenting the connection as ready.
       completionURL = connectedSettingsURL({ status: 'failed' })
     }
 

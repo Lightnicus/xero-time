@@ -347,25 +347,6 @@ button[data-pending='true'] {
   font-weight: 700;
 }
 
-.auth-separator {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin: 1rem 0;
-  color: var(--ink-soft);
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.auth-separator::before,
-.auth-separator::after {
-  height: 1px;
-  flex: 1;
-  background: var(--line);
-  content: '';
-}
-
 .compact-form {
   display: grid;
   gap: 0.8rem;
@@ -784,6 +765,30 @@ button[data-pending='true'] {
   padding: clamp(2rem, 6vw, 4.5rem) 0;
 }
 
+.app-alert {
+  width: min(100% - 2rem, 1180px);
+  margin: 1rem auto 0;
+}
+
+.app-alert-inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.app-alert-inner p {
+  margin: 0;
+}
+
+.recovery-steps {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
 .app-footer {
   display: flex;
   width: min(100% - 2rem, 1180px);
@@ -905,8 +910,7 @@ button[data-pending='true'] {
 }
 
 .panel.page-stack,
-.confirmation-panel,
-.invitation-list-panel {
+.confirmation-panel {
   padding: var(--panel-content-padding);
 }
 
@@ -1466,13 +1470,11 @@ button[data-pending='true'] {
   color: var(--ink-soft);
 }
 
-.invitation-create-form,
 .password-change-form {
   display: grid;
   gap: 1rem;
 }
 
-.invitation-create-form > div:first-child p,
 .password-change-form > div:first-child p {
   margin: 0.2rem 0 0;
   color: var(--ink-soft);
@@ -1485,79 +1487,9 @@ button[data-pending='true'] {
   font-size: 1rem;
 }
 
-.invitation-list-panel {
-  display: grid;
-  gap: 1rem;
-}
-
-.invitation-list {
-  display: grid;
-  gap: 0.75rem;
-}
-
-.invitation-item {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 1rem;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface);
-}
-
-.invitation-item p {
-  margin: 0.22rem 0;
-}
-
-.invitation-item small {
-  color: var(--ink-soft);
-}
-
-.invitation-item-heading {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.55rem;
-}
-
-.invitation-actions {
-  display: grid;
-  width: min(100%, 320px);
-  gap: 0.65rem;
-}
-
-.invitation-actions form,
 .compact-action-form {
   display: grid;
   gap: 0.65rem;
-}
-
-.invitation-actions summary {
-  color: var(--danger);
-  cursor: pointer;
-  font-size: 0.84rem;
-  font-weight: 750;
-}
-
-.invitation-actions .notice p {
-  margin: 0;
-}
-
-.status-invitation-pending,
-.status-invitation-expired {
-  background: var(--warning-pale);
-  color: var(--warning);
-}
-
-.status-invitation-accepted {
-  background: var(--success-pale);
-  color: var(--success);
-}
-
-.status-invitation-revoked {
-  background: var(--danger-pale);
-  color: var(--danger);
 }
 
 .tenant-selection-form {
@@ -1986,15 +1918,6 @@ button[data-pending='true'] {
   .app-footer {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .invitation-item {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .invitation-actions {
-    width: 100%;
   }
 
   .page-heading .button {

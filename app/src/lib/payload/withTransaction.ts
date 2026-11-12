@@ -71,6 +71,7 @@ export async function withPayloadTransaction<T>(
   const session = client.startSession()
   const transactionID = randomUUID()
   let callbackAttempts = 0
+  let lastCallbackError: unknown
 
   payload.db.sessions[transactionID] = session
   req.transactionID = transactionID
@@ -89,6 +90,7 @@ export async function withPayloadTransaction<T>(
       try {
         return await callback(req)
       } catch (error) {
+        lastCallbackError = error
         if (isRetryableTransactionError(error)) {
           // Payload field traversal can have sibling validation reads still
           // settling when one read reports a transaction conflict. Keeping the
@@ -101,6 +103,17 @@ export async function withPayloadTransaction<T>(
     }, payload.db.transactionOptions)
 
     return result as T
+  } catch (error) {
+    // Payload aborts the transaction itself when an operation fails, so the driver's own abort
+    // then fails with "Cannot call abortTransaction twice" and hides the original error.
+    if (
+      lastCallbackError !== undefined &&
+      error instanceof Error &&
+      /abortTransaction twice/i.test(error.message)
+    ) {
+      throw lastCallbackError
+    }
+    throw error
   } finally {
     delete req.transactionID
     delete payload.db.sessions[transactionID]

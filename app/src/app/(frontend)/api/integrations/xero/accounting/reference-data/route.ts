@@ -5,7 +5,6 @@ import { refreshXeroReferenceData } from '@/lib/xero/accounting/reference-data'
 import {
   hasTrustedOrigin,
   guardAccountingCommand,
-  isAllowedAccountingAdministrator,
   safeErrorCode,
   settingsURL,
 } from '@/lib/xero/accounting/route-helpers'
@@ -17,7 +16,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   const session = await getAppSession()
-  if (!isAllowedAccountingAdministrator(session)) {
+  if (!session) {
     return NextResponse.redirect(settingsURL({ error: 'forbidden' }), 303)
   }
   try {

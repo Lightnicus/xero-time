@@ -1,13 +1,7 @@
 import { ValidationError } from 'payload'
 
-import {
-  adminOnly,
-  financialField,
-  ownerAdminField,
-  readBusinessDirectory,
-  systemFieldWrite,
-} from '@/access/domain'
-import { ownerOrAdmin } from '@/access/roles'
+import { authenticatedField, systemFieldWrite } from '@/access/domain'
+import { authenticated, signedInAdmin } from '@/access/roles'
 import { auditCollectionChange } from '@/lib/audit/change-hooks'
 import {
   DEFAULT_CURRENCY,
@@ -177,12 +171,12 @@ export const Customers: CollectionConfig = {
     singular: 'Customer',
   },
   access: {
-    admin: adminOnly,
-    create: ownerOrAdmin,
+    admin: signedInAdmin,
+    create: authenticated,
     delete: () => false,
-    read: readBusinessDirectory,
-    readVersions: ownerOrAdmin,
-    update: ownerOrAdmin,
+    read: authenticated,
+    readVersions: authenticated,
+    update: authenticated,
   },
   admin: {
     defaultColumns: [
@@ -261,7 +255,7 @@ export const Customers: CollectionConfig = {
                   name: 'billingEmail',
                   type: 'email',
                   access: {
-                    read: financialField,
+                    read: authenticatedField,
                   },
                   admin: {
                     description:
@@ -276,7 +270,7 @@ export const Customers: CollectionConfig = {
               type: 'textarea',
               maxLength: 5_000,
               access: {
-                read: financialField,
+                read: authenticatedField,
               },
               admin: {
                 description:
@@ -293,7 +287,7 @@ export const Customers: CollectionConfig = {
                   name: 'revenueAccountCode',
                   type: 'text',
                   maxLength: 20,
-                  access: { read: financialField },
+                  access: { read: authenticatedField },
                   admin: {
                     description: 'Optional billing override inherited by customer projects.',
                     width: '50%',
@@ -309,7 +303,7 @@ export const Customers: CollectionConfig = {
                   name: 'taxType',
                   type: 'text',
                   maxLength: 50,
-                  access: { read: financialField },
+                  access: { read: authenticatedField },
                   admin: {
                     description: 'Optional Xero TaxType inherited by customer projects.',
                     width: '50%',
@@ -333,7 +327,7 @@ export const Customers: CollectionConfig = {
                   validate: validateInvoiceReferenceCode,
                   access: {
                     create: systemFieldWrite,
-                    read: financialField,
+                    read: authenticatedField,
                     update: systemFieldWrite,
                   },
                   admin: {
@@ -358,7 +352,7 @@ export const Customers: CollectionConfig = {
                       : validateWholeNumber(value, { max: Number.MAX_SAFE_INTEGER, min: 1 }),
                   access: {
                     create: systemFieldWrite,
-                    read: financialField,
+                    read: authenticatedField,
                     update: systemFieldWrite,
                   },
                   admin: {
@@ -381,7 +375,7 @@ export const Customers: CollectionConfig = {
                   : validateWholeNumber(value, { max: Number.MAX_SAFE_INTEGER, min: 1 }),
               access: {
                 create: systemFieldWrite,
-                read: ownerAdminField,
+                read: authenticatedField,
                 update: systemFieldWrite,
               },
               admin: {
@@ -404,7 +398,7 @@ export const Customers: CollectionConfig = {
               validate: validateOptionalXeroID,
               access: {
                 create: systemFieldWrite,
-                read: ownerAdminField,
+                read: authenticatedField,
                 update: systemFieldWrite,
               },
               admin: {
@@ -431,7 +425,7 @@ export const Customers: CollectionConfig = {
                   ],
                   access: {
                     create: systemFieldWrite,
-                    read: ownerAdminField,
+                    read: authenticatedField,
                     update: systemFieldWrite,
                   },
                   admin: {
@@ -446,7 +440,7 @@ export const Customers: CollectionConfig = {
                   maxLength: 255,
                   access: {
                     create: systemFieldWrite,
-                    read: ownerAdminField,
+                    read: authenticatedField,
                     update: systemFieldWrite,
                   },
                   admin: {
@@ -465,7 +459,7 @@ export const Customers: CollectionConfig = {
                   type: 'email',
                   access: {
                     create: systemFieldWrite,
-                    read: ownerAdminField,
+                    read: authenticatedField,
                     update: systemFieldWrite,
                   },
                   admin: { readOnly: true, width: '50%' },
@@ -475,7 +469,7 @@ export const Customers: CollectionConfig = {
                   type: 'date',
                   access: {
                     create: systemFieldWrite,
-                    read: ownerAdminField,
+                    read: authenticatedField,
                     update: systemFieldWrite,
                   },
                   admin: {
@@ -494,7 +488,7 @@ export const Customers: CollectionConfig = {
                   type: 'date',
                   access: {
                     create: systemFieldWrite,
-                    read: ownerAdminField,
+                    read: authenticatedField,
                     update: systemFieldWrite,
                   },
                   admin: {
@@ -510,7 +504,7 @@ export const Customers: CollectionConfig = {
                   maxDepth: 0,
                   access: {
                     create: systemFieldWrite,
-                    read: ownerAdminField,
+                    read: authenticatedField,
                     update: systemFieldWrite,
                   },
                   admin: {

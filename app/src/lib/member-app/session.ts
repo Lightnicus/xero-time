@@ -11,7 +11,7 @@ import {
 } from 'payload'
 import { cache } from 'react'
 
-import { isActiveUser } from '@/access/roles'
+import { isSignedIn } from '@/access/roles'
 import type { User } from '@/payload-types'
 import config from '@/payload.config'
 
@@ -28,8 +28,7 @@ const appSessionFromHeaders = async (
   const payload = existingPayload ?? (await getPayload({ config }))
   const { user } = await payload.auth({ headers: requestHeaders })
 
-  // JWT authentication reloads the user, but account activity is an application rule.
-  if (!isActiveUser(user)) return null
+  if (!isSignedIn(user)) return null
 
   const req = await createLocalReq({ user }, payload)
 
@@ -50,8 +49,8 @@ export const getAppSession = cache(async (): Promise<AppSession | null> =>
 
 /**
  * Payload deliberately ignores JWT cookies on cross-site requests. An OAuth
- * start route writes a fresh local JWT after password confirmation, so recover
- * only that signed token on the provider callback. Caller authorization,
+ * start route runs with the signed-in user's JWT cookie, so recover only that
+ * signed token on the provider callback. Caller authorization,
  * origin, fetch metadata, and unrelated cookies are intentionally discarded;
  * the callback route still validates one-time state and browser binding.
  */
@@ -81,8 +80,4 @@ export async function requireAppSession(): Promise<AppSession> {
   if (!session) redirect('/login?next=/app')
 
   return session
-}
-
-export function canLogTime(user: Pick<User, 'active' | 'role'>): boolean {
-  return user.active && (user.role === 'owner' || user.role === 'admin' || user.role === 'member')
 }

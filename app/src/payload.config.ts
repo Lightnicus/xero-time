@@ -6,11 +6,8 @@ import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import { buildConfig } from 'payload'
 
 import { AuditEvents } from './collections/AuditEvents'
-import { AuthIdentities } from './collections/AuthIdentities'
 import { Customers } from './collections/Customers'
 import { ExportBatches } from './collections/ExportBatches'
-import { ExternalAuthSessions } from './collections/ExternalAuthSessions'
-import { Invitations } from './collections/Invitations'
 import { InvoiceExportEntries } from './collections/InvoiceExportEntries'
 import { InvoiceExports } from './collections/InvoiceExports'
 import { Projects } from './collections/Projects'
@@ -23,7 +20,6 @@ import { XeroContactOperations } from './collections/XeroContactOperations'
 import { XeroOAuthStates } from './collections/XeroOAuthStates'
 import { XeroReferenceData } from './collections/XeroReferenceData'
 import { XeroWebhookReceipts } from './collections/XeroWebhookReceipts'
-import { AuthenticationSettings } from './globals/AuthenticationSettings'
 import { BillingSettings } from './globals/BillingSettings'
 import { BusinessSettings } from './globals/BusinessSettings'
 import { accountEmailAdapter } from './lib/account-email'
@@ -52,9 +48,6 @@ export default buildConfig({
   },
   collections: [
     Users,
-    Invitations,
-    AuthIdentities,
-    ExternalAuthSessions,
     Customers,
     Projects,
     TimeEntries,
@@ -75,7 +68,7 @@ export default buildConfig({
   defaultDepth: 1,
   editor: lexicalEditor(),
   email: accountEmailAdapter,
-  globals: [BusinessSettings, AuthenticationSettings, BillingSettings],
+  globals: [BusinessSettings, BillingSettings],
   graphQL: {
     disable: true,
   },
@@ -83,25 +76,9 @@ export default buildConfig({
   jobs: jobsConfig,
   onInit: async (payload) => {
     const oauthStateCollection = requireMongoModel(payload, 'xero-oauth-states').collection
-    const externalSessionCollection = requireMongoModel(
-      payload,
-      'external-auth-sessions',
-    ).collection
     const database = payload.db.connection.db
     if (!database) throw new Error('MongoDB is unavailable while configuring application indexes.')
     await Promise.all([
-      requireMongoModel(payload, 'invitations').collection.createIndex(
-        { email: 1 },
-        { name: 'email_1', unique: true },
-      ),
-      requireMongoModel(payload, 'invitations').collection.createIndex(
-        { tokenHash: 1 },
-        { name: 'tokenHash_1', unique: true },
-      ),
-      requireMongoModel(payload, 'invitations').collection.createIndex(
-        { cleanupAt: 1 },
-        { expireAfterSeconds: 0, name: 'cleanupAt_1' },
-      ),
       requireMongoModel(payload, 'xero-connections').collection.createIndex(
         { singletonKey: 1 },
         { name: 'singletonKey_1', unique: true },
@@ -110,9 +87,13 @@ export default buildConfig({
         { stateHash: 1 },
         { name: 'stateHash_1', unique: true },
       ),
-      externalSessionCollection.createIndex(
-        { tokenHash: 1 },
-        { name: 'tokenHash_1', unique: true },
+      requireMongoModel(payload, 'xero-contact-operations').collection.createIndex(
+        { activeCustomerKey: 1 },
+        {
+          name: 'activeCustomerKey_unique_when_present',
+          partialFilterExpression: { activeCustomerKey: { $type: 'string' } },
+          unique: true,
+        },
       ),
       requireMongoModel(payload, 'invoice-exports').collection.createIndex(
         { xeroInvoiceId: 1 },
@@ -125,17 +106,6 @@ export default buildConfig({
       database
         .collection('application_rate_limits')
         .createIndex({ cleanupAt: 1 }, { expireAfterSeconds: 0, name: 'cleanupAt_1' }),
-      database
-        .collection('application_owner_transition_locks')
-        .updateOne(
-          { _id: 'business-owner' as never },
-          { $setOnInsert: { version: 0 }, $set: { updatedAt: new Date() } },
-          { upsert: true },
-        ),
-      requireMongoModel(payload, 'users').updateMany(
-        { _verified: { $exists: false } },
-        { $set: { _verified: true } },
-      ),
     ])
 
     const expiryIndex = (await oauthStateCollection.indexes()).find(
@@ -152,25 +122,6 @@ export default buildConfig({
       await database.command({
         collMod: oauthStateCollection.collectionName,
         index: { expireAfterSeconds: 0, name: expiryIndex.name },
-      })
-    }
-
-    const externalSessionExpiryIndex = (await externalSessionCollection.indexes()).find(
-      (index) => Object.keys(index.key ?? {}).length === 1 && index.key?.cleanupAt === 1,
-    )
-    if (!externalSessionExpiryIndex) {
-      await externalSessionCollection.createIndex(
-        { cleanupAt: 1 },
-        { expireAfterSeconds: 0, name: 'cleanupAt_1' },
-      )
-    } else if (externalSessionExpiryIndex.expireAfterSeconds !== 0) {
-      const database = payload.db.connection.db
-      if (!database) {
-        throw new Error('MongoDB is unavailable while configuring external-session expiry.')
-      }
-      await database.command({
-        collMod: externalSessionCollection.collectionName,
-        index: { expireAfterSeconds: 0, name: externalSessionExpiryIndex.name },
       })
     }
   },

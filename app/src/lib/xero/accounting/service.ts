@@ -1,14 +1,14 @@
 import 'server-only'
 
-import { createLocalReq, type Payload, type PayloadRequest } from 'payload'
+import { createLocalReq, type Payload } from 'payload'
 
-import { hasActiveRole } from '@/access/roles'
 import { recordAuditEvent } from '@/lib/audit/service'
 import { isRecord, relationshipID } from '@/lib/domain/validation'
 import { environment } from '@/lib/env'
 import type { AppSession } from '@/lib/member-app/session'
 import { requireMongoModel } from '@/lib/payload/mongo'
 import { withPayloadTransaction } from '@/lib/payload/withTransaction'
+import { resumeExportsAwaitingReconnect } from '@/lib/xero/export/resume'
 import type { XeroConnection, XeroOauthState } from '@/payload-types'
 
 import { createXeroAccountingClient, type XeroAccountingClient } from './client'
@@ -30,6 +30,8 @@ import {
   randomOpaqueValue,
   type EncryptionKey,
 } from './crypto'
+import { sendReconnectAlert } from './reconnect-alert'
+import { connectionFailureMessage } from './recovery'
 import { validateAccountingAccessToken, type AccountingAccessTokenMetadata } from './token'
 
 export const ACCOUNTING_FLOW_COOKIE = 'xero-accounting-flow'
@@ -61,29 +63,24 @@ type PendingGrant = {
   tokenSet: XeroTokenSet
 }
 
-const trustedAccountingRequests = new WeakSet<PayloadRequest>()
-
 /** Builds an internal request for durable jobs without granting any HTTP caller system authority. */
 export async function createAccountingSystemSession(payload: Payload): Promise<AppSession> {
-  const owners = await payload.find({
+  const users = await payload.find({
     collection: 'users',
     depth: 0,
     limit: 1,
     overrideAccess: true,
-    where: {
-      and: [{ active: { equals: true } }, { role: { equals: 'owner' } }],
-    },
+    sort: 'createdAt',
   })
-  const owner = owners.docs[0]
-  if (!owner) {
+  const user = users.docs[0]
+  if (!user) {
     throw new AccountingIntegrationError(
       'missing-system-owner',
-      'An active owner is required for protected accounting jobs.',
+      'Create the app user before running accounting jobs.',
     )
   }
-  const req = await createLocalReq({ user: owner }, payload)
-  trustedAccountingRequests.add(req)
-  return { payload, req, user: owner }
+  const req = await createLocalReq({ user }, payload)
+  return { payload, req, user }
 }
 
 export type AccountingConnectionView = {
@@ -112,18 +109,6 @@ export type AccountingConnectionView = {
 export type TenantSelection = {
   connections: XeroConnectionCandidate[]
   flowID: string
-}
-
-const assertAccountingAdministrator = (session: AppSession): void => {
-  if (
-    !trustedAccountingRequests.has(session.req) &&
-    !hasActiveRole(session.user, ['owner', 'admin'])
-  ) {
-    throw new AccountingIntegrationError(
-      'forbidden',
-      'Only an owner or administrator can manage the Xero accounting connection.',
-    )
-  }
 }
 
 const findConnection = async (session: AppSession): Promise<XeroConnection | null> => {
@@ -165,19 +150,6 @@ const hasPersistedConfiguration = (
 ): connection is ConfiguredConnection =>
   Boolean(connection?.oauthClientId && connection.oauthClientSecretEnvelope)
 
-const assertCredentialBoundary = (clientID: string, clientSecret: string): void => {
-  if (
-    environment.xeroIdentity.configured &&
-    (environment.xeroIdentity.clientID === clientID ||
-      environment.xeroIdentity.clientSecret === clientSecret)
-  ) {
-    throw new AccountingIntegrationError(
-      'credential-boundary',
-      'The identity and accounting integrations must use different Xero credentials.',
-    )
-  }
-}
-
 const configuredEnvironment = async (
   session: AppSession,
   override?: ConfiguredAccountingEnvironment,
@@ -196,7 +168,6 @@ const configuredEnvironment = async (
     CLIENT_SECRET_PURPOSE,
     configurationEncryptionKey(),
   )
-  assertCredentialBoundary(connection.oauthClientId, clientSecret)
   const tokenKey = derivedTokenEncryptionKey()
 
   return {
@@ -226,7 +197,6 @@ export async function resolveAccountingRuntime(
   config: ConfiguredAccountingEnvironment
   validateAccessToken: NonNullable<ServiceDependencies['validateAccessToken']>
 }> {
-  assertAccountingAdministrator(session)
   return dependencies(session, overrides)
 }
 
@@ -252,7 +222,6 @@ export async function configureAccountingOAuth(
   session: AppSession,
   input: { clientID: string; clientSecret: string },
 ): Promise<void> {
-  assertAccountingAdministrator(session)
   const clientID = credential(input.clientID, { label: 'client ID', max: 200, min: 5 })
   const suppliedSecret = input.clientSecret.trim()
 
@@ -283,7 +252,6 @@ export async function configureAccountingOAuth(
           'Enter the Xero accounting client secret.',
         )
       }
-      assertCredentialBoundary(clientID, clientSecret)
 
       const now = new Date().toISOString()
       const data = {
@@ -385,7 +353,6 @@ const safeConnectionView = (connection: XeroConnection): AccountingConnectionVie
 export async function getAccountingConnectionView(
   session: AppSession,
 ): Promise<AccountingConnectionView> {
-  assertAccountingAdministrator(session)
   const connection = await findConnection(session)
   return hasPersistedConfiguration(connection)
     ? safeConnectionView(connection)
@@ -398,80 +365,21 @@ export async function getAccountingConnectionView(
       }
 }
 
-export async function verifyAccountingPassword(
-  session: AppSession,
-  password: string,
-): Promise<string> {
-  assertAccountingAdministrator(session)
-  if (password.length === 0 || password.length > 1_024) {
-    throw new AccountingIntegrationError('reauthentication-failed', 'Password confirmation failed.')
-  }
-
-  try {
-    const result = await session.payload.login({
-      collection: 'users',
-      data: { email: session.user.email, password },
-    })
-
-    if (!result.token || !result.user || String(result.user.id) !== String(session.user.id)) {
-      throw new Error('Password confirmation returned a different account.')
-    }
-    return result.token
-  } catch (error) {
-    throw new AccountingIntegrationError(
-      'reauthentication-failed',
-      'Password confirmation failed.',
-      { cause: error },
-    )
-  }
-}
-
 export async function createAccountingAuthorization(
   session: AppSession,
   overrides: Pick<ServiceDependencies, 'config'> = {},
-  flow: { handoverReason?: string; purpose?: 'authorizer-handover' } = {},
 ): Promise<{ authorizationURL: string; browserBinding: string }> {
-  assertAccountingAdministrator(session)
   const config = await configuredEnvironment(session, overrides.config)
   const connection = await findConnection(session)
 
-  if (connection?.status === 'connected' && flow.purpose !== 'authorizer-handover') {
+  if (connection?.status === 'connected') {
     throw new AccountingIntegrationError(
       'already-connected',
       'A Xero organisation is already connected.',
     )
   }
 
-  if (flow.purpose === 'authorizer-handover') {
-    if (!connection || connection.status !== 'connected' || !connection.tenantId) {
-      throw new AccountingIntegrationError(
-        'not-connected',
-        'A connected Xero organisation is required for authorizer handover.',
-      )
-    }
-    const reason = flow.handoverReason?.trim() ?? ''
-    if (reason.length < 10 || reason.length > 1_000) {
-      throw new AccountingIntegrationError(
-        'invalid-handover-reason',
-        'Enter a handover reason of at least 10 characters.',
-      )
-    }
-    const unsafe = await session.payload.find({
-      collection: 'invoice-exports',
-      depth: 0,
-      limit: 1,
-      overrideAccess: true,
-      req: session.req,
-      where: { state: { in: ['processing', 'reconciling', 'manual-review'] } },
-    })
-    if (unsafe.docs[0]) {
-      throw new AccountingIntegrationError(
-        'unsafe-export-state',
-        'Resolve processing, reconciling, or manual-review exports before changing the accounting authorizer.',
-      )
-    }
-  }
-  const purpose = flow.purpose ?? (connection?.tenantId ? 'reconnect' : 'initial-connect')
+  const purpose = connection?.tenantId ? 'reconnect' : 'initial-connect'
   const state = randomOpaqueValue()
   const browserBinding = randomOpaqueValue()
   const expiresAt = new Date(Date.now() + ACCOUNTING_FLOW_MAX_AGE_SECONDS * 1_000).toISOString()
@@ -482,8 +390,6 @@ export async function createAccountingAuthorization(
       browserBindingHash: hashOpaqueValue(browserBinding),
       expiresAt,
       family: 'accounting',
-      handoverReason:
-        flow.purpose === 'authorizer-handover' ? flow.handoverReason?.trim() : undefined,
       initiatingUser: session.user.id,
       pinnedTenantId: connection?.tenantId ?? undefined,
       purpose,
@@ -504,17 +410,6 @@ export async function createAccountingAuthorization(
   }).toString()
 
   return { authorizationURL: authorizationURL.toString(), browserBinding }
-}
-
-export async function createAccountingHandoverAuthorization(
-  session: AppSession,
-  reason: string,
-  overrides: Pick<ServiceDependencies, 'config'> = {},
-): Promise<{ authorizationURL: string; browserBinding: string }> {
-  return createAccountingAuthorization(session, overrides, {
-    handoverReason: reason,
-    purpose: 'authorizer-handover',
-  })
 }
 
 const stateUserID = (state: XeroOauthState): string | null => {
@@ -695,16 +590,6 @@ const persistConnection = async (
       'The authorized Xero organisation does not match the pinned organisation.',
     )
   }
-  if (
-    existing?.authorizingXeroUserId &&
-    existing.authorizingXeroUserId !== grant.metadata.xeroUserId &&
-    state.purpose !== 'authorizer-handover'
-  ) {
-    throw new AccountingIntegrationError(
-      'handover-required',
-      'A different Xero authorizer requires the explicit handover workflow.',
-    )
-  }
 
   const now = new Date().toISOString()
   const data = {
@@ -726,6 +611,7 @@ const persistConnection = async (
     lastErrorCode: null,
     lastErrorMessage: null,
     lastSuccessfulRequestAt: now,
+    reconnectAlertSentAt: null,
     refreshLockExpiresAt: null,
     refreshLockId: null,
     refreshTokenEnvelope: encryptSecret(
@@ -767,6 +653,22 @@ const persistConnectionAndCompleteState = async (
   candidate: XeroConnectionCandidate,
   grant: PendingGrant,
   config: ConfiguredAccountingEnvironment,
+): Promise<XeroConnection> => {
+  const connection = await commitConnectionAndState(session, state, candidate, grant, config)
+  try {
+    await resumeExportsAwaitingReconnect(session.payload)
+  } catch {
+    // Parked exports also recheck the connection on their own schedule.
+  }
+  return connection
+}
+
+const commitConnectionAndState = async (
+  session: AppSession,
+  state: XeroOauthState,
+  candidate: XeroConnectionCandidate,
+  grant: PendingGrant,
+  config: ConfiguredAccountingEnvironment,
 ): Promise<XeroConnection> =>
   withPayloadTransaction(
     session.payload,
@@ -782,11 +684,7 @@ const persistConnectionAndCompleteState = async (
       )
       await completeState(transactionSession, state.id, candidate.tenantId)
       const eventType =
-        state.purpose === 'authorizer-handover'
-          ? 'xero.accounting-handover'
-          : state.purpose === 'reconnect'
-            ? 'xero.accounting-reconnected'
-            : 'xero.accounting-connected'
+        state.purpose === 'reconnect' ? 'xero.accounting-reconnected' : 'xero.accounting-connected'
       await recordAuditEvent(
         session.payload,
         {
@@ -795,17 +693,11 @@ const persistConnectionAndCompleteState = async (
           metadata: {
             authorizingXeroUserId: grant.metadata.xeroUserId,
             connectionId: candidate.connectionId,
-            previousAuthorizingXeroUserId:
-              state.purpose === 'authorizer-handover' ? previous?.authorizingXeroUserId : undefined,
-            previousConnectionId:
-              state.purpose === 'authorizer-handover' ? previous?.connectionId : undefined,
-            previousCredentialLineageVersion:
-              state.purpose === 'authorizer-handover' ? previous?.tokenVersion : undefined,
+            previousAuthorizingXeroUserId: previous?.authorizingXeroUserId ?? undefined,
             tenantId: candidate.tenantId,
             tenantName: candidate.tenantName,
             credentialLineageVersion: connection.tokenVersion,
           },
-          reason: state.handoverReason ?? undefined,
           targetCollection: 'xero-connections',
           targetId: connection.id,
         },
@@ -903,7 +795,6 @@ export async function completeAccountingCallback(
   input: { browserBinding: string; code: string; state: string },
   overrides: ServiceDependencies = {},
 ): Promise<{ flowID?: string; status: 'connected' | 'select-tenant' }> {
-  assertAccountingAdministrator(session)
   if (
     input.state.length === 0 ||
     input.state.length > 500 ||
@@ -956,7 +847,7 @@ export async function completeAccountingCallback(
     }
 
     const grant: PendingGrant = { metadata, tokenSet }
-    if (state.purpose === 'reconnect' || state.purpose === 'authorizer-handover') {
+    if (state.purpose === 'reconnect') {
       const candidate = candidates.find((item) => item.tenantId === state.pinnedTenantId)
       if (!candidate) {
         throw new AccountingIntegrationError(
@@ -968,15 +859,9 @@ export async function completeAccountingCallback(
       await verifyAccountingGrantCapability(client, tokenSet.accessToken, candidate)
 
       const previous = await findConnection(session)
-      const previousRefreshToken =
-        (state.purpose === 'authorizer-handover' || state.purpose === 'reconnect') &&
-        previous?.refreshTokenEnvelope
-          ? decryptSecret(
-              previous.refreshTokenEnvelope,
-              REFRESH_TOKEN_PURPOSE,
-              encryptionKey(config),
-            )
-          : null
+      const previousRefreshToken = previous?.refreshTokenEnvelope
+        ? decryptSecret(previous.refreshTokenEnvelope, REFRESH_TOKEN_PURPOSE, encryptionKey(config))
+        : null
       await persistConnectionAndCompleteState(session, state, candidate, grant, config)
       if (previousRefreshToken && previousRefreshToken !== tokenSet.refreshToken) {
         try {
@@ -1030,7 +915,6 @@ export async function rejectAccountingCallback(
   session: AppSession,
   input: { browserBinding: string; failureCode: string; state: string },
 ): Promise<void> {
-  assertAccountingAdministrator(session)
   if (input.state.length === 0 || input.state.length > 500) {
     throw new AccountingIntegrationError(
       'invalid-callback',
@@ -1082,7 +966,6 @@ export async function getAccountingTenantSelection(
   flowID: string,
   browserBinding: string,
 ): Promise<TenantSelection> {
-  assertAccountingAdministrator(session)
   const state = await getSelectionState(session, flowID, browserBinding)
   return { connections: parsePendingConnections(state.pendingConnections), flowID: state.id }
 }
@@ -1092,7 +975,6 @@ export async function selectAccountingTenant(
   input: { browserBinding: string; flowID: string; tenantID: string },
   overrides: Pick<ServiceDependencies, 'client' | 'config'> = {},
 ): Promise<void> {
-  assertAccountingAdministrator(session)
   const found = await getSelectionState(session, input.flowID, input.browserBinding)
   const state = await bulkClaimState(session, found.id, 'awaiting-selection')
   const candidates = parsePendingConnections(found.pendingConnections)
@@ -1164,7 +1046,7 @@ const updateRefreshFailure = async (
             : null,
         lastErrorCode: error.code.slice(0, 100),
         lastErrorMessage: terminal
-          ? 'Xero requires the accounting organisation to be reconnected.'
+          ? connectionFailureMessage(error.code)
           : 'The Xero token refresh did not complete and can be retried.',
         refreshLockExpiresAt: null,
         refreshLockId: null,
@@ -1198,10 +1080,10 @@ export async function getValidAccountingAccessToken(
   session: AppSession,
   overrides: ServiceDependencies = {},
 ): Promise<{ accessToken: string; connection: XeroConnection }> {
-  assertAccountingAdministrator(session)
-  const resolved = await dependencies(session, overrides)
   let connection = await findConnection(session)
 
+  // Check the connection first so a broken connection is reported as needing a reconnect even
+  // when its application credentials are also unusable.
   if (
     !connection ||
     connection.status !== 'connected' ||
@@ -1209,11 +1091,19 @@ export async function getValidAccountingAccessToken(
     !connection.refreshTokenEnvelope ||
     !connection.accessTokenExpiresAt
   ) {
-    throw new AccountingIntegrationError(
-      'not-connected',
-      'The Xero accounting organisation is not connected.',
-    )
+    throw connection?.status === 'action-required'
+      ? new AccountingIntegrationError(
+          'reconnect-required',
+          'Xero needs to be reconnected before this can continue.',
+          { reconnectRequired: true },
+        )
+      : new AccountingIntegrationError(
+          'not-connected',
+          'The Xero accounting organisation is not connected.',
+          { reconnectRequired: true },
+        )
   }
+  const resolved = await dependencies(session, overrides)
 
   if (new Date(connection.accessTokenExpiresAt).getTime() > Date.now() + ACCESS_REFRESH_SKEW_MS) {
     return {
@@ -1229,6 +1119,13 @@ export async function getValidAccountingAccessToken(
   const lockID = randomOpaqueValue()
   if (!(await acquireRefreshLock(session, connection, lockID))) {
     connection = await waitForConcurrentRefresh(session, connection.tokenVersion)
+    if (connection.status === 'action-required') {
+      throw new AccountingIntegrationError(
+        'reconnect-required',
+        'Xero needs to be reconnected before this can continue.',
+        { reconnectRequired: true },
+      )
+    }
     if (
       connection.status !== 'connected' ||
       !connection.accessTokenEnvelope ||
@@ -1324,6 +1221,10 @@ export async function getValidAccountingAccessToken(
             retryable: true,
           })
     await updateRefreshFailure(session, connection, lockID, safeError)
+    if (!safeError.retryable) {
+      safeError.reconnectRequired = true
+      await sendReconnectAlert(session.payload, connection.id)
+    }
     throw safeError
   }
 }
@@ -1355,6 +1256,7 @@ export async function checkAccountingConnectionHealth(
       overrideAccess: true,
       req: session.req,
     })
+    await sendReconnectAlert(session.payload, connection.id)
     return safeConnectionView(updated)
   }
 
@@ -1376,17 +1278,10 @@ export async function checkAccountingConnectionHealth(
 
 export async function disconnectAccountingConnection(
   session: AppSession,
-  reason: string,
+  reason: string = '',
   overrides: ServiceDependencies = {},
 ): Promise<{ remoteCleanupComplete: boolean }> {
-  assertAccountingAdministrator(session)
-  const normalizedReason = reason.trim()
-  if (normalizedReason.length < 10 || normalizedReason.length > 1_000) {
-    throw new AccountingIntegrationError(
-      'invalid-disconnect-reason',
-      'Enter a disconnect reason of at least 10 characters.',
-    )
-  }
+  const normalizedReason = reason.trim().slice(0, 1_000) || 'Disconnected from settings.'
 
   const resolved = await dependencies(session, overrides)
   let connection = await findConnection(session)
